@@ -19,6 +19,7 @@ export default function App() {
 
     const init = async () => {
       try {
+        console.log("[App] Before handleGoogleRedirectResult");
         await handleGoogleRedirectResult();
       } catch (err) {
         console.error("[App] Redirect result error:", err);
@@ -31,6 +32,7 @@ export default function App() {
           "[App] Auth State Changed:",
           currentUser ? `Logged In (${currentUser.email})` : "Logged Out"
         );
+
         if (!isMounted) return;
         setUser(currentUser);
         setIsAuthReady(true);
