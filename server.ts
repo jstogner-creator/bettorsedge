@@ -779,6 +779,25 @@ async function startServer() {
   const apiCache = new SimpleCache();
   const workingConfigs = new Map<string, string>(); // Cache successful URL prefixes per API key
 
+  const sportNameMap: Record<string, string> = {
+    'sr:sport:1': 'soccer',
+    'sr:sport:2': 'basketball',
+    'sr:sport:3': 'baseball',
+    'sr:sport:4': 'hockey',
+    'sr:sport:5': 'tennis',
+    'sr:sport:6': 'handball',
+    'sr:sport:12': 'football',
+    'sr:sport:16': 'rugby',
+    'sr:sport:20': 'table-tennis',
+    'sr:sport:21': 'cricket',
+    'sr:sport:23': 'volleyball',
+    'sr:sport:24': 'darts',
+    'sr:sport:31': 'esports',
+    'sr:sport:34': 'badminton',
+    'sr:sport:37': 'aussie-rules',
+    'sr:sport:109': 'mma'
+  };
+
   // Helper for Sportradar API configuration
   const getSportradarConfig = (l: string) => {
     const league = l.toLowerCase();
@@ -1848,116 +1867,86 @@ async function startServer() {
           return res.redirect(req.originalUrl);
         }
 
-        // Quick v3 fallback before full search
-        if (error.response?.status === 403 && url.includes('/v2/')) {
-          const v3Url = url.replace('/v2/', '/v3/');
-          console.log(`[Sportradar Proxy] v2 failed with 403, trying v3: ${v3Url.replace(apiKey, 'REDACTED')}`);
-          try {
-            response = await fetchWithRetry(v3Url, 0);
-            const prefix = v3Url.split('/en/')[0] + '/en';
-            workingConfigs.set(configKey, prefix);
-            apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
-            return res.json(response.data);
-          } catch (v3Err) {
-            console.log(`[Sportradar Proxy] v3 also failed, trying us1...`);
+      // Quick fallbacks before full search
+      if (error.response?.status === 403) {
+        const domains = ['api.sportradar.us', 'api.sportradar.com'];
+        const products = [
+          'oddscomparison-us1', 'oddscomparison-row1', 'oddscomparison-global', 'oddscomparison-m1',
+          'odds-comparison-us1', 'odds-comparison-row1', 'odds-comparison-global',
+          'odds-us1', 'odds-row1', 'odds-global', 'odds-m1'
+        ];
+        const versions = ['v3', 'v2', 'v1', 'v4', 'v8'];
+        const pathTypes = ['trial', 'production', 'official', 'premium'];
+
+        console.log(`[Sportradar Proxy] Quick fallback search starting...`);
+        for (const domain of domains) {
+          for (const product of products) {
+            for (const v of versions) {
+              for (const pathType of pathTypes) {
+                let testUrl = "";
+                if (type === 'books') testUrl = `https://${domain}/${product}/${pathType}/${v}/en/additional/books.json?api_key=${apiKey}`;
+                else if (type === 'markets' && eventId) testUrl = `https://${domain}/${product}/${pathType}/${v}/en/sport_events/${eventId}/markets.json?api_key=${apiKey}`;
+                else if (type === 'odds' && eventId) testUrl = `https://${domain}/${product}/${pathType}/${v}/en/sport_events/${eventId}/odds.json?api_key=${apiKey}`;
+                else if (date) testUrl = `https://${domain}/${product}/${pathType}/${v}/en/sports/${sportId}/daily_schedule/${date}.json?api_key=${apiKey}`;
+                else testUrl = `https://${domain}/${product}/${pathType}/${v}/en/sports/${sportId}/schedule.json?api_key=${apiKey}`;
+
+                try {
+                  console.log(`[Sportradar Proxy] Trying quick fallback: ${domain}/${product}/${pathType}/${v}`);
+                  response = await fetchWithRetry(testUrl, 0);
+                  const prefix = testUrl.split('/en/')[0] + '/en';
+                  workingConfigs.set(configKey, prefix);
+                  apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
+                  return res.json(response.data);
+                } catch (e) {
+                  // Try without "additional" for books if it fails
+                  if (type === 'books') {
+                    try {
+                      const altUrl = `https://${domain}/${product}/${pathType}/${v}/en/books.json?api_key=${apiKey}`;
+                      response = await fetchWithRetry(altUrl, 0);
+                      const prefix = altUrl.split('/en/')[0] + '/en';
+                      workingConfigs.set(configKey, prefix);
+                      apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
+                      return res.json(response.data);
+                    } catch (e2) {}
+                  }
+                }
+              }
+            }
           }
         }
+        console.log(`[Sportradar Proxy] Quick fallbacks failed, proceeding to full fallback search...`);
+      }
 
-        // Quick v3 fallback before full search
-        if (error.response?.status === 403 && url.includes('/v2/')) {
-          const v3Url = url.replace('/v2/', '/v3/');
-          const v3UrlCom = v3Url.replace('api.sportradar.us', 'api.sportradar.com');
-          console.log(`[Sportradar Proxy] v2 failed with 403, trying v3 (us & com)...`);
-          try {
-            response = await fetchWithRetry(v3Url, 0);
-            const prefix = v3Url.split('/en/')[0] + '/en';
-            workingConfigs.set(configKey, prefix);
-            apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
-            return res.json(response.data);
-          } catch (v3Err) {
-            try {
-              response = await fetchWithRetry(v3UrlCom, 0);
-              const prefix = v3UrlCom.split('/en/')[0] + '/en';
-              workingConfigs.set(configKey, prefix);
-              apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
-              return res.json(response.data);
-            } catch (e) {}
-            console.log(`[Sportradar Proxy] v3 also failed, trying us1...`);
-          }
-        }
+      // If 403, try other endpoints, domains, and versions
+      if (error.response?.status === 403) {
+        const domains = ['api.sportradar.us', 'api.sportradar.com'];
+        const products = [
+          'oddscomparison-us1', 'oddscomparison-row1', 'oddscomparison-global', 'oddscomparison-m1',
+          'odds-comparison-us1', 'odds-comparison-row1', 'odds-comparison-global',
+          'odds-us1', 'odds-row1', 'odds-global', 'odds-m1',
+          'oddscomparison-us2', 'oddscomparison-row2', 'oddscomparison-global2',
+          'oddscomparison-us', 'oddscomparison-row', 'oddscomparison-global',
+          'odds-us', 'odds-row', 'odds-global',
+          'oddscomparison', 'odds', 'odds-comparison',
+          'sport-event-odds', 'sport-event-odds-us1', 'sport-event-odds-row1',
+          'sport-event-odds-global', 'sport-event-odds-m1',
+          'liveodds-us1', 'liveodds-row1', 'liveodds-global', 'liveodds-m1',
+          'live-odds-us1', 'live-odds-row1', 'live-odds-global',
+          'nba-odds', 'mlb-odds', 'nfl-odds', 'nhl-odds', 'soccer-odds',
+          'basketball-odds', 'baseball-odds', 'football-odds', 'hockey-odds',
+          'us-odds', 'row-odds', 'global-odds', 'm1-odds',
+          'odds-comparison-v2', 'odds-comparison-v3', 'odds-v2', 'odds-v3'
+        ];
+        const pathTypes = ['trial', 'production', 'official', 'premium', 'standard', 'trial-tracking', 'tracking'];
+        const versions = ['v2', 'v3', 'v1', 'v4', 'v5', 'v6', 'v7', 'v8', 'v9'];
+        const sIdStr = String(sportId);
+        const sportIds = [sIdStr, sIdStr.replace('sr:sport:', ''), sIdStr.split(':').pop() || ''];
+        
+        // Add sport names to search
+        const sportName = sportNameMap[sIdStr];
+        if (sportName) sportIds.push(sportName);
 
-        // Quick us1 fallback before full search
-        if (error.response?.status === 403 && url.includes('-row1/')) {
-          const us1Url = url.replace('-row1/', '-us1/');
-          const us1UrlCom = us1Url.replace('api.sportradar.us', 'api.sportradar.com');
-          console.log(`[Sportradar Proxy] row1 failed with 403, trying us1 (us & com)...`);
-          try {
-            response = await fetchWithRetry(us1Url, 0);
-            const prefix = us1Url.split('/en/')[0] + '/en';
-            workingConfigs.set(configKey, prefix);
-            apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
-            return res.json(response.data);
-          } catch (us1Err) {
-            try {
-              response = await fetchWithRetry(us1UrlCom, 0);
-              const prefix = us1UrlCom.split('/en/')[0] + '/en';
-              workingConfigs.set(configKey, prefix);
-              apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
-              return res.json(response.data);
-            } catch (e) {}
-            console.log(`[Sportradar Proxy] us1 also failed, trying production fallback...`);
-          }
-        }
-
-        // Quick trial to production fallback
-        if (error.response?.status === 403 && url.includes('/trial/')) {
-          const prodUrl = url.replace('/trial/', '/production/');
-          const prodUrlCom = prodUrl.replace('api.sportradar.us', 'api.sportradar.com');
-          console.log(`[Sportradar Proxy] trial failed with 403, trying production (us & com)...`);
-          try {
-            response = await fetchWithRetry(prodUrl, 0);
-            const prefix = prodUrl.split('/en/')[0] + '/en';
-            workingConfigs.set(configKey, prefix);
-            apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
-            return res.json(response.data);
-          } catch (prodErr) {
-            try {
-              response = await fetchWithRetry(prodUrlCom, 0);
-              const prefix = prodUrlCom.split('/en/')[0] + '/en';
-              workingConfigs.set(configKey, prefix);
-              apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
-              return res.json(response.data);
-            } catch (e) {}
-            console.log(`[Sportradar Proxy] production also failed, proceeding to full fallback search...`);
-          }
-        }
-
-        // If 403, try other endpoints, domains, and versions
-        if (error.response?.status === 403) {
-          const domains = ['api.sportradar.us', 'api.sportradar.com'];
-          const products = [
-            'oddscomparison-us1', 'oddscomparison-row1', 'oddscomparison-global', 'oddscomparison-m1',
-            'odds-comparison-us1', 'odds-comparison-row1', 'odds-comparison-global',
-            'odds-us1', 'odds-row1', 'odds-global', 'odds-m1',
-            'oddscomparison-us2', 'oddscomparison-row2', 'oddscomparison-global2',
-            'oddscomparison-us', 'oddscomparison-row', 'oddscomparison-global',
-            'odds-us', 'odds-row', 'odds-global',
-            'oddscomparison', 'odds', 'odds-comparison',
-            'sport-event-odds', 'sport-event-odds-us1', 'sport-event-odds-row1',
-            'sport-event-odds-global', 'sport-event-odds-m1',
-            'liveodds-us1', 'liveodds-row1', 'liveodds-global', 'liveodds-m1',
-            'live-odds-us1', 'live-odds-row1', 'live-odds-global',
-            'nba-odds', 'mlb-odds', 'nfl-odds', 'nhl-odds', 'soccer-odds',
-            'basketball-odds', 'baseball-odds', 'football-odds', 'hockey-odds',
-            'us-odds', 'row-odds', 'global-odds', 'm1-odds',
-            'odds-comparison-v2', 'odds-comparison-v3', 'odds-v2', 'odds-v3'
-          ];
-          const pathTypes = ['trial', 'production', 'official', 'premium', 'standard', 'trial-tracking', 'tracking'];
-          const versions = ['v2', 'v3', 'v1', 'v4', 'v5', 'v6', 'v7', 'v8', 'v9'];
-          const sIdStr = String(sportId);
-          const sportIds = [sIdStr, sIdStr.replace('sr:sport:', ''), sIdStr.split(':').pop() || ''];
-          
-          let lastError = error;
+        let lastError = error;
           let count = 0;
           const maxAttempts = 3000; // Increased from 2000 to allow even deeper search
           
@@ -2278,7 +2267,7 @@ async function startServer() {
   const distExists = fs.existsSync(distPath);
   const isProd = process.env.NODE_ENV === "production";
 
-  if (distExists && (isProd || !process.env.VITE_DEV)) {
+  if (isProd && distExists) {
     console.log(`[SERVER] Serving static files from: ${distPath}`);
     console.log(`[SERVER] dist directory found. Contents: ${fs.readdirSync(distPath).join(", ")}`);
     app.use(express.static(distPath));

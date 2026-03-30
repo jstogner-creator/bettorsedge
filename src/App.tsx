@@ -21,7 +21,7 @@ export default function App() {
       try {
         await handleGoogleRedirectResult();
       } catch (err) {
-        console.error("Redirect result error:", err);
+        console.error("[App] Redirect result error:", err);
       }
 
       if (!isMounted) return;

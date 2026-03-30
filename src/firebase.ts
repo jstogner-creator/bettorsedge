@@ -1,3 +1,5 @@
+Use this:
+
 import { FirebaseApp, initializeApp } from 'firebase/app';
 import {
   Auth,
@@ -53,13 +55,6 @@ function getFirebase() {
         });
       });
     }
-
-    console.log('[Firebase] Initialized:', {
-      projectId: config.projectId,
-      authDomain: config.authDomain,
-      currentHost:
-        typeof window !== 'undefined' ? window.location.hostname : 'server',
-    });
   }
 
   return {
@@ -80,39 +75,13 @@ googleProvider.setCustomParameters({
 });
 
 export async function loginWithGoogle(): Promise<void> {
-  const auth = getAuthInstance();
-
-  try {
-    console.log('[Auth] Starting Google redirect sign-in');
-    await signInWithRedirect(auth, googleProvider);
-  } catch (error: any) {
-    console.error('[Auth] signInWithRedirect failed:', {
-      code: error?.code,
-      message: error?.message,
-      stack: error?.stack,
-      customData: error?.customData,
-    });
-    throw error;
-  }
+  await signInWithRedirect(getAuthInstance(), googleProvider);
 }
 
 export async function handleGoogleRedirectResult(): Promise<User | null> {
-  const auth = getAuthInstance();
-
   try {
-    console.log('[Auth] Checking redirect result...');
-    const result = await getRedirectResult(auth);
-
-    if (result?.user) {
-      console.log('[Auth] Redirect login success:', {
-        email: result.user.email,
-        uid: result.user.uid,
-      });
-      return result.user;
-    }
-
-    console.log('[Auth] No redirect result present');
-    return null;
+    const result = await getRedirectResult(getAuthInstance());
+    return result?.user ?? null;
   } catch (error: any) {
     console.error('[Auth] getRedirectResult failed:', {
       code: error?.code,
