@@ -778,7 +778,6 @@ async function startServer() {
 
   const apiCache = new SimpleCache();
   const workingConfigs = new Map<string, string>(); // Cache successful URL prefixes per API key
-  const deniedOddsConfigs = new Map<string, number>(); // Cache 403-only odds configs to avoid repeated heavy fallback scans
 
   const sportNameMap: Record<string, string> = {
     'sr:sport:1': 'soccer',
@@ -1821,6 +1820,18 @@ async function startServer() {
 
       // Check for working config
       const configKey = `odds-${apiKey.substring(0, 8)}`;
+      const denyCacheKey = `${configKey}-${type}-${sportId}-${eventId || ''}`;
+const deniedUntil = deniedOddsConfigs.get(denyCacheKey);
+if (deniedUntil && deniedUntil > Date.now()) {
+  console.log(`[Sportradar Proxy] Skipping odds fallback scan due to recent 403 for ${denyCacheKey}`);
+  const emptyPayload = {
+    sport_events: [],
+    generated_at: new Date().toISOString(),
+    _meta: { source: "sportradar-odds", status: "forbidden", fallbackApplied: true }
+  };
+  apiCache.set(cacheKey, emptyPayload, 5 * 60 * 1000);
+  return res.json(emptyPayload);
+}
       const workingPrefix = workingConfigs.get(configKey);
       
       let url = "";
