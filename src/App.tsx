@@ -27,11 +27,11 @@ export default function App() {
       if (!isMounted) return;
 
       unsubscribe = onAuthStateChanged(getAuthInstance(), (currentUser) => {
-        if (!isMounted) return;
         console.log(
           "[App] Auth State Changed:",
           currentUser ? `Logged In (${currentUser.email})` : "Logged Out"
         );
+        if (!isMounted) return;
         setUser(currentUser);
         setIsAuthReady(true);
       });
