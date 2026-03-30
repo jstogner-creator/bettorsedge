@@ -1,0 +1,144 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: predictions
+    // Document ID: gameId (string)
+    // Fields:
+    //   - gameId: string (required)
+    //   - winner: string (required)
+    //   - confidence: number (required, 1-10)
+    //   - kalshiPrice: number (optional, 0-1)
+    //   - reasoning: string (optional)
+    //   - hedgingAdvice: string (optional)
+    //   - keyFactors: list (optional)
+    //   - injuries: list (optional)
+    //   - lastUpdated: string (required, ISO 8601)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // For now, allow only the specific admin emails to act as admin
+    function isAdmin() {
+      return isAuthenticated() && 
+             (request.auth.token.email.lower() == "jstogner@risenetworkcabling.com" || 
+              request.auth.token.email.lower() == "jesslandry35@gmail.com" ||
+              request.auth.token.email.lower() == "nousiharatl82@gmail.com" ||
+              (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+    }
+
+    function isValidPrediction(data) {
+      return data.keys().hasAll(['gameId', 'winner', 'confidence', 'lastUpdated']) &&
+             data.gameId is string &&
+             data.winner is string &&
+             data.confidence is number && data.confidence >= 1 && data.confidence <= 10 &&
+             data.lastUpdated is string;
+    }
+
+    function isValidSourceAudit(data) {
+      return data.keys().hasAll(['gameId', 'league', 'timestamp']) &&
+             data.gameId is string &&
+             data.league is string &&
+             data.timestamp is string;
+    }
+
+    function isValidSourceHealthCheck(data) {
+      return data.keys().hasAll(['status', 'timestamp']) &&
+             data.keys().hasOnly(['status', 'canAccess', 'filesFound', 'latestDate', 'details', 'timestamp']) &&
+             data.status in ['healthy', 'degraded', 'error'] &&
+             data.timestamp is string;
+    }
+
+    function isValidBet(data) {
+      return data.keys().hasAll(['userId', 'gameId', 'league', 'date', 'team', 'type', 'amount', 'odds', 'status', 'createdAt', 'gameInfo']) &&
+             data.userId == request.auth.uid &&
+             data.amount is number && data.amount > 0 &&
+             data.odds is number &&
+             data.status in ['pending', 'won', 'lost', 'push'] &&
+             data.gameId is string &&
+             data.league is string &&
+             data.date is string &&
+             data.team is string &&
+             data.type is string &&
+             data.createdAt is string &&
+             data.gameInfo is map &&
+             data.gameInfo.keys().hasAll(['homeTeam', 'awayTeam']);
+    }
+
+    match /predictions/{gameId} {
+      // Allow any authenticated user to read predictions
+      allow read: if isAuthenticated();
+      
+      // Only admins can create or update predictions
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /app_logs/{logId} {
+      allow create: if isAuthenticated();
+      allow read: if isAdmin();
+    }
+
+    match /api_logs/{logId} {
+      allow create: if isAuthenticated();
+      allow read: if isAdmin();
+    }
+
+    match /schedules/{scheduleId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin();
+    }
+
+    match /status_reports/{reportId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    match /brackets/{bracketId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /source_audits/{auditId} {
+      allow create: if isAuthenticated() && isValidSourceAudit(request.resource.data);
+      allow read: if isAdmin();
+    }
+
+    match /source_health_checks/{checkId} {
+      allow create: if isAuthenticated() && isValidSourceHealthCheck(request.resource.data);
+      allow read: if isAdmin();
+    }
+
+    match /bets/{betId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidBet(request.resource.data);
+      allow update: if (isOwner(resource.data.userId) && isValidBet(request.resource.data)) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /users/{uid} {
+      allow read: if (isAuthenticated() && request.auth.uid == uid) || isAdmin();
+      // Users can't update their own subscription status, that's handled by the webhook
+      allow create: if (isAuthenticated() && request.auth.uid == uid) || isAdmin();
+      allow update: if (isAuthenticated() && request.auth.uid == uid && 
+                      !request.resource.data.diff(resource.data).affectedKeys().hasAny(['subscriptionStatus', 'stripeSubscriptionId', 'stripeCustomerId', 'role'])) || isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

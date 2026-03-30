@@ -1,0 +1,181 @@
+{
+  "entities": {
+    "Prediction": {
+      "title": "Prediction",
+      "description": "AI-generated sports game prediction and analysis.",
+      "type": "object",
+      "properties": {
+        "gameId": { "type": "string", "description": "Unique ID of the game." },
+        "winner": { "type": "string", "description": "Predicted winner team name." },
+        "confidence": { "type": "integer", "description": "Confidence level from 1 to 10." },
+        "kalshiPrice": { "type": "number", "description": "Predicted fair value price on Kalshi (0.01-0.99)." },
+        "reasoning": { "type": "string", "description": "Detailed AI analysis of the matchup." },
+        "matchupRankings": {
+          "type": "object",
+          "description": "Head-to-head matchup rankings.",
+          "properties": {
+            "homeRank": { "type": ["string", "number"] },
+            "awayRank": { "type": ["string", "number"] },
+            "homeOffenseRank": { "type": ["string", "number"] },
+            "awayOffenseRank": { "type": ["string", "number"] },
+            "homeDefenseRank": { "type": ["string", "number"] },
+            "awayDefenseRank": { "type": ["string", "number"] }
+          }
+        },
+        "hedgingAdvice": { "type": "string", "description": "Advice on how to hedge bets." },
+        "keyFactors": { "type": "array", "items": { "type": "string" }, "description": "Key factors influencing the prediction." },
+        "injuries": { "type": "array", "items": { "type": "string" }, "description": "Relevant injury reports." },
+        "lastUpdated": { "type": "string", "format": "date-time", "description": "When the prediction was last generated." }
+      },
+      "required": ["gameId", "winner", "confidence", "lastUpdated"]
+    },
+    "StatusReport": {
+      "title": "Status Report",
+      "description": "User-submitted reports about player status.",
+      "type": "object",
+      "properties": {
+        "gameId": { "type": "string", "description": "Unique ID of the game." },
+        "report": { "type": "string", "description": "The user's report." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the report was submitted." },
+        "userId": { "type": "string", "description": "The user who submitted the report." }
+      },
+      "required": ["gameId", "report", "timestamp", "userId"]
+    },
+    "Schedule": {
+      "title": "Schedule",
+      "description": "Daily game schedule.",
+      "type": "object",
+      "properties": {
+        "data": { "type": "array", "description": "List of games." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the schedule was fetched." }
+      },
+      "required": ["data", "timestamp"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile and subscription status.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "subscriptionStatus": { "type": "string", "enum": ["active", "inactive", "past_due", "canceled"] },
+        "subscribedSports": { "type": "array", "items": { "type": "string" } },
+        "stripeCustomerId": { "type": "string" },
+        "stripeSubscriptionId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "TournamentBracket": {
+      "title": "Tournament Bracket",
+      "description": "NCAA Tournament bracket structure and progress.",
+      "type": "object",
+      "properties": {
+        "league": { "type": "string" },
+        "year": { "type": "integer" },
+        "rounds": { "type": "array", "items": { "type": "object" } },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["league", "year", "rounds", "lastUpdated"]
+    },
+    "SourceAudit": {
+      "title": "Source Audit",
+      "description": "Audit of data sources accessed during AI analysis.",
+      "type": "object",
+      "properties": {
+        "gameId": { "type": "string" },
+        "league": { "type": "string" },
+        "googleDriveAccessed": { "type": "boolean" },
+        "nbaOfficialAccessed": { "type": "boolean" },
+        "lastAuditTime": { "type": "string", "format": "date-time" },
+        "auditNotes": { "type": "string" },
+        "status": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["gameId", "league", "timestamp"]
+    },
+    "Bet": {
+      "title": "Bet",
+      "description": "A user's paper trade or bet.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "gameId": { "type": "string" },
+        "league": { "type": "string" },
+        "date": { "type": "string" },
+        "team": { "type": "string" },
+        "type": { "type": "string", "enum": ["ML", "Spread", "Total"] },
+        "amount": { "type": "number" },
+        "odds": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "won", "lost", "push"] },
+        "payout": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "resolvedAt": { "type": "string", "format": "date-time" },
+        "gameInfo": {
+          "type": "object",
+          "properties": {
+            "homeTeam": { "type": "string" },
+            "awayTeam": { "type": "string" },
+            "score": {
+              "type": "object",
+              "properties": {
+                "home": { "type": "number" },
+                "away": { "type": "number" }
+              }
+            }
+          }
+        }
+      },
+      "required": ["userId", "gameId", "league", "team", "type", "amount", "odds", "status", "createdAt"]
+    },
+    "SourceHealthCheck": {
+      "title": "Source Health Check",
+      "description": "Diagnostic test of external data source accessibility.",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["healthy", "degraded", "error"] },
+        "canAccess": { "type": "boolean" },
+        "filesFound": { "type": "array", "items": { "type": "string" } },
+        "latestDate": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["status", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/predictions/{gameId}": {
+      "schema": "Prediction",
+      "description": "Collection of game predictions indexed by game ID."
+    },
+    "/status_reports/{reportId}": {
+      "schema": "StatusReport",
+      "description": "Collection of user-submitted status reports."
+    },
+    "/schedules/{scheduleId}": {
+      "schema": "Schedule",
+      "description": "Collection of daily game schedules."
+    },
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles and subscription data."
+    },
+    "/brackets/{bracketId}": {
+      "schema": "TournamentBracket",
+      "description": "Collection of tournament brackets."
+    },
+    "/source_audits/{auditId}": {
+      "schema": "SourceAudit",
+      "description": "Collection of source audits."
+    },
+    "/bets/{betId}": {
+      "schema": "Bet",
+      "description": "Collection of user bets."
+    },
+    "/source_health_checks/{checkId}": {
+      "schema": "SourceHealthCheck",
+      "description": "Collection of source health checks."
+    }
+  }
+}
