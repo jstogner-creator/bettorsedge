@@ -62,7 +62,7 @@ if (process.env.STRIPE_SECRET_KEY) {
 async function startServer() {
   console.log(`[SERVER] Starting server in ${process.env.NODE_ENV || "development"} mode...`);
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Trust proxy for rate limiting (Cloud Run/Nginx)
   app.set('trust proxy', 1);
