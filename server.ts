@@ -778,6 +778,7 @@ async function startServer() {
 
   const apiCache = new SimpleCache();
   const workingConfigs = new Map<string, string>(); // Cache successful URL prefixes per API key
+  const deniedOddsConfigs = new Map<string, number>(); // Cache 403-only odds configs to avoid repeated heavy fallback scans
 
   const sportNameMap: Record<string, string> = {
     'sr:sport:1': 'soccer',
