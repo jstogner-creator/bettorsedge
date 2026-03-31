@@ -4,12 +4,27 @@ import { formatInTimeZone } from "date-fns-tz";
 import { Layout } from "../components/Layout";
 import { GameCard } from "../components/GameCard";
 import { espnService } from "../services/espn";
-import { sportradarService } from "../services/sportradar";
 import { sportsOracle } from "../services/gemini";
 import { kalshiService } from "../services/kalshi";
 import { Game, Prediction, TournamentBracket } from "../types";
 import { logError } from "../services/logger";
-import { Calendar as CalendarIcon, Loader2, AlertCircle, Zap, LogIn, LogOut, User as UserIcon, RefreshCw, FileText, Activity, Trophy, Brain, TrendingUp, ShieldCheck, Shield } from "lucide-react";
+import {
+  Calendar as CalendarIcon,
+  Loader2,
+  AlertCircle,
+  Zap,
+  LogIn,
+  LogOut,
+  User as UserIcon,
+  RefreshCw,
+  FileText,
+  Activity,
+  Trophy,
+  Brain,
+  TrendingUp,
+  ShieldCheck,
+  Shield,
+} from "lucide-react";
 import { Toast } from "../components/Toast";
 import { LocksOfTheDay } from "../components/LocksOfTheDay";
 import { AccuracyTab } from "../components/AccuracyTab";
@@ -19,13 +34,25 @@ import { LegalModal } from "../components/LegalModal";
 import { cn } from "../lib/utils";
 import { getAuthInstance, getDb, loginWithGoogle, logout, getIdToken } from "../firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
-import { collection, onSnapshot, doc, writeBatch, getDoc, query, where, setDoc, deleteDoc, orderBy, limit } from "firebase/firestore";
+import {
+  collection,
+  onSnapshot,
+  doc,
+  writeBatch,
+  getDoc,
+  query,
+  where,
+  setDoc,
+  deleteDoc,
+  orderBy,
+  limit,
+} from "firebase/firestore";
 import { sendNotification, requestNotificationPermission } from "../utils/notification";
 import { handleFirestoreError, OperationType } from "../lib/firestoreErrors";
 import { UserProfile, Bet } from "../types";
 import { Paywall } from "../components/Paywall";
-import BankrollTracker from '../components/BankrollTracker';
-import { bettingService } from '../services/bettingService';
+import BankrollTracker from "../components/BankrollTracker";
+import { bettingService } from "../services/bettingService";
 import { AdminUsersTab } from "../components/AdminUsersTab";
 import { DailyBriefingModal } from "../components/DailyBriefingModal";
 import { Bracket } from "../components/Bracket";
@@ -34,7 +61,6 @@ import { GameGridErrorBoundary } from "../components/ErrorBoundary";
 import { loadStripe } from "@stripe/stripe-js";
 import { Joyride, STATUS } from "react-joyride";
 import type { Step } from "react-joyride";
-
 // Robust Joyride component retrieval
 const JoyrideComponent = (Joyride as any)?.default || Joyride;
 const JoyrideAny = typeof JoyrideComponent === 'function' ? JoyrideComponent : null;
@@ -301,81 +327,6 @@ function ApiSportsWidgetEmbed({ html, className }: ApiSportsWidgetEmbedProps) {
   return <div ref={containerRef} className={className} />;
 }
 
-function NbaApiSportsPanel({
-  gamesWidgetHtml,
-  gameWidgetHtml,
-  h2hWidgetHtml,
-}: {
-  gamesWidgetHtml: string;
-  gameWidgetHtml: string;
-  h2hWidgetHtml: string;
-}) {
-  const [activeWidgetTab, setActiveWidgetTab] = useState<"games" | "game" | "h2h">("games");
-
-  const currentHtml = useMemo(() => {
-    switch (activeWidgetTab) {
-      case "game":
-        return gameWidgetHtml;
-      case "h2h":
-        return h2hWidgetHtml;
-      case "games":
-      default:
-        return gamesWidgetHtml;
-    }
-  }, [activeWidgetTab, gamesWidgetHtml, gameWidgetHtml, h2hWidgetHtml]);
-
-  return (
-    <section className="mb-8 rounded-3xl border border-slate-800 bg-slate-900/70 p-4 md:p-6">
-      <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-xl font-bold text-white">API-Sports NBA Widgets</h3>
-          <p className="text-sm text-slate-400">
-            Live games, single-game detail, and matchup history.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-950/80 p-1">
-          <button
-            onClick={() => setActiveWidgetTab("games")}
-            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
-              activeWidgetTab === "games"
-                ? "bg-indigo-600 text-white"
-                : "text-slate-400 hover:bg-slate-800 hover:text-white"
-            }`}
-          >
-            Games
-          </button>
-
-          <button
-            onClick={() => setActiveWidgetTab("game")}
-            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
-              activeWidgetTab === "game"
-                ? "bg-indigo-600 text-white"
-                : "text-slate-400 hover:bg-slate-800 hover:text-white"
-            }`}
-          >
-            Game
-          </button>
-
-          <button
-            onClick={() => setActiveWidgetTab("h2h")}
-            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
-              activeWidgetTab === "h2h"
-                ? "bg-indigo-600 text-white"
-                : "text-slate-400 hover:bg-slate-800 hover:text-white"
-            }`}
-          >
-            H2H
-          </button>
-        </div>
-      </div>
-
-      <div className="min-h-[560px] overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-2 md:p-4">
-        <ApiSportsWidgetEmbed html={currentHtml} />
-      </div>
-    </section>
-  );
-}
 
 export function Dashboard({
   user: initialUser,
