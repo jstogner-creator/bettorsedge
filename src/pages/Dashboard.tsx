@@ -88,6 +88,50 @@ const PAYWALL_ONLY_BYPASS_EMAILS = [
   'nousiharatl82@gmail.com' // Also add here for redundancy
 ];
 
+
+let apiSportsScriptPromise: Promise<void> | null = null;
+
+function loadApiSportsScript() {
+  if (typeof window === "undefined") return Promise.resolve();
+
+  if ((window as any).__apiSportsWidgetsLoaded) {
+    return Promise.resolve();
+  }
+
+  if (!apiSportsScriptPromise) {
+    apiSportsScriptPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector<HTMLScriptElement>(
+        'script[data-api-sports-widgets="true"]'
+      );
+
+      if (existing) {
+        existing.addEventListener("load", () => {
+          (window as any).__apiSportsWidgetsLoaded = true;
+          resolve();
+        });
+        existing.addEventListener("error", reject);
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://widgets.api-sports.io/2.0.3/widgets.js";
+      script.async = true;
+      script.defer = true;
+      script.dataset.apiSportsWidgets = "true";
+
+      script.onload = () => {
+        (window as any).__apiSportsWidgetsLoaded = true;
+        resolve();
+      };
+
+      script.onerror = reject;
+
+      document.body.appendChild(script);
+    });
+  }
+
+  return apiSportsScriptPromise;
+}
 type ApiSportsWidgetEmbedProps = {
   html: string;
   className?: string;
@@ -135,8 +179,9 @@ function loadApiSportsScript() {
   }
 
   return apiSportsScriptPromise;
+}ion loadApiSportsScript() {
+  ...
 }
-
 function ApiSportsWidgetEmbed({ html, className }: ApiSportsWidgetEmbedProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -245,54 +290,7 @@ function NbaApiSportsPanel({
     </section>
   );
 }
-type ApiSportsWidgetEmbedProps = {
-  html: string;
-  className?: string;
-};
 
-let apiSportsScriptPromise: Promise<void> | null = null;
-
-function loadApiSportsScript() {
-  if (typeof window === "undefined") return Promise.resolve();
-
-  if ((window as any).__apiSportsWidgetsLoaded) {
-    return Promise.resolve();
-  }
-
-  if (!apiSportsScriptPromise) {
-    apiSportsScriptPromise = new Promise((resolve, reject) => {
-      const existing = document.querySelector<HTMLScriptElement>(
-        'script[data-api-sports-widgets="true"]'
-      );
-
-      if (existing) {
-        existing.addEventListener("load", () => {
-          (window as any).__apiSportsWidgetsLoaded = true;
-          resolve();
-        });
-        existing.addEventListener("error", reject);
-        return;
-      }
-
-      const script = document.createElement("script");
-      script.src = "https://widgets.api-sports.io/2.0.3/widgets.js";
-      script.async = true;
-      script.defer = true;
-      script.dataset.apiSportsWidgets = "true";
-
-      script.onload = () => {
-        (window as any).__apiSportsWidgetsLoaded = true;
-        resolve();
-      };
-
-      script.onerror = reject;
-
-      document.body.appendChild(script);
-    });
-  }
-
-  return apiSportsScriptPromise;
-}
 
 function ApiSportsWidgetEmbed({ html, className }: ApiSportsWidgetEmbedProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
