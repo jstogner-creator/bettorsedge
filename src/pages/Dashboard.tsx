@@ -386,16 +386,9 @@ export function Dashboard({
     isOpen: false,
     type: "terms",
   });
-  const [testingSportradar, setTestingSportradar] = useState(false);
-  const [lastTestResult, setLastTestResult] = useState<any>(null);
+  
 
-  const handleTestSportradar = async () => {
-    setTestingSportradar(true);
-    try {
-      const data = await sportradarService.testConnection();
-      setLastTestResult(data);
-      const { nba, odds, schedule, otherSports } = data.results || {};
-      const { prefix, length } = data.keyInfo || {};
+   
       
       let message = `Key: ${prefix}... (${length} chars) | `;
       if (nba?.status === 'success') message += `NBA: OK | `;
@@ -1132,10 +1125,7 @@ export function Dashboard({
           console.error(`[Dashboard] fetchGames: AI/Firestore fetch failed for ${activeTab}:`, e);
           return [];
         }),
-        (activeTab === "NBA" || activeTab === "MLB") ? 
-          sportradarService.getDailySchedule(selectedDate, activeTab.toLowerCase()).then(res => {
-            console.log(`[Dashboard] fetchGames: Sportradar fetch SUCCESS: ${res.length} games for ${activeTab}`);
-            return res;
+        
           }).catch(e => {
             console.warn(`[Dashboard] fetchGames: Sportradar fetch failed for ${activeTab}`, e);
             return [];
@@ -1146,18 +1136,7 @@ export function Dashboard({
         fetchedGames = [...espnGames];
       }
 
-      if (Array.isArray(srGames) && srGames.length > 0) {
-        // Merge Sportradar games
-        srGames.forEach(srGame => {
-          const exists = fetchedGames.some(g => 
-            (g.homeTeam === srGame.homeTeam && g.awayTeam === srGame.awayTeam) ||
-            (g.id === srGame.id)
-          );
-          if (!exists) {
-            fetchedGames.push(srGame);
-          }
-        });
-      }
+     
       
       if (aiGames && Array.isArray(aiGames) && aiGames.length > 0) {
         // Filter AI games to ensure they match the active league
@@ -1308,8 +1287,7 @@ export function Dashboard({
         // 3. Fetch Kalshi Odds in background
         fetchKalshiOdds(activeTab);
         
-        // 4. Fetch Sportradar Odds in background
-        fetchSportradarOdds(activeTab, dateStrIso);
+       
       }
 
     } catch (err: any) {
@@ -1437,72 +1415,10 @@ export function Dashboard({
     }
   };
 
-  const fetchSportradarOdds = async (league: string, dateStr?: string) => {
-    if (league !== 'NBA' && league !== 'MLB') return;
-    
-    try {
-      console.log(`[Dashboard] Fetching Sportradar odds for ${league} on ${dateStr || 'today'}...`);
-      const oddsMap = await sportradarService.getDailyOdds(league, dateStr);
-      
-      if (Object.keys(oddsMap).length > 0) {
-        console.log(`[Dashboard] Received ${Object.keys(oddsMap).length} odds from Sportradar`);
-        setGames(prevGames => {
-          return prevGames.map(game => {
-            const home = game.homeTeam.toLowerCase();
-            const away = game.awayTeam.toLowerCase();
-            
-            // Try to find a match in the odds map
-            // We'll try a few variations of the key
-            const keysToTry = [
-              `${home}_vs_${away}`,
-              `${away}_vs_${home}`,
-            ];
-            
-            let match = null;
-            for (const key of keysToTry) {
-              if (oddsMap[key]) {
-                match = oddsMap[key];
-                break;
-              }
-            }
-            
-            // If no exact match, try fuzzy matching
-            if (!match) {
-              const homeKeywords = home.split(' ').filter(w => w.length > 2); // Reduced length for better matching
-              const awayKeywords = away.split(' ').filter(w => w.length > 2);
               
-              const fuzzyKey = Object.keys(oddsMap).find(k => {
-                const [seHome, seAway] = k.split('_vs_');
-                if (!seHome || !seAway) return false;
-                
-                const matchHome = homeKeywords.some(kw => seHome.includes(kw));
-                const matchAway = awayKeywords.some(kw => seAway.includes(kw));
-                return matchHome && matchAway;
-              });
-              
-              if (fuzzyKey) {
-                console.log(`[Dashboard] Fuzzy matched ${away} @ ${home} to Sportradar key: ${fuzzyKey}`);
-                match = oddsMap[fuzzyKey];
-              }
-            }
+        
             
-            if (match) {
-              return {
-                ...game,
-                marketOdds: match
-              };
-            }
-            return game;
-          });
-        });
-      } else {
-        console.log(`[Dashboard] No odds found in Sportradar map for ${league}`);
-      }
-    } catch (err) {
-      console.warn("Background Sportradar odds fetch failed:", err);
-    }
-  };
-
+   
   const getFilteredGames = () => {
     console.log(`[Dashboard] getFilteredGames: Filtering ${games.length} games for ${activeTab}`);
     let filtered = games.filter(game => {
@@ -2044,8 +1960,7 @@ export function Dashboard({
 
   const handleRefresh = () => {
     espnService.clearCache();
-    sportradarService.clearCache();
-    fetchGames(true);
+        fetchGames(true);
     setToast({ message: "Schedule refreshed.", type: "success" });
   };
 
@@ -2301,32 +2216,7 @@ export function Dashboard({
               <div className="bg-slate-800/50 rounded-2xl p-6 border border-slate-700">
                 <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                   <Activity className="w-5 h-5 text-indigo-400" />
-                  Sportradar API Status
-                </h3>
-                <div className="space-y-4">
-                  <button
-                    onClick={handleTestSportradar}
-                    disabled={testingSportradar}
-                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
-                  >
-                    {testingSportradar ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5" />}
-                    Run Connection Test
-                  </button>
-                  <p className="text-xs text-slate-500 text-center">
-                    This tests NBA Injuries and Odds Comparison endpoints.
-                  </p>
-                  <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-200/70 space-y-1">
-                    <p className="font-bold text-amber-400">If you see 403 Forbidden:</p>
-                    <ul className="list-disc list-inside space-y-1">
-                      <li>Check if your key is for <strong>NBA</strong> specifically.</li>
-                      <li>Check if you have <strong>Odds Comparison</strong> entitlement.</li>
-                      <li>Ensure your key is not <strong>Expired</strong> or <strong>Inactive</strong>.</li>
-                      <li>Try switching between <strong>Trial</strong> and <strong>Production</strong> keys.</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-
+                 
               <div className="bg-slate-800/50 rounded-2xl p-6 border border-slate-700">
                 <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                   <Shield className="w-5 h-5 text-indigo-400" />
@@ -2357,8 +2247,7 @@ export function Dashboard({
                   <button
                     onClick={() => {
                       espnService.clearCache();
-                      sportradarService.clearCache();
-                      fetchGames();
+                                           fetchGames();
                       setToast({ message: "Cache cleared. Refreshing schedule...", type: "info" });
                     }}
                     className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
@@ -2384,7 +2273,7 @@ export function Dashboard({
               <p>[Status] Games Loaded: {games.length}</p>
               {lastTestResult && (
                 <>
-                  <p className="text-amber-400 mt-2">--- Last Sportradar Test ---</p>
+                 
                   <p>Key: {lastTestResult.keyInfo?.prefix}... ({lastTestResult.keyInfo?.length} chars)</p>
                   <p>NBA: <span className={lastTestResult.results?.nba?.status === 'success' ? 'text-green-400' : 'text-red-400'}>{lastTestResult.results?.nba?.status?.toUpperCase()}</span> (Code: {lastTestResult.results?.nba?.code})</p>
                   <p>MLB: <span className={lastTestResult.results?.mlb?.status === 'success' ? 'text-green-400' : 'text-red-400'}>{lastTestResult.results?.mlb?.status?.toUpperCase()}</span> (Code: {lastTestResult.results?.mlb?.code})</p>
@@ -2426,21 +2315,13 @@ export function Dashboard({
               {activeTab} Schedule
             </h2>
             {isAdminUser && (
-              <button
-                onClick={handleTestSportradar}
-                disabled={testingSportradar}
-                className="px-3 py-1 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-400 text-xs font-bold rounded-lg border border-indigo-500/30 transition-all flex items-center gap-2"
-                title="Test Sportradar API Key"
-              >
-                {testingSportradar ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-                Test API Key
-              </button>
+          
+            
             )}
             {isAdminUser && (
               <button
                 onClick={() => {
                   espnService.clearCache();
-                  sportradarService.clearCache();
                   fetchGames();
                   setToast({ message: "Cache cleared. Refreshing schedule...", type: "info" });
                 }}
@@ -2473,8 +2354,7 @@ export function Dashboard({
               </span>
             </div>
             <div className="flex items-center text-[10px] uppercase tracking-wider font-mono">
-              <span className="text-slate-500 mr-2">Sportradar:</span>
-              <button 
+           
                 onClick={async () => {
                   try {
                     const response = await fetch(`/api/sportradar/odds?sportId=${activeTab === 'NBA' ? 'sr:sport:2' : 'sr:sport:3'}&date=${format(selectedDate, "yyyy-MM-dd")}`, {
@@ -2500,16 +2380,13 @@ export function Dashboard({
                 disabled={testingSportradar}
                 className="ml-2 text-indigo-400 hover:text-indigo-300 disabled:opacity-50 flex items-center gap-1"
               >
-                {testingSportradar ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Activity className="w-2.5 h-2.5" />}
-                [Test API Key]
-              </button>
+               
             </div>
             <div className="flex items-center text-[10px] uppercase tracking-wider font-mono">
               <span className="text-slate-500 mr-2">Cache:</span>
               <button 
                 onClick={() => {
                   espnService.clearCache();
-                  sportradarService.clearCache();
                   fetchGames();
                   setToast({ message: "Cache cleared. Refreshing schedule...", type: "info" });
                 }}
