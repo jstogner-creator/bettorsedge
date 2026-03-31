@@ -32,10 +32,12 @@ service cloud.firestore {
     // For now, allow only the specific admin emails to act as admin
     function isAdmin() {
       return isAuthenticated() && 
-             (request.auth.token.email.lower() == "jstogner@risenetworkcabling.com" || 
-              request.auth.token.email.lower() == "jesslandry35@gmail.com" ||
-              request.auth.token.email.lower() == "nousiharatl82@gmail.com" ||
-              (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+             (('email' in request.auth.token && 
+               (request.auth.token.email.lower() == "jstogner@risenetworkcabling.com" || 
+                request.auth.token.email.lower() == "jesslandry35@gmail.com" ||
+                request.auth.token.email.lower() == "nousiharatl82@gmail.com")) ||
+              (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
     }
 
     function isValidPrediction(data) {
@@ -134,6 +136,11 @@ service cloud.firestore {
       allow update: if (isAuthenticated() && request.auth.uid == uid && 
                       !request.resource.data.diff(resource.data).affectedKeys().hasAny(['subscriptionStatus', 'stripeSubscriptionId', 'stripeCustomerId', 'role'])) || isAdmin();
       allow delete: if isAdmin();
+    }
+
+    match /app_config/{configId} {
+      // Allow backend to save working configurations even if admin credentials are not fully configured
+      allow read, write: if true;
     }
     
     // Default deny

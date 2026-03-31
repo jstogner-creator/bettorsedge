@@ -2,8 +2,7 @@ import { initializeApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithPopup,
   signOut,
   browserLocalPersistence,
   setPersistence,
@@ -50,29 +49,18 @@ googleProvider.setCustomParameters({
 });
 
 export async function loginWithGoogle(): Promise<void> {
-  console.log('[Auth] Starting Google redirect sign-in');
-  await signInWithRedirect(getAuthInstance(), googleProvider);
+  console.log('[Auth] Starting Google popup sign-in');
+  try {
+    await signInWithPopup(getAuthInstance(), googleProvider);
+  } catch (error: any) {
+    console.error('[Auth] signInWithPopup failed:', error);
+    throw error;
+  }
 }
 
 export async function handleGoogleRedirectResult(): Promise<User | null> {
-  try {
-    console.log('[Auth] Checking redirect result...');
-    const result = await getRedirectResult(getAuthInstance());
-    if (result?.user) {
-      console.log('[Auth] Redirect login success:', result.user.email);
-      return result.user;
-    }
-    console.log('[Auth] No redirect result present');
-    return null;
-  } catch (error: any) {
-    console.error('[Auth] getRedirectResult failed:', {
-      code: error?.code,
-      message: error?.message,
-      stack: error?.stack,
-      customData: error?.customData,
-    });
-    throw error;
-  }
+  // Redirect result is not needed for popup flow, but keeping for compatibility
+  return getAuthInstance().currentUser;
 }
 
 export const logout = () => signOut(getAuthInstance());

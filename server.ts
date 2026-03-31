@@ -1,3 +1,4 @@
+import { resolveInjuryTruth } from "./injuryResolver";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -26,28 +27,32 @@ if (fs.existsSync(firebaseConfigPath)) {
   const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf8"));
   firestoreDatabaseId = firebaseConfig.firestoreDatabaseId;
   try {
+    // Try to initialize with applicationDefault first
     initializeApp({
-      credential: applicationDefault(), // Or use service account if provided
+      credential: applicationDefault(),
       projectId: firebaseConfig.projectId,
     });
-    console.log(`[FIREBASE ADMIN] Initialized with project ID: ${firebaseConfig.projectId}`);
+    console.log(`[FIREBASE ADMIN] Initialized with applicationDefault and project ID: ${firebaseConfig.projectId}`);
   } catch (err: any) {
-    console.warn(`[FIREBASE ADMIN] Failed to initialize with applicationDefault: ${err.message}. Falling back to basic initialization.`);
+    console.warn(`[FIREBASE ADMIN] applicationDefault initialization failed: ${err.message}. Trying basic initialization...`);
     try {
+      // Fallback to basic initialization with just the project ID
+      // This may still fail if the environment doesn't provide implicit credentials
       initializeApp({
         projectId: firebaseConfig.projectId,
       });
-      console.log(`[FIREBASE ADMIN] Initialized with basic config (no credentials)`);
+      console.log(`[FIREBASE ADMIN] Initialized with basic config (projectId: ${firebaseConfig.projectId})`);
     } catch (e: any) {
       console.error(`[FIREBASE ADMIN] CRITICAL: Failed to initialize Firebase Admin: ${e.message}`);
     }
   }
 } else {
+  console.warn("[FIREBASE ADMIN] firebase-applet-config.json not found. Initializing with environment defaults...");
   try {
     initializeApp();
-    console.log(`[FIREBASE ADMIN] Initialized with default config`);
+    console.log("[FIREBASE ADMIN] Initialized with default environment config");
   } catch (e: any) {
-    console.error(`[FIREBASE ADMIN] CRITICAL: Failed to initialize Firebase Admin (no config): ${e.message}`);
+    console.error(`[FIREBASE ADMIN] CRITICAL: Failed to initialize Firebase Admin with defaults: ${e.message}`);
   }
 }
 
@@ -98,6 +103,15 @@ async function startServer() {
   // Standard Middlewares
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+
+  // Debugging for unhandled rejections
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('[CRITICAL] Unhandled Rejection at:', promise, 'reason:', reason);
+  });
+
+  process.on('uncaughtException', (error) => {
+    console.error('[CRITICAL] Uncaught Exception:', error);
+  });
 
   // CORS configuration
   const corsOptions = {
@@ -623,7 +637,7 @@ async function startServer() {
         console.warn("Could not sign Kalshi request, attempting unauthenticated:", e);
       }
 
-      const response = await axios.get(url, { headers });
+      const response = await fetchKalshiWithRetry(url, { headers });
 
       res.json(response.data);
     } catch (error: any) {
@@ -670,7 +684,7 @@ async function startServer() {
         console.warn("Could not sign Kalshi request, attempting unauthenticated:", e);
       }
 
-      const response = await axios.get(url, { headers });
+      const response = await fetchKalshiWithRetry(url, { headers });
 
       res.json(response.data);
     } catch (error: any) {
@@ -692,7 +706,7 @@ async function startServer() {
       url = `${KALSHI_BASE_URL}${path}`;
       console.log(`Fetching from Kalshi: ${url}`);
 
-      const response = await axios.get(url, {
+      const response = await fetchKalshiWithRetry(url, {
         headers: {
           "Content-Type": "application/json",
         },
@@ -777,56 +791,242 @@ async function startServer() {
   }
 
   const apiCache = new SimpleCache();
-  const workingConfigs = new Map<string, string>(); // Cache successful URL prefixes per API key
+  // API-Sports NBA API
+  const apiSportsBaseUrl = "https://v2.nba.api-sports.io";
+  const apiSportsKey = process.env.API_SPORTS_KEY || "b2795a8c744b26f971aaf15eb994212e";
 
-  const sportNameMap: Record<string, string> = {
-    'sr:sport:1': 'soccer',
-    'sr:sport:2': 'basketball',
-    'sr:sport:3': 'baseball',
-    'sr:sport:4': 'hockey',
-    'sr:sport:5': 'tennis',
-    'sr:sport:6': 'handball',
-    'sr:sport:12': 'football',
-    'sr:sport:16': 'rugby',
-    'sr:sport:20': 'table-tennis',
-    'sr:sport:21': 'cricket',
-    'sr:sport:23': 'volleyball',
-    'sr:sport:24': 'darts',
-    'sr:sport:31': 'esports',
-    'sr:sport:34': 'badminton',
-    'sr:sport:37': 'aussie-rules',
-    'sr:sport:109': 'mma'
-  };
-
-  // Helper for Sportradar API configuration
-  const getSportradarConfig = (l: string) => {
-    const league = l.toLowerCase();
-    let version = 'v8';
-    if (league === 'nhl') version = 'v7';
-    if (league === 'mlb') version = 'v8';
-    if (league === 'nba') version = 'v8';
-    if (league === 'nfl') version = 'v7';
-    
-    return {
-      version,
-      paths: ['trial', 'production', 'official', 'premium', 'standard', 'trial-tracking', 'tracking'],
-      domains: ['api.sportradar.us', 'api.sportradar.com']
-    };
-  };
-
-  // Helper for API with retry logic for 429s
-  const fetchWithRetry = async (url: string, retries = 3, delay = 2000): Promise<any> => {
+  app.get("/api/nba/:endpoint*", authenticate, async (req, res) => {
     try {
-      return await axios.get(url, { timeout: 15000 });
+      const endpoint = req.params.endpoint + (req.params[0] || "");
+      const queryParams = new URLSearchParams(req.query as any).toString();
+      const url = `${apiSportsBaseUrl}/${endpoint}${queryParams ? `?${queryParams}` : ""}`;
+      
+      const cacheKey = `api-sports-${url}`;
+      const cachedData = apiCache.get(cacheKey);
+      if (cachedData) return res.json(cachedData);
+
+      console.log(`[API-Sports] Fetching: ${url}`);
+      const response = await axios.get(url, {
+        headers: {
+          "x-apisports-key": apiSportsKey
+        },
+        timeout: 30000
+      });
+
+      apiCache.set(cacheKey, response.data, 15 * 60 * 1000); // 15 min cache
+      res.json(response.data);
     } catch (error: any) {
-      if (error.response?.status === 429 && retries > 0) {
-        console.log(`[Proxy] Rate limited (429) for ${url.split('?')[0]}. Retrying in ${delay}ms... (${retries} left)`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+      console.error(`[API-Sports] Error fetching ${req.params.endpoint}:`, error.response?.data || error.message);
+      res.status(error.response?.status || 500).json(error.response?.data || { error: error.message });
+    }
+  });
+
+  app.get("/api/nba/test-connection", authenticate, async (req, res) => {
+    try {
+      const url = `${apiSportsBaseUrl}/status`;
+      const response = await axios.get(url, {
+        headers: {
+          "x-apisports-key": apiSportsKey
+        },
+        timeout: 10000
+      });
+      res.json({ status: "success", data: response.data });
+    } catch (error: any) {
+      res.status(error.response?.status || 500).json({ status: "error", error: error.message });
+    }
+  });
+
+  // Helper for API with retry logic for rate limits and transient errors
+  const fetchWithRetry = async (url: string, retries = 3, delay = 2000, timeout = 10000): Promise<any> => {
+    try {
+      return await axios.get(url, { timeout });
+    } catch (error: any) {
+      const status = error.response?.status;
+      const code = error.code;
+      
+      // Retry on rate limit (429) or transient server errors (502, 503, 504) or network issues
+      const isRetryable = status === 429 || status === 502 || status === 503 || status === 504 || 
+                         code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ECONNABORTED';
+
+      if (isRetryable && retries > 0) {
+        // Add jitter to avoid thundering herd
+        const jitter = Math.random() * 1000;
+        const nextDelay = delay + jitter;
+        
+        console.log(`[Proxy] Retryable error (${status || code}) for ${url.split('?')[0]}. Retrying in ${Math.round(nextDelay)}ms... (${retries} left)`);
+        await new Promise(resolve => setTimeout(resolve, nextDelay));
         return fetchWithRetry(url, retries - 1, delay * 2);
       }
       throw error;
     }
   };
+
+  // Helper for Kalshi API with retry logic for ECONNRESET/ETIMEDOUT
+  const fetchKalshiWithRetry = async (url: string, options: any, retries = 3, delay = 1000): Promise<any> => {
+    try {
+      return await axios.get(url, { ...options, timeout: 30000 });
+    } catch (error: any) {
+      const status = error.response?.status;
+      const code = error.code;
+
+      const isRetryable = status === 429 || status === 502 || status === 503 || status === 504 || 
+                         code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ECONNABORTED';
+
+      if (isRetryable && retries > 0) {
+        const jitter = Math.random() * 500;
+        const nextDelay = delay + jitter;
+        
+        console.warn(`[Kalshi Proxy] Retryable error (${status || code}), retrying in ${Math.round(nextDelay)}ms... (${retries} left)`);
+        await new Promise(resolve => setTimeout(resolve, nextDelay));
+        return fetchKalshiWithRetry(url, options, retries - 1, delay * 2);
+      }
+      throw error;
+    }
+  };
+
+  app.get("/api/sportradar/resolved-injuries", authenticate, async (req, res) => {
+    try {
+      const { league = 'nba', year, month, day } = req.query;
+      const apiKey = process.env.SPORTRADAR_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: "Sportradar API key not configured" });
+
+      const now = new Date();
+      const y = year || now.getFullYear().toString();
+      const m = month || (now.getMonth() + 1).toString().padStart(2, '0');
+      const d = day || now.getDate().toString().padStart(2, '0');
+
+      const cacheKey = `sr-resolved-injuries-${league}-${y}-${m}-${d}`;
+      const cachedData = apiCache.get(cacheKey);
+      if (cachedData) {
+        return res.json(cachedData);
+      }
+
+      // Internal fetch helpers to avoid public HTTP calls
+      const fetchRawInjuries = async () => {
+        const configKey = `${league}-injuries-${apiKey.substring(0, 8)}`;
+        const workingPrefix = workingConfigs.get(configKey);
+        if (workingPrefix) {
+          try {
+            const url = `${workingPrefix}/league/injuries.json?api_key=${apiKey}`;
+            const response = await fetchWithRetry(url, 3, 1000, 45000);
+            return response.data;
+          } catch (e) {
+            workingConfigs.delete(configKey);
+          }
+        }
+        const { version, paths, domains } = getSportradarConfig(league as string);
+        for (const domain of domains) {
+          for (const pathType of paths) {
+            const url = `https://${domain}/${league}/${pathType}/${version}/en/league/injuries.json?api_key=${apiKey}`;
+            try {
+              const response = await fetchWithRetry(url);
+              const prefix = url.split('/league/')[0];
+              workingConfigs.set(configKey, prefix);
+              return response.data;
+            } catch (error: any) {
+              if (error.response?.status !== 403) break;
+            }
+          }
+        }
+        return null;
+      };
+
+      const fetchRawDailyInjuries = async () => {
+        const configKey = `${league}-daily-injuries-${apiKey.substring(0, 8)}`;
+        const workingPrefix = workingConfigs.get(configKey);
+        if (workingPrefix) {
+          try {
+            const url = `${workingPrefix}/league/daily_injuries.json?api_key=${apiKey}`;
+            const response = await fetchWithRetry(url, 3, 1000, 45000);
+            return response.data;
+          } catch (e) {
+            workingConfigs.delete(configKey);
+          }
+        }
+        const { version, paths, domains } = getSportradarConfig(league as string);
+        for (const domain of domains) {
+          for (const pathType of paths) {
+            const url = `https://${domain}/${league}/${pathType}/${version}/en/league/daily_injuries.json?api_key=${apiKey}`;
+            try {
+              const response = await fetchWithRetry(url);
+              const prefix = url.split('/league/')[0];
+              workingConfigs.set(configKey, prefix);
+              return response.data;
+            } catch (error: any) {
+              if (error.response?.status !== 403) break;
+            }
+          }
+        }
+        return null;
+      };
+
+      const fetchRawChangelog = async () => {
+        const configKey = `${league}-changelog-${apiKey.substring(0, 8)}`;
+        const workingPrefix = workingConfigs.get(configKey);
+        if (workingPrefix) {
+          try {
+            const url = `${workingPrefix}/league/changes.json?api_key=${apiKey}`;
+            const response = await fetchWithRetry(url, 3, 1000, 45000);
+            return response.data;
+          } catch (e) {
+            workingConfigs.delete(configKey);
+          }
+        }
+        const { version, paths, domains } = getSportradarConfig(league as string);
+        for (const domain of domains) {
+          for (const pathType of paths) {
+            const url = `https://${domain}/${league}/${pathType}/${version}/en/league/changes.json?api_key=${apiKey}`;
+            try {
+              const response = await fetchWithRetry(url);
+              const prefix = url.split('/league/')[0];
+              workingConfigs.set(configKey, prefix);
+              return response.data;
+            } catch (error: any) {
+              if (error.response?.status !== 403) break;
+            }
+          }
+        }
+        return null;
+      };
+
+      const [injuries, dailyInjuries, dailyChangelog] = await Promise.all([
+        fetchRawInjuries().catch(() => null),
+        fetchRawDailyInjuries().catch(() => null),
+        fetchRawChangelog().catch(() => null)
+      ]);
+
+      const sourceHealth = {
+        injuries: !!injuries,
+        dailyInjuries: !!dailyInjuries,
+        dailyChangelog: !!dailyChangelog
+      };
+
+      const records = resolveInjuryTruth(league as string, {
+        injuries,
+        dailyInjuries,
+        dailyChangelog
+      });
+
+      const response = {
+        league,
+        date: `${y}-${m}-${d}`,
+        generatedAt: new Date().toISOString(),
+        counts: {
+          total: records.length,
+          out: records.filter(r => r.resolvedStatus === 'OUT').length,
+          conflicts: records.filter(r => r.conflict).length
+        },
+        sourceHealth,
+        records
+      };
+
+      apiCache.set(cacheKey, response, 15 * 60 * 1000);
+      return res.json(response);
+    } catch (error: any) {
+      console.error(`[Sportradar Proxy] ERROR resolving injuries:`, error.message);
+      res.status(500).json({ error: "Failed to resolve injuries", details: error.message });
+    }
+  });
 
   app.get("/api/sportradar/injuries", authenticate, async (req, res) => {
     try {
@@ -847,8 +1047,8 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/league/injuries.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
-          apiCache.set(cacheKey, response.data, 60 * 60 * 1000);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
+          apiCache.set(cacheKey, response.data, 15 * 60 * 1000); // 15 minutes
           return res.json(response.data);
         } catch (e) {
           workingConfigs.delete(configKey);
@@ -871,8 +1071,8 @@ async function startServer() {
             workingConfigs.set(configKey, prefix);
             console.log(`[Sportradar Proxy] SUCCESS: Received ${league} injuries for ${teamCount} teams (${domain}/${pathType}). Saved config.`);
             
-            // Cache for 1 hour
-            apiCache.set(cacheKey, response.data, 60 * 60 * 1000);
+            // Cache for 15 minutes
+            apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
             
             return res.json(response.data);
           } catch (error: any) {
@@ -904,7 +1104,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/games/${year}/${month}/${day}/summary.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           return res.json(response.data);
         } catch (e) {
           workingConfigs.delete(configKey);
@@ -960,7 +1160,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/league/${year}/${month}/${day}/changes.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1023,7 +1223,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/league/${year}/${month}/${day}/daily_injuries.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1102,7 +1302,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/games/${year}/${month}/${day}/schedule.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1180,7 +1380,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/games/${gameId}/summary.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           return res.json(response.data);
         } catch (e) {
           workingConfigs.delete(configKey);
@@ -1232,7 +1432,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/teams/${teamId1}/versus/${teamId2}/matches.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           return res.json(response.data);
         } catch (e) {
           workingConfigs.delete(configKey);
@@ -1288,7 +1488,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/games/${year}/${month}/${day}/boxscore.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1341,7 +1541,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/games/${gameId}/pbp.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1394,7 +1594,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/league/standings.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 60 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1447,7 +1647,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/league/hierarchy.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 24 * 60 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1500,7 +1700,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/teams/${teamId}/profile.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 24 * 60 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1553,7 +1753,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/players/${playerId}/profile.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 24 * 60 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1606,7 +1806,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/games/${gameId}/boxscore.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1659,7 +1859,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/teams/${teamId}/${year}/${season_type}/splits.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 24 * 60 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1712,7 +1912,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/teams/${teamId}/${year}/${season_type}/statistics.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 24 * 60 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1765,7 +1965,7 @@ async function startServer() {
       if (workingPrefix) {
         try {
           const url = `${workingPrefix}/league/${year}/${season_type}/leaders.json?api_key=${apiKey}`;
-          const response = await fetchWithRetry(url);
+          const response = await fetchWithRetry(url, 3, 1000, 45000);
           apiCache.set(cacheKey, response.data, 24 * 60 * 60 * 1000);
           return res.json(response.data);
         } catch (e) {
@@ -1835,7 +2035,9 @@ if (deniedUntil && deniedUntil > Date.now()) {
       const workingPrefix = workingConfigs.get(configKey);
       
       let url = "";
+      let isWorkingPrefix = false;
       if (workingPrefix) {
+        isWorkingPrefix = true;
         if (type === 'books') url = `${workingPrefix}/additional/books.json?api_key=${apiKey}`;
         else if (type === 'markets' && eventId) url = `${workingPrefix}/sport_events/${eventId}/markets.json?api_key=${apiKey}`;
         else if (type === 'odds' && eventId) url = `${workingPrefix}/sport_events/${eventId}/odds.json?api_key=${apiKey}`;
@@ -1858,12 +2060,12 @@ if (deniedUntil && deniedUntil > Date.now()) {
       console.log(`[Sportradar Proxy] Fetching ${type}: ${url.replace(apiKey, 'REDACTED')}`);
       let response;
       try {
-        response = await fetchWithRetry(url);
+        response = await fetchWithRetry(url, 3, 1000, isWorkingPrefix ? 45000 : 10000);
         
         // If it worked and we didn't have a working prefix, save it
         if (!workingPrefix) {
           const prefix = url.split('/en/')[0] + '/en';
-          workingConfigs.set(configKey, prefix);
+          saveWorkingConfig(configKey, prefix);
         }
 
         // Cache for 15 minutes
@@ -1885,9 +2087,11 @@ if (deniedUntil && deniedUntil > Date.now()) {
         const products = [
           'oddscomparison-us1', 'oddscomparison-row1', 'oddscomparison-global', 'oddscomparison-m1',
           'odds-comparison-us1', 'odds-comparison-row1', 'odds-comparison-global',
-          'odds-us1', 'odds-row1', 'odds-global', 'odds-m1'
+          'odds-us1', 'odds-row1', 'odds-global', 'odds-m1',
+          'nba-odds', 'mlb-odds', 'nfl-odds', 'nhl-odds', 'soccer-odds',
+          'nba-t3', 'nba-v7', 'nba-v8', 'mlb-t1', 'mlb-v7', 'mlb-v8'
         ];
-        const versions = ['v3', 'v2', 'v1', 'v4', 'v8'];
+        const versions = ['v3', 'v2', 'v1', 'v4', 'v7', 'v8'];
         const pathTypes = ['trial', 'production', 'official', 'premium'];
 
         console.log(`[Sportradar Proxy] Quick fallback search starting...`);
@@ -1902,26 +2106,26 @@ if (deniedUntil && deniedUntil > Date.now()) {
                 else if (date) testUrl = `https://${domain}/${product}/${pathType}/${v}/en/sports/${sportId}/daily_schedule/${date}.json?api_key=${apiKey}`;
                 else testUrl = `https://${domain}/${product}/${pathType}/${v}/en/sports/${sportId}/schedule.json?api_key=${apiKey}`;
 
-                try {
-                  console.log(`[Sportradar Proxy] Trying quick fallback: ${domain}/${product}/${pathType}/${v}`);
-                  response = await fetchWithRetry(testUrl, 0);
-                  const prefix = testUrl.split('/en/')[0] + '/en';
-                  workingConfigs.set(configKey, prefix);
-                  apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
-                  return res.json(response.data);
-                } catch (e) {
-                  // Try without "additional" for books if it fails
-                  if (type === 'books') {
-                    try {
-                      const altUrl = `https://${domain}/${product}/${pathType}/${v}/en/books.json?api_key=${apiKey}`;
-                      response = await fetchWithRetry(altUrl, 0);
-                      const prefix = altUrl.split('/en/')[0] + '/en';
-                      workingConfigs.set(configKey, prefix);
-                      apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
-                      return res.json(response.data);
-                    } catch (e2) {}
+                  try {
+                    console.log(`[Sportradar Proxy] Trying quick fallback: ${domain}/${product}/${pathType}/${v}`);
+                    response = await fetchWithRetry(testUrl, 0, 1000, 3000); // 3s timeout for quick fallback
+                    const prefix = testUrl.split('/en/')[0] + '/en';
+                    saveWorkingConfig(configKey, prefix);
+                    apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
+                    return res.json(response.data);
+                  } catch (e) {
+                    // Try without "additional" for books if it fails
+                    if (type === 'books') {
+                      try {
+                        const altUrl = `https://${domain}/${product}/${pathType}/${v}/en/books.json?api_key=${apiKey}`;
+                        response = await fetchWithRetry(altUrl, 0, 2000, 10000);
+                        const prefix = altUrl.split('/en/')[0] + '/en';
+                        saveWorkingConfig(configKey, prefix);
+                        apiCache.set(cacheKey, response.data, 15 * 60 * 1000);
+                        return res.json(response.data);
+                      } catch (e2) {}
+                    }
                   }
-                }
               }
             }
           }
@@ -1945,6 +2149,8 @@ if (deniedUntil && deniedUntil > Date.now()) {
           'liveodds-us1', 'liveodds-row1', 'liveodds-global', 'liveodds-m1',
           'live-odds-us1', 'live-odds-row1', 'live-odds-global',
           'nba-odds', 'mlb-odds', 'nfl-odds', 'nhl-odds', 'soccer-odds',
+          'nba-t3', 'nba-v7', 'nba-v8', 'mlb-t1', 'mlb-v7', 'mlb-v8',
+          'nfl-t1', 'nfl-v7', 'nhl-t1', 'nhl-v7', 'soccer-t1', 'soccer-v4',
           'basketball-odds', 'baseball-odds', 'football-odds', 'hockey-odds',
           'us-odds', 'row-odds', 'global-odds', 'm1-odds',
           'odds-comparison-v2', 'odds-comparison-v3', 'odds-v2', 'odds-v3'
@@ -1960,7 +2166,7 @@ if (deniedUntil && deniedUntil > Date.now()) {
 
         let lastError = error;
           let count = 0;
-          const maxAttempts = 3000; // Increased from 2000 to allow even deeper search
+          const maxAttempts = 250; // Drastically reduced to avoid timeouts
           
           outer: for (const domain of domains) {
             for (const product of products) {
@@ -1990,9 +2196,9 @@ if (deniedUntil && deniedUntil > Date.now()) {
                     
                     for (const nextUrl of nextUrls) {
                       try {
-                        response = await fetchWithRetry(nextUrl, 0); // No retries during fallback search
+                        response = await fetchWithRetry(nextUrl, 0, 1000, 2000); // 2s timeout during fallback search
                         const prefix = nextUrl.split('/en/')[0] + '/en';
-                        workingConfigs.set(configKey, prefix);
+                        saveWorkingConfig(configKey, prefix);
                         console.log(`[Sportradar Proxy] SUCCESS with ${nextUrl.replace(apiKey, 'REDACTED')} fallback! Saved config.`);
                         break outer;
                       } catch (nextErr: any) {
@@ -2026,9 +2232,9 @@ if (deniedUntil && deniedUntil > Date.now()) {
                   }
                   
                   try {
-                    response = await fetchWithRetry(nextUrl, 0);
+                    response = await fetchWithRetry(nextUrl, 0, 2000, 10000);
                     const prefix = nextUrl.split('/en/')[0] + '/en';
-                    workingConfigs.set(configKey, prefix);
+                    saveWorkingConfig(configKey, prefix);
                     console.log(`[Sportradar Proxy] SUCCESS with ${domain}/${product}-${v}/${sId} fallback! Saved config.`);
                     break outer;
                   } catch (nextErr: any) {
@@ -2036,9 +2242,9 @@ if (deniedUntil && deniedUntil > Date.now()) {
                     if (type === 'markets' || type === 'odds') {
                       const altUrl = nextUrl.replace('/sport_events/', '/events/');
                       try {
-                        response = await fetchWithRetry(altUrl, 0);
+                        response = await fetchWithRetry(altUrl, 0, 2000, 10000);
                         const prefix = altUrl.split('/en/')[0] + '/en';
-                        workingConfigs.set(configKey, prefix);
+                        saveWorkingConfig(configKey, prefix);
                         console.log(`[Sportradar Proxy] SUCCESS with ${domain}/${product}-${v}/${sId} (events) fallback! Saved config.`);
                         break outer;
                       } catch (e) {}
@@ -2053,6 +2259,9 @@ if (deniedUntil && deniedUntil > Date.now()) {
           
           if (!response) {
             console.error(`[Sportradar Proxy] ALL fallbacks failed for ${type}. Final error: ${lastError.message}`);
+            if (lastError.response?.status === 403) {
+              deniedOddsConfigs.set(denyCacheKey, Date.now() + 15 * 60 * 1000);
+            }
             throw lastError;
           }
         } else {
@@ -2097,11 +2306,11 @@ if (deniedUntil && deniedUntil > Date.now()) {
           if (nbaSuccess) break;
           try {
             const nbaUrl = `https://${domain}/nba/${pathType}/v8/en/league/injuries.json?api_key=${apiKey}`;
-            await axios.get(nbaUrl, { timeout: 10000 });
+            await axios.get(nbaUrl, { timeout: 30000 });
             results.nba = { status: 'success', domain, path: pathType };
             nbaSuccess = true;
             const prefix = nbaUrl.split('/league/')[0];
-            workingConfigs.set(`nba-injuries-${apiKey.substring(0, 8)}`, prefix);
+            saveWorkingConfig(`nba-injuries-${apiKey.substring(0, 8)}`, prefix);
           } catch (err: any) {
             results.nba = { status: 'failed', error: err.message, code: err.response?.status, lastPath: pathType };
           }
@@ -2135,20 +2344,20 @@ if (deniedUntil && deniedUntil > Date.now()) {
               if (oddsSuccess) break;
               try {
                 const oddsUrl = `https://${domain}/${region}/${pathType}/${version}/en/books.json?api_key=${apiKey}`;
-                await axios.get(oddsUrl, { timeout: 10000 });
+                await axios.get(oddsUrl, { timeout: 30000 });
                 results.odds = { status: 'success', domain, region, version, path: pathType };
                 oddsSuccess = true;
                 const prefix = oddsUrl.split('/en/')[0] + '/en';
-                workingConfigs.set(`odds-${apiKey.substring(0, 8)}`, prefix);
+                saveWorkingConfig(`odds-${apiKey.substring(0, 8)}`, prefix);
               } catch (err: any) {
                 // Try without "additional" if it fails
                 try {
                   const oddsUrlAlt = `https://${domain}/${region}/${pathType}/${version}/en/additional/books.json?api_key=${apiKey}`;
-                  await axios.get(oddsUrlAlt, { timeout: 10000 });
+                  await axios.get(oddsUrlAlt, { timeout: 30000 });
                   results.odds = { status: 'success', domain, region, version, path: pathType, alt: 'additional' };
                   oddsSuccess = true;
                   const prefix = oddsUrlAlt.split('/en/')[0] + '/en';
-                  workingConfigs.set(`odds-${apiKey.substring(0, 8)}`, prefix);
+                  saveWorkingConfig(`odds-${apiKey.substring(0, 8)}`, prefix);
                 } catch (e) {
                   results.odds = { status: 'failed', error: err.message, code: err.response?.status, lastRegion: region, lastVersion: version, lastPath: pathType };
                 }
@@ -2167,14 +2376,14 @@ if (deniedUntil && deniedUntil > Date.now()) {
           if (scheduleSuccess) break;
           try {
             const scheduleUrl = `https://${domain}/nba/${pathType}/v8/en/games/${year}/${month}/${day}/schedule.json?api_key=${apiKey}`;
-            const scheduleResp = await axios.get(scheduleUrl, { timeout: 10000 });
+            const scheduleResp = await axios.get(scheduleUrl, { timeout: 30000 });
             results.schedule = { status: 'success', domain, path: pathType };
             scheduleSuccess = true;
             if (scheduleResp.data?.games?.length > 0) {
               sampleGameId = scheduleResp.data.games[0].id;
             }
             const prefix = scheduleUrl.split('/games/')[0];
-            workingConfigs.set(`nba-schedule-${apiKey.substring(0, 8)}`, prefix);
+            saveWorkingConfig(`nba-schedule-${apiKey.substring(0, 8)}`, prefix);
           } catch (err: any) {
             results.schedule = { status: 'failed', error: err.message, code: err.response?.status, lastPath: pathType };
           }
@@ -2187,7 +2396,7 @@ if (deniedUntil && deniedUntil > Date.now()) {
         try {
           // Try markets
           const marketsUrl = `https://api.sportradar.us/oddscomparison-us1/trial/v2/en/sport_events/${sampleGameId}/markets.json?api_key=${apiKey}`;
-          await axios.get(marketsUrl, { timeout: 5000 });
+          await axios.get(marketsUrl, { timeout: 15000 });
           results.eventOdds.markets = 'success';
         } catch (err: any) {
           results.eventOdds.markets = `failed (${err.response?.status || 'ERR'})`;
@@ -2196,7 +2405,7 @@ if (deniedUntil && deniedUntil > Date.now()) {
         try {
           // Try odds
           const oddsUrl = `https://api.sportradar.us/oddscomparison-us1/trial/v2/en/sport_events/${sampleGameId}/odds.json?api_key=${apiKey}`;
-          await axios.get(oddsUrl, { timeout: 5000 });
+          await axios.get(oddsUrl, { timeout: 30000 });
           results.eventOdds.odds = 'success';
         } catch (err: any) {
           results.eventOdds.odds = `failed (${err.response?.status || 'ERR'})`;
@@ -2214,7 +2423,7 @@ if (deniedUntil && deniedUntil > Date.now()) {
       results.otherSports = {};
       for (const sport of otherSports) {
         try {
-          await axios.get(sport.url, { timeout: 5000 });
+          await axios.get(sport.url, { timeout: 30000 });
           results.otherSports[sport.name] = 'success';
         } catch (err: any) {
           results.otherSports[sport.name] = err.response?.status || 'failed';
@@ -2224,7 +2433,7 @@ if (deniedUntil && deniedUntil > Date.now()) {
       // Test 5: Daily Injuries
       try {
         const injuriesUrl = `https://api.sportradar.us/nba/trial/v8/en/league/${year}/${month}/${day}/daily_injuries.json?api_key=${apiKey}`;
-        await axios.get(injuriesUrl, { timeout: 10000 });
+        await axios.get(injuriesUrl, { timeout: 30000 });
         results.dailyInjuries = { status: 'success' };
       } catch (err: any) {
         results.dailyInjuries = { status: 'failed', code: err.response?.status || 'ERR' };
@@ -2233,13 +2442,37 @@ if (deniedUntil && deniedUntil > Date.now()) {
       // Test 6: Daily Changelog
       try {
         const changelogUrl = `https://api.sportradar.us/nba/trial/v8/en/league/${year}/${month}/${day}/changes.json?api_key=${apiKey}`;
-        await axios.get(changelogUrl, { timeout: 10000 });
+        await axios.get(changelogUrl, { timeout: 30000 });
         results.dailyChangelog = { status: 'success' };
       } catch (err: any) {
         results.dailyChangelog = { status: 'failed', code: err.response?.status || 'ERR' };
       }
 
-      // Test 7: MLB Specific Endpoints
+      // Test 7: Daily Summary
+      try {
+        const summaryUrl = `https://api.sportradar.us/nba/trial/v8/en/league/${year}/${month}/${day}/summary.json?api_key=${apiKey}`;
+        await axios.get(summaryUrl, { timeout: 30000 });
+        results.dailySummary = { status: 'success' };
+      } catch (err: any) {
+        results.dailySummary = { status: 'failed', code: err.response?.status || 'ERR' };
+      }
+
+      // Test 8: Head-to-Head (if sample game has teams)
+      try {
+        const h2hUrl = `https://api.sportradar.us/nba/trial/v8/en/league/hierarchy.json?api_key=${apiKey}`;
+        const hierarchy = await axios.get(h2hUrl, { timeout: 30000 });
+        if (hierarchy.data?.conferences?.[0]?.divisions?.[0]?.teams?.[0] && hierarchy.data?.conferences?.[0]?.divisions?.[0]?.teams?.[1]) {
+          const team1 = hierarchy.data.conferences[0].divisions[0].teams[0].id;
+          const team2 = hierarchy.data.conferences[0].divisions[0].teams[1].id;
+          const h2hTestUrl = `https://api.sportradar.us/nba/trial/v8/en/teams/${team1}/versus/${team2}/matches/summary.json?api_key=${apiKey}`;
+          await axios.get(h2hTestUrl, { timeout: 30000 });
+          results.h2h = { status: 'success', team1, team2 };
+        }
+      } catch (err: any) {
+        results.h2h = { status: 'failed', code: err.response?.status || 'ERR' };
+      }
+
+      // Test 9: MLB Specific Endpoints
       results.mlbSpecific = {};
       const mlbTests = [
         { name: 'standings', url: `https://api.sportradar.us/mlb/trial/v8/en/league/standings.json?api_key=${apiKey}` },
@@ -2249,7 +2482,7 @@ if (deniedUntil && deniedUntil > Date.now()) {
 
       for (const test of mlbTests) {
         try {
-          await axios.get(test.url, { timeout: 5000 });
+          await axios.get(test.url, { timeout: 30000 });
           results.mlbSpecific[test.name] = 'success';
         } catch (err: any) {
           results.mlbSpecific[test.name] = err.response?.status || 'failed';
@@ -2266,11 +2499,14 @@ if (deniedUntil && deniedUntil > Date.now()) {
       };
 
       res.json({
+        timestamp: new Date().toISOString(),
+        apiKeyPrefix: apiKey.substring(0, 4) + '...',
         keyInfo,
         results
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("[Sportradar Test] Fatal error:", error);
+      res.status(500).json({ error: "Sportradar test connection failed", details: error.message });
     }
   });
 
