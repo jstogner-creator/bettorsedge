@@ -205,39 +205,81 @@ type ApiSportsWidgetEmbedProps = {
 }
 
 
-function ApiSportsWidgetEmbed({ html, className }: ApiSportsWidgetEmbedProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+function NbaApiSportsPanel({
+  gamesWidgetHtml,
+  gameWidgetHtml,
+  h2hWidgetHtml,
+}: {
+  gamesWidgetHtml: string;
+  gameWidgetHtml: string;
+  h2hWidgetHtml: string;
+}) {
+  const [activeWidgetTab, setActiveWidgetTab] = useState<"games" | "game" | "h2h">("games");
 
-  useEffect(() => {
-    let cancelled = false;
+  const currentHtml = useMemo(() => {
+    switch (activeWidgetTab) {
+      case "game":
+        return gameWidgetHtml;
+      case "h2h":
+        return h2hWidgetHtml;
+      case "games":
+      default:
+        return gamesWidgetHtml;
+    }
+  }, [activeWidgetTab, gamesWidgetHtml, gameWidgetHtml, h2hWidgetHtml]);
 
-    const mount = async () => {
-      await loadApiSportsScript();
-      if (cancelled || !containerRef.current) return;
+  return (
+    <section className="mb-8 rounded-3xl border border-slate-800 bg-slate-900/70 p-4 md:p-6">
+      <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-xl font-bold text-white">API-Sports NBA Widgets</h3>
+          <p className="text-sm text-slate-400">
+            Live games, single-game detail, and matchup history.
+          </p>
+        </div>
 
-      containerRef.current.innerHTML = html;
+        <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-950/80 p-1">
+          <button
+            onClick={() => setActiveWidgetTab("games")}
+            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
+              activeWidgetTab === "games"
+                ? "bg-indigo-600 text-white"
+                : "text-slate-400 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            Games
+          </button>
 
-      const maybeRefresh = (window as any)?.ApiSportsWidgets?.refresh;
-      if (typeof maybeRefresh === "function") {
-        maybeRefresh();
-      }
-    };
+          <button
+            onClick={() => setActiveWidgetTab("game")}
+            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
+              activeWidgetTab === "game"
+                ? "bg-indigo-600 text-white"
+                : "text-slate-400 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            Game
+          </button>
 
-    mount().catch((err) => {
-      console.error("[API-Sports Widgets] Failed to load widget script:", err);
-    });
+          <button
+            onClick={() => setActiveWidgetTab("h2h")}
+            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
+              activeWidgetTab === "h2h"
+                ? "bg-indigo-600 text-white"
+                : "text-slate-400 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            H2H
+          </button>
+        </div>
+      </div>
 
-    return () => {
-      cancelled = true;
-      if (containerRef.current) {
-        containerRef.current.innerHTML = "";
-      }
-    };
-  }, [html]);
-
-  return <div ref={containerRef} className={className} />;
+      <div className="min-h-[560px] overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-2 md:p-4">
+        <ApiSportsWidgetEmbed html={currentHtml} />
+      </div>
+    </section>
+  );
 }
-
 
 export function Dashboard({
   user: initialUser,
