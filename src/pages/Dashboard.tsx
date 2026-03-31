@@ -132,78 +132,44 @@ function loadApiSportsScript() {
 
   return apiSportsScriptPromise;
 }
+
 type ApiSportsWidgetEmbedProps = {
   html: string;
   className?: string;
 };
 
+function ApiSportsWidgetEmbed({ html, className }: ApiSportsWidgetEmbedProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
+  useEffect(() => {
+    let cancelled = false;
 
-  const currentHtml = useMemo(() => {
-    switch (activeWidgetTab) {
-      case "game":
-        return gameWidgetHtml;
-      case "h2h":
-        return h2hWidgetHtml;
-      case "games":
-      default:
-        return gamesWidgetHtml;
-    }
-  }, [activeWidgetTab, gamesWidgetHtml, gameWidgetHtml, h2hWidgetHtml]);
+    const mount = async () => {
+      await loadApiSportsScript();
+      if (cancelled || !containerRef.current) return;
 
-  return (
-    <section className="mb-8 rounded-3xl border border-slate-800 bg-slate-900/70 p-4 md:p-6">
-      <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-xl font-bold text-white">API-Sports NBA Widgets</h3>
-          <p className="text-sm text-slate-400">
-            Live games, single-game detail, and matchup history.
-          </p>
-        </div>
+      containerRef.current.innerHTML = html;
 
-        <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-950/80 p-1">
-          <button
-            onClick={() => setActiveWidgetTab("games")}
-            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
-              activeWidgetTab === "games"
-                ? "bg-indigo-600 text-white"
-                : "text-slate-400 hover:bg-slate-800 hover:text-white"
-            }`}
-          >
-            Games
-          </button>
+      const maybeRefresh = (window as any)?.ApiSportsWidgets?.refresh;
+      if (typeof maybeRefresh === "function") {
+        maybeRefresh();
+      }
+    };
 
-          <button
-            onClick={() => setActiveWidgetTab("game")}
-            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
-              activeWidgetTab === "game"
-                ? "bg-indigo-600 text-white"
-                : "text-slate-400 hover:bg-slate-800 hover:text-white"
-            }`}
-          >
-            Game
-          </button>
+    mount().catch((err) => {
+      console.error("[API-Sports Widgets] Failed to load widget script:", err);
+    });
 
-          <button
-            onClick={() => setActiveWidgetTab("h2h")}
-            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
-              activeWidgetTab === "h2h"
-                ? "bg-indigo-600 text-white"
-                : "text-slate-400 hover:bg-slate-800 hover:text-white"
-            }`}
-          >
-            H2H
-          </button>
-        </div>
-      </div>
+    return () => {
+      cancelled = true;
+      if (containerRef.current) {
+        containerRef.current.innerHTML = "";
+      }
+    };
+  }, [html]);
 
-      <div className="min-h-[560px] overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-2 md:p-4">
-        <ApiSportsWidgetEmbed html={currentHtml} />
-      </div>
-    </section>
-  );
+  return <div ref={containerRef} className={className} />;
 }
-
 
 function NbaApiSportsPanel({
   gamesWidgetHtml,
@@ -281,6 +247,8 @@ function NbaApiSportsPanel({
   );
 }
 
+
+
 export function Dashboard({
   user: initialUser,
   onOpenFAQ,
@@ -298,19 +266,58 @@ export function Dashboard({
   const [savedPredictions, setSavedPredictions] = useState<Record<string, Prediction>>({});
   const [allPredictions, setAllPredictions] = useState<Record<string, Prediction>>({});
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
+// API-Sports widget snippets
+// API-Sports widget snippets
+const apiSportsGamesWidgetHtml = `
+  <div class="space-y-4">
+    <api-sports-widget
+      data-type="games"
+      data-date="${format(selectedDate, "yyyy-MM-dd")}"
+      data-refresh="30"
+      data-show-toolbar="true"
+      data-tab="all"
+      data-games-style="2"
+      data-target-game="#api-sports-game-details"
+      data-target-standings="modal"
+    ></api-sports-widget>
 
-  // API-Sports widget snippets
-  const apiSportsGamesWidgetHtml = `
-    <!-- PASTE THE EXACT API-SPORTS GAMES WIDGET SNIPPET HERE -->
-  `;
+    <div
+      id="api-sports-game-details"
+      class="min-h-[500px] rounded-2xl border border-slate-800 bg-slate-950 p-4"
+    >
+      <div class="text-slate-400 text-sm">
+        Click a matchup above to load game details here.
+      </div>
+    </div>
 
-  const apiSportsGameWidgetHtml = `
-    <!-- PASTE THE EXACT API-SPORTS GAME WIDGET SNIPPET HERE -->
-  `;
+    <api-sports-widget
+      data-type="config"
+      data-key="b2795a8c744b26f971aaf15eb994212e"
+      data-sport="nba"
+      data-lang="en"
+      data-theme="grey"
+      data-timezone="CST"
+      data-show-errors="true"
+      data-show-logos="true"
+      data-favorite="true"
+    ></api-sports-widget>
+  </div>
+`;
 
-  const apiSportsH2HWidgetHtml = `
-    <!-- PASTE THE EXACT API-SPORTS H2H WIDGET SNIPPET HERE -->
-  `;
+const apiSportsGameWidgetHtml = `
+  <div class="rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-400 text-sm">
+    The standalone Game widget requires a data-game-id.
+    For now, use the Games tab and click a matchup to load game details automatically.
+  </div>
+`;
+
+const apiSportsH2HWidgetHtml = `
+  <div class="rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-400 text-sm">
+    The H2H widget requires data-h2h="teamId-teamId".
+    Once you have API-Sports team IDs for the selected matchup, this panel can be wired to update automatically.
+  </div>
+`;-widget>
+`;
 
   // Persistent Logging Helper
   const addDebugLog = (msg: string) => {
@@ -390,25 +397,6 @@ export function Dashboard({
 
    
       
-      let message = `Key: ${prefix}... (${length} chars) | `;
-      if (nba?.status === 'success') message += `NBA: OK | `;
-      else message += `NBA: FAIL (${nba?.code || 'ERR'}) | `;
-      
-      if (schedule?.status === 'success') message += `Sched: OK | `;
-      else message += `Sched: FAIL (${schedule?.code || 'ERR'}) | `;
-      
-      if (odds?.status === 'success') message += `Odds: OK`;
-      else message += `Odds: FAIL (${odds?.code || 'ERR'})`;
-
-      // Check for other sports success to help identify key type
-      const activeSports = Object.entries(otherSports || {})
-        .filter(([_, status]) => status === 'success')
-        .map(([name]) => name.toUpperCase());
-      
-      if (activeSports.length > 0) {
-        message += ` | Other: ${activeSports.join(', ')}`;
-      }
-
       setToast({ 
         message,
         type: (nba?.status === 'success' && odds?.status === 'success' && schedule?.status === 'success') ? "success" : "warning"
@@ -595,22 +583,31 @@ export function Dashboard({
             }
           } else {
             // Fallback if doc was somehow deleted or not yet created
-            setUserProfile({
-              uid: user.uid,
-              email: user.email || '',
-              subscriptionStatus: 'inactive',
-              subscribedSports: [],
-            });
-            setIsAdminUser(isBypassEmail);
-          }
-          setAuthReady(true);
-        }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
-          setProfileError("Lost connection to your profile. Retrying...");
-          setAuthReady(true);
-        });
-      };
+            profileUnsubscribe = onSnapshot(
+  userRef,
+  (docSnap) => {
+    if (docSnap.exists()) {
+      setUserProfile(docSnap.data() as UserProfile);
+      setIsAdminUser(isBypassEmail);
+    } else {
+      setUserProfile({
+        uid: user.uid,
+        email: user.email || "",
+        subscriptionStatus: "inactive",
+        subscribedSports: [],
+      });
+      setIsAdminUser(isBypassEmail);
+    }
 
+    setAuthReady(true);
+  },
+  (error) => {
+    handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+    setProfileError("Lost connection to your profile. Retrying...");
+    setAuthReady(true);
+  }
+);
+  
       setupProfile();
     } else {
       setUserProfile(null);
@@ -1086,219 +1083,236 @@ export function Dashboard({
     resolveGames();
   }, [games, savedPredictions]);
 
-  const fetchGames = async (force: boolean = false) => {
-    if (activeTab === "Accuracy") {
-      setGames([]);
-      setLoading(false);
-      return;
-    }
+const fetchGames = async (force: boolean = false) => {
+  if (activeTab === "Accuracy") {
+    setGames([]);
+    setLoading(false);
+    return;
+  }
 
-    setLoading(true);
-    setError(null);
-    if (force) setGames([]); // Clear previous games to avoid showing stale data
-    
-    const dateStr = format(selectedDate, "yyyy-MM-dd");
-    console.log(`[Dashboard] fetchGames: Fetching schedule for ${activeTab} on ${dateStr} (force=${force})`);
+  setLoading(true);
+  setError(null);
+  if (force) setGames([]);
 
-    try {
-      let fetchedGames: Game[] = [];
-      const dateStrIso = format(selectedDate, "yyyy-MM-dd");
-      
-      console.log(`[Dashboard] fetchGames: Parallel fetch starting for ${activeTab}...`);
-      
-      // Fetch both in parallel to be as fast as possible
-      const [espnGames, aiGames, srGames] = await Promise.all([
-        Promise.race([
-          espnService.getSchedule(activeTab, selectedDate),
-          new Promise<Game[]>((_, reject) => setTimeout(() => reject(new Error("ESPN fetch timed out")), 30000))
-        ]).then(res => {
+  const dateStr = format(selectedDate, "yyyy-MM-dd");
+  console.log(`[Dashboard] fetchGames: Fetching schedule for ${activeTab} on ${dateStr} (force=${force})`);
+
+  try {
+    let fetchedGames: Game[] = [];
+    const dateStrIso = format(selectedDate, "yyyy-MM-dd");
+
+    console.log(`[Dashboard] fetchGames: Parallel fetch starting for ${activeTab}...`);
+
+    const [espnGames, aiGames] = await Promise.all([
+      Promise.race([
+        espnService.getSchedule(activeTab, selectedDate),
+        new Promise<Game[]>((_, reject) =>
+          setTimeout(() => reject(new Error("ESPN fetch timed out")), 30000)
+        ),
+      ])
+        .then((res) => {
           console.log(`[Dashboard] fetchGames: ESPN fetch SUCCESS: ${res.length} games for ${activeTab}`);
           return res;
-        }).catch(e => {
+        })
+        .catch((e) => {
           console.warn(`[Dashboard] fetchGames: ESPN fetch failed or timed out for ${activeTab}`, e);
           return [];
         }),
-        sportsOracle.getDailySchedule(activeTab, dateStrIso, force).then(res => {
+
+      sportsOracle
+        .getDailySchedule(activeTab, dateStrIso, force)
+        .then((res) => {
           console.log(`[Dashboard] fetchGames: AI/Firestore fetch SUCCESS: ${res.length} games for ${activeTab}`);
           return res;
-        }).catch(e => {
+        })
+        .catch((e) => {
           console.error(`[Dashboard] fetchGames: AI/Firestore fetch failed for ${activeTab}:`, e);
           return [];
         }),
-        
-          }).catch(e => {
-            console.warn(`[Dashboard] fetchGames: Sportradar fetch failed for ${activeTab}`, e);
-            return [];
-          }) : Promise.resolve([])
-      ]);
+    ]);
 
-      if (Array.isArray(espnGames)) {
-        fetchedGames = [...espnGames];
-      }
+    if (Array.isArray(espnGames)) {
+      fetchedGames = [...espnGames];
+    }
 
-     
-      
-      if (aiGames && Array.isArray(aiGames) && aiGames.length > 0) {
-        // Filter AI games to ensure they match the active league
-        // This prevents NBA games from showing up in NFL tab if the AI or cache is confused
-        const filteredAiGames = aiGames.filter(g => {
-          if (!g.league) return true; // If no league specified, assume it's the one we asked for
-          
-          const gLeague = g.league.toUpperCase();
-          const currentTab = activeTab.toUpperCase();
-          
-          // Match exactly or check if one contains the other (e.g. "NCAA" vs "NCAA Men's Basketball")
-          const isMatch = gLeague === currentTab || gLeague.includes(currentTab) || currentTab.includes(gLeague);
-          if (!isMatch) {
-            console.log(`[Dashboard] fetchGames: AI game league mismatch. Game: ${g.awayTeam}@${g.homeTeam}, League: ${gLeague}, Tab: ${currentTab}`);
-          }
-          return isMatch;
-        });
+    if (aiGames && Array.isArray(aiGames) && aiGames.length > 0) {
+      const filteredAiGames = aiGames.filter((g) => {
+        if (!g.league) return true;
 
-        // Ensure AI games have unique IDs if they are generic
-        filteredAiGames.forEach(g => {
-          if (g.id === 'unique-id' || g.id === 'unique_string_id' || !g.id) {
-            const dateStr = g.date ? g.date.split('T')[0] : 'unknown';
-            g.id = `${g.league || activeTab}-${g.awayTeam}-${g.homeTeam}-${dateStr}`.toLowerCase().replace(/[^a-z0-9]/g, '-');
-          }
-        });
+        const gLeague = g.league.toUpperCase();
+        const currentTab = activeTab.toUpperCase();
 
-        if (fetchedGames.length === 0) {
-          fetchedGames = filteredAiGames;
-        } else {
-          // Merge by ID and team names to avoid duplicates and ensure we have all games
-          filteredAiGames.forEach(g => {
-            const isDuplicate = fetchedGames.some(eg => {
-              // 1. Exact ID match
-              if (eg.id === g.id) return true;
+        const isMatch =
+          gLeague === currentTab ||
+          gLeague.includes(currentTab) ||
+          currentTab.includes(gLeague);
 
-              // 2. Team name normalization and comparison
-              const normalize = (name: string) => name?.toLowerCase().replace(/[^a-z0-9]/g, '').trim() || "";
+        if (!isMatch) {
+          console.log(
+            `[Dashboard] fetchGames: AI game league mismatch. Game: ${g.awayTeam}@${g.homeTeam}, League: ${gLeague}, Tab: ${currentTab}`
+          );
+        }
+
+        return isMatch;
+      });
+
+      filteredAiGames.forEach((g) => {
+        if (g.id === "unique-id" || g.id === "unique_string_id" || !g.id) {
+          const safeDateStr = g.date ? g.date.split("T")[0] : "unknown";
+          g.id = `${g.league || activeTab}-${g.awayTeam}-${g.homeTeam}-${safeDateStr}`
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "-");
+        }
+      });
+
+      if (fetchedGames.length === 0) {
+        fetchedGames = filteredAiGames;
+      } else {
+        filteredAiGames.forEach((g) => {
+          const isDuplicate = fetchedGames.some((eg) => {
+            if (eg.id === g.id) return true;
+
+            const normalize = (name: string) =>
+              name?.toLowerCase().replace(/[^a-z0-9]/g, "").trim() || "";
+
+            const egHome = normalize(eg.homeTeam);
+            const egAway = normalize(eg.awayTeam);
+            const gHome = normalize(g.homeTeam);
+            const gAway = normalize(g.awayTeam);
+
+            const homeMatch =
+              egHome === gHome ||
+              (egHome.length > 3 &&
+                gHome.length > 3 &&
+                (egHome.includes(gHome) || gHome.includes(egHome)));
+
+            const awayMatch =
+              egAway === gAway ||
+              (egAway.length > 3 &&
+                gAway.length > 3 &&
+                (egAway.includes(gAway) || gAway.includes(egAway)));
+
+            return homeMatch && awayMatch;
+          });
+
+          if (!isDuplicate) {
+            console.log(`[Dashboard] fetchGames: Adding missing game from AI: ${g.awayTeam} @ ${g.homeTeam}`);
+            fetchedGames.push(g);
+          } else {
+            const existingGame = fetchedGames.find((eg) => {
+              const normalize = (name: string) =>
+                name?.toLowerCase().replace(/[^a-z0-9]/g, "").trim() || "";
+
               const egHome = normalize(eg.homeTeam);
               const egAway = normalize(eg.awayTeam);
               const gHome = normalize(g.homeTeam);
               const gAway = normalize(g.awayTeam);
 
-              // Check for containment or exact match (handles "Clippers" vs "LA Clippers")
-              // We check if the mascot/name is present in both
-              const homeMatch = egHome === gHome || (egHome.length > 3 && gHome.length > 3 && (egHome.includes(gHome) || gHome.includes(egHome)));
-              const awayMatch = egAway === gAway || (egAway.length > 3 && gAway.length > 3 && (egAway.includes(gAway) || gAway.includes(egAway)));
-              
-              // Only match if both teams match
-              return homeMatch && awayMatch;
+              return (
+                (egHome === gHome || egHome.includes(gHome) || gHome.includes(egHome)) &&
+                (egAway === gAway || egAway.includes(gAway) || gAway.includes(egAway))
+              );
             });
-            
-            if (!isDuplicate) {
-              console.log(`[Dashboard] fetchGames: Adding missing game from AI: ${g.awayTeam} @ ${g.homeTeam}`);
-              fetchedGames.push(g);
-            } else {
-              // If it is a duplicate, ensure the fetched game has the AI game's ID
-              // This is CRITICAL because predictions are keyed by the AI game's ID
-              const existingGame = fetchedGames.find(eg => {
-                const normalize = (name: string) => name?.toLowerCase().replace(/[^a-z0-9]/g, '').trim() || "";
-                const egHome = normalize(eg.homeTeam);
-                const egAway = normalize(eg.awayTeam);
-                const gHome = normalize(g.homeTeam);
-                const gAway = normalize(g.awayTeam);
-                
-                return (egHome === gHome || egHome.includes(gHome) || gHome.includes(egHome)) && 
-                       (egAway === gAway || egAway.includes(gAway) || gAway.includes(egAway));
-              });
-              
-              if (existingGame && g.id) {
-                console.log(`[Dashboard] fetchGames: Syncing ID for ${existingGame.awayTeam} @ ${existingGame.homeTeam}: ${existingGame.id} -> ${g.id}`);
-                existingGame.id = g.id;
-              }
+
+            if (existingGame && g.id) {
+              console.log(
+                `[Dashboard] fetchGames: Syncing ID for ${existingGame.awayTeam} @ ${existingGame.homeTeam}: ${existingGame.id} -> ${g.id}`
+              );
+              existingGame.id = g.id;
             }
-          });
-        }
-      }
-
-      // Final deduplication pass to ensure no internal duplicates from either source
-      const finalUniqueGames: Game[] = [];
-      console.log(`[Dashboard] fetchGames: Starting final deduplication pass on ${fetchedGames.length} games.`);
-      
-      fetchedGames.forEach(g => {
-        const normalize = (name: string) => {
-          if (!name) return "";
-          // Extract the last word (mascot) for more robust matching
-          const parts = name.toLowerCase().trim().split(/\s+/);
-          return parts[parts.length - 1].replace(/[^a-z0-9]/g, '').trim();
-        };
-        const gHome = normalize(g.homeTeam);
-        const gAway = normalize(g.awayTeam);
-        
-        const isAlreadyAdded = finalUniqueGames.some(ug => {
-          if (g.id && ug.id === g.id) {
-            console.log(`[Dashboard] fetchGames: Duplicate ID found: ${g.id} (${g.awayTeam}@${g.homeTeam})`);
-            return true;
           }
-          const ugHome = normalize(ug.homeTeam);
-          const ugAway = normalize(ug.awayTeam);
-          
-          // Match if mascots match OR if one name is contained in the other
-          const homeMatch = ugHome === gHome || 
-                           (g.homeTeam.toLowerCase().includes(ug.homeTeam.toLowerCase()) || 
-                            ug.homeTeam.toLowerCase().includes(g.homeTeam.toLowerCase()));
-          const awayMatch = ugAway === gAway || 
-                           (g.awayTeam.toLowerCase().includes(ug.awayTeam.toLowerCase()) || 
-                            ug.awayTeam.toLowerCase().includes(g.awayTeam.toLowerCase()));
-          
-          if (homeMatch && awayMatch) {
-            console.log(`[Dashboard] fetchGames: Duplicate team names found: ${g.awayTeam}@${g.homeTeam} matches ${ug.awayTeam}@${ug.homeTeam}`);
-          }
-          return homeMatch && awayMatch;
         });
-        
-        if (!isAlreadyAdded) {
-          finalUniqueGames.push(g);
+      }
+    }
+
+    const finalUniqueGames: Game[] = [];
+    console.log(`[Dashboard] fetchGames: Starting final deduplication pass on ${fetchedGames.length} games.`);
+
+    fetchedGames.forEach((g) => {
+      const normalize = (name: string) => {
+        if (!name) return "";
+        const parts = name.toLowerCase().trim().split(/\s+/);
+        return parts[parts.length - 1].replace(/[^a-z0-9]/g, "").trim();
+      };
+
+      const gHome = normalize(g.homeTeam);
+      const gAway = normalize(g.awayTeam);
+
+      const isAlreadyAdded = finalUniqueGames.some((ug) => {
+        if (g.id && ug.id === g.id) {
+          console.log(`[Dashboard] fetchGames: Duplicate ID found: ${g.id} (${g.awayTeam}@${g.homeTeam})`);
+          return true;
         }
+
+        const ugHome = normalize(ug.homeTeam);
+        const ugAway = normalize(ug.awayTeam);
+
+        const homeMatch =
+          ugHome === gHome ||
+          g.homeTeam.toLowerCase().includes(ug.homeTeam.toLowerCase()) ||
+          ug.homeTeam.toLowerCase().includes(g.homeTeam.toLowerCase());
+
+        const awayMatch =
+          ugAway === gAway ||
+          g.awayTeam.toLowerCase().includes(ug.awayTeam.toLowerCase()) ||
+          ug.awayTeam.toLowerCase().includes(g.awayTeam.toLowerCase());
+
+        if (homeMatch && awayMatch) {
+          console.log(
+            `[Dashboard] fetchGames: Duplicate team names found: ${g.awayTeam}@${g.homeTeam} matches ${ug.awayTeam}@${ug.homeTeam}`
+          );
+        }
+
+        return homeMatch && awayMatch;
       });
 
-      fetchedGames = finalUniqueGames;
+      if (!isAlreadyAdded) {
+        finalUniqueGames.push(g);
+      }
+    });
 
-      // Final safety filter: Ensure every game belongs to the selected date (ET)
-      // This prevents "yesterday's" games from leaking in from any source
-      const targetDateStr = format(selectedDate, "yyyy-MM-dd");
-      fetchedGames = fetchedGames.filter(g => {
-        if (!g.date) return true; // Keep if no date info, but usually there is
-        
-        // Convert game date to ET yyyy-MM-dd
-        const gameDate = new Date(g.date);
-        const gameEtStr = formatInTimeZone(gameDate, 'America/New_York', 'yyyy-MM-dd');
-        
-        const isMatch = gameEtStr === targetDateStr;
-        if (!isMatch) {
-          console.log(`[Dashboard] fetchGames: Filtering out game from different date. Game: ${g.awayTeam}@${g.homeTeam}, Date: ${gameEtStr}, Target: ${targetDateStr}`);
-        }
-        return isMatch;
-      });
+    fetchedGames = finalUniqueGames;
 
-      console.log(`[Dashboard] fetchGames: Final unique games count after date filtering: ${fetchedGames?.length || 0} for ${activeTab}`);
+    const targetDateStr = format(selectedDate, "yyyy-MM-dd");
+    fetchedGames = fetchedGames.filter((g) => {
+      if (!g.date) return true;
 
-      if (!fetchedGames || !Array.isArray(fetchedGames) || fetchedGames.length === 0) {
-        console.warn(`[Dashboard] fetchGames: NO GAMES FOUND for ${activeTab} on ${dateStrIso} from any source.`);
-        setGames([]);
-      } else {
-        console.log(`[Dashboard] fetchGames: Setting ${fetchedGames.length} games for ${activeTab}. Sample: ${fetchedGames[0].awayTeam}@${fetchedGames[0].homeTeam}`);
-        // 2. Show games immediately (Optimistic UI)
-        setGames(fetchedGames);
-        
-        // 3. Fetch Kalshi Odds in background
-        fetchKalshiOdds(activeTab);
-        
-       
+      const gameDate = new Date(g.date);
+      const gameEtStr = formatInTimeZone(gameDate, "America/New_York", "yyyy-MM-dd");
+
+      const isMatch = gameEtStr === targetDateStr;
+      if (!isMatch) {
+        console.log(
+          `[Dashboard] fetchGames: Filtering out game from different date. Game: ${g.awayTeam}@${g.homeTeam}, Date: ${gameEtStr}, Target: ${targetDateStr}`
+        );
       }
 
-    } catch (err: any) {
-      const msg = err?.message || "Failed to fetch schedule. Please try again.";
-      setError(msg);
-      console.error("[Dashboard] Error fetching games:", err);
+      return isMatch;
+    });
+
+    console.log(
+      `[Dashboard] fetchGames: Final unique games count after date filtering: ${fetchedGames?.length || 0} for ${activeTab}`
+    );
+
+    if (!fetchedGames || !Array.isArray(fetchedGames) || fetchedGames.length === 0) {
+      console.warn(`[Dashboard] fetchGames: NO GAMES FOUND for ${activeTab} on ${dateStrIso} from any source.`);
       setGames([]);
-    } finally {
-      setLoading(false);
+    } else {
+      console.log(
+        `[Dashboard] fetchGames: Setting ${fetchedGames.length} games for ${activeTab}. Sample: ${fetchedGames[0].awayTeam}@${fetchedGames[0].homeTeam}`
+      );
+      setGames(fetchedGames);
+      fetchKalshiOdds(activeTab);
     }
-  };
+  } catch (err: any) {
+    const msg = err?.message || "Failed to fetch schedule. Please try again.";
+    setError(msg);
+    console.error("[Dashboard] Error fetching games:", err);
+    setGames([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleImportSchedule = async () => {
     if (!user) {
