@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { format, addDays } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { Layout } from "../components/Layout";
@@ -62,7 +62,328 @@ const PAYWALL_ONLY_BYPASS_EMAILS = [
   'nousiharatl82@gmail.com' // Also add here for redundancy
 ];
 
-export function Dashboard({ user: initialUser, onOpenFAQ }: { user: User; onOpenFAQ: () => void }) {
+type ApiSportsWidgetEmbedProps = {
+  html: string;
+  className?: string;
+};
+
+let apiSportsScriptPromise: Promise<void> | null = null;
+
+function loadApiSportsScript() {
+  if (typeof window === "undefined") return Promise.resolve();
+
+  if ((window as any).__apiSportsWidgetsLoaded) {
+    return Promise.resolve();
+  }
+
+  if (!apiSportsScriptPromise) {
+    apiSportsScriptPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector<HTMLScriptElement>(
+        'script[data-api-sports-widgets="true"]'
+      );
+
+      if (existing) {
+        existing.addEventListener("load", () => {
+          (window as any).__apiSportsWidgetsLoaded = true;
+          resolve();
+        });
+        existing.addEventListener("error", reject);
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://widgets.api-sports.io/2.0.3/widgets.js";
+      script.async = true;
+      script.defer = true;
+      script.dataset.apiSportsWidgets = "true";
+
+      script.onload = () => {
+        (window as any).__apiSportsWidgetsLoaded = true;
+        resolve();
+      };
+
+      script.onerror = reject;
+
+      document.body.appendChild(script);
+    });
+  }
+
+  return apiSportsScriptPromise;
+}
+
+function ApiSportsWidgetEmbed({ html, className }: ApiSportsWidgetEmbedProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const mount = async () => {
+      await loadApiSportsScript();
+      if (cancelled || !containerRef.current) return;
+
+      containerRef.current.innerHTML = html;
+
+      const maybeRefresh = (window as any)?.ApiSportsWidgets?.refresh;
+      if (typeof maybeRefresh === "function") {
+        maybeRefresh();
+      }
+    };
+
+    mount().catch((err) => {
+      console.error("[API-Sports Widgets] Failed to load widget script:", err);
+    });
+
+    return () => {
+      cancelled = true;
+      if (containerRef.current) {
+        containerRef.current.innerHTML = "";
+      }
+    };
+  }, [html]);
+
+  return <div ref={containerRef} className={className} />;
+}
+
+function NbaApiSportsPanel({
+  gamesWidgetHtml,
+  gameWidgetHtml,
+  h2hWidgetHtml,
+}: {
+  gamesWidgetHtml: string;
+  gameWidgetHtml: string;
+  h2hWidgetHtml: string;
+}) {
+  const [activeWidgetTab, setActiveWidgetTab] = useState<"games" | "game" | "h2h">("games");
+
+  const currentHtml = useMemo(() => {
+    switch (activeWidgetTab) {
+      case "game":
+        return gameWidgetHtml;
+      case "h2h":
+        return h2hWidgetHtml;
+      case "games":
+      default:
+        return gamesWidgetHtml;
+    }
+  }, [activeWidgetTab, gamesWidgetHtml, gameWidgetHtml, h2hWidgetHtml]);
+
+  return (
+    <section className="mb-8 rounded-3xl border border-slate-800 bg-slate-900/70 p-4 md:p-6">
+      <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-xl font-bold text-white">API-Sports NBA Widgets</h3>
+          <p className="text-sm text-slate-400">
+            Live games, single-game detail, and matchup history.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-950/80 p-1">
+          <button
+            onClick={() => setActiveWidgetTab("games")}
+            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
+              activeWidgetTab === "games"
+                ? "bg-indigo-600 text-white"
+                : "text-slate-400 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            Games
+          </button>
+
+          <button
+            onClick={() => setActiveWidgetTab("game")}
+            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
+              activeWidgetTab === "game"
+                ? "bg-indigo-600 text-white"
+                : "text-slate-400 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            Game
+          </button>
+
+          <button
+            onClick={() => setActiveWidgetTab("h2h")}
+            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
+              activeWidgetTab === "h2h"
+                ? "bg-indigo-600 text-white"
+                : "text-slate-400 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            H2H
+          </button>
+        </div>
+      </div>
+
+      <div className="min-h-[560px] overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-2 md:p-4">
+        <ApiSportsWidgetEmbed html={currentHtml} />
+      </div>
+    </section>
+  );
+}
+type ApiSportsWidgetEmbedProps = {
+  html: string;
+  className?: string;
+};
+
+let apiSportsScriptPromise: Promise<void> | null = null;
+
+function loadApiSportsScript() {
+  if (typeof window === "undefined") return Promise.resolve();
+
+  if ((window as any).__apiSportsWidgetsLoaded) {
+    return Promise.resolve();
+  }
+
+  if (!apiSportsScriptPromise) {
+    apiSportsScriptPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector<HTMLScriptElement>(
+        'script[data-api-sports-widgets="true"]'
+      );
+
+      if (existing) {
+        existing.addEventListener("load", () => {
+          (window as any).__apiSportsWidgetsLoaded = true;
+          resolve();
+        });
+        existing.addEventListener("error", reject);
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://widgets.api-sports.io/2.0.3/widgets.js";
+      script.async = true;
+      script.defer = true;
+      script.dataset.apiSportsWidgets = "true";
+
+      script.onload = () => {
+        (window as any).__apiSportsWidgetsLoaded = true;
+        resolve();
+      };
+
+      script.onerror = reject;
+
+      document.body.appendChild(script);
+    });
+  }
+
+  return apiSportsScriptPromise;
+}
+
+function ApiSportsWidgetEmbed({ html, className }: ApiSportsWidgetEmbedProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const mount = async () => {
+      await loadApiSportsScript();
+      if (cancelled || !containerRef.current) return;
+
+      containerRef.current.innerHTML = html;
+
+      const maybeRefresh = (window as any)?.ApiSportsWidgets?.refresh;
+      if (typeof maybeRefresh === "function") {
+        maybeRefresh();
+      }
+    };
+
+    mount().catch((err) => {
+      console.error("[API-Sports Widgets] Failed to load widget script:", err);
+    });
+
+    return () => {
+      cancelled = true;
+      if (containerRef.current) {
+        containerRef.current.innerHTML = "";
+      }
+    };
+  }, [html]);
+
+  return <div ref={containerRef} className={className} />;
+}
+
+function NbaApiSportsPanel({
+  gamesWidgetHtml,
+  gameWidgetHtml,
+  h2hWidgetHtml,
+}: {
+  gamesWidgetHtml: string;
+  gameWidgetHtml: string;
+  h2hWidgetHtml: string;
+}) {
+  const [activeWidgetTab, setActiveWidgetTab] = useState<"games" | "game" | "h2h">("games");
+
+  const currentHtml = useMemo(() => {
+    switch (activeWidgetTab) {
+      case "game":
+        return gameWidgetHtml;
+      case "h2h":
+        return h2hWidgetHtml;
+      case "games":
+      default:
+        return gamesWidgetHtml;
+    }
+  }, [activeWidgetTab, gamesWidgetHtml, gameWidgetHtml, h2hWidgetHtml]);
+
+  return (
+    <section className="mb-8 rounded-3xl border border-slate-800 bg-slate-900/70 p-4 md:p-6">
+      <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-xl font-bold text-white">API-Sports NBA Widgets</h3>
+          <p className="text-sm text-slate-400">
+            Live games, single-game detail, and matchup history.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-950/80 p-1">
+          <button
+            onClick={() => setActiveWidgetTab("games")}
+            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
+              activeWidgetTab === "games"
+                ? "bg-indigo-600 text-white"
+                : "text-slate-400 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            Games
+          </button>
+
+          <button
+            onClick={() => setActiveWidgetTab("game")}
+            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
+              activeWidgetTab === "game"
+                ? "bg-indigo-600 text-white"
+                : "text-slate-400 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            Game
+          </button>
+
+          <button
+            onClick={() => setActiveWidgetTab("h2h")}
+            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
+              activeWidgetTab === "h2h"
+                ? "bg-indigo-600 text-white"
+                : "text-slate-400 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            H2H
+          </button>
+        </div>
+      </div>
+
+      <div className="min-h-[560px] overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-2 md:p-4">
+        <ApiSportsWidgetEmbed html={currentHtml} />
+      </div>
+    </section>
+  );
+}
+
+export function Dashboard({
+  user: initialUser,
+  onOpenFAQ,
+}: {
+  user: User;
+  onOpenFAQ: () => void;
+}) {
   const [activeTab, setActiveTab] = useState("NBA");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [games, setGames] = useState<Game[]>([]);
@@ -72,20 +393,35 @@ export function Dashboard({ user: initialUser, onOpenFAQ }: { user: User; onOpen
   const [error, setError] = useState<string | null>(null);
   const [savedPredictions, setSavedPredictions] = useState<Record<string, Prediction>>({});
   const [allPredictions, setAllPredictions] = useState<Record<string, Prediction>>({});
-  const [debugLogs, setDebugLogs] = useState<any[]>([]);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+
+  // API-Sports widget snippets
+  const apiSportsGamesWidgetHtml = `
+    <!-- PASTE THE EXACT API-SPORTS GAMES WIDGET SNIPPET HERE -->
+  `;
+
+  const apiSportsGameWidgetHtml = `
+    <!-- PASTE THE EXACT API-SPORTS GAME WIDGET SNIPPET HERE -->
+  `;
+
+  const apiSportsH2HWidgetHtml = `
+    <!-- PASTE THE EXACT API-SPORTS H2H WIDGET SNIPPET HERE -->
+  `;
 
   // Persistent Logging Helper
   const addDebugLog = (msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
-    const fullMsg = `[${timestamp}] ${msg}`;
+    const fullMsg = \`[\${timestamp}] \${msg}\`;
     console.log(fullMsg);
-    setDebugLogs(prev => [fullMsg, ...prev].slice(0, 50));
-    
+    setDebugLogs((prev) => [fullMsg, ...prev].slice(0, 50));
+
     try {
-      const stored = JSON.parse(localStorage.getItem('debug_logs') || '[]');
+      const stored = JSON.parse(localStorage.getItem("debug_logs") || "[]") as string[];
       const updated = [fullMsg, ...stored].slice(0, 100);
-      localStorage.setItem('debug_logs', JSON.stringify(updated));
-    } catch (e) {}
+      localStorage.setItem("debug_logs", JSON.stringify(updated));
+    } catch (e) {
+      console.error("[Dashboard] Failed to persist debug log:", e);
+    }
   };
 
   useEffect(() => {
@@ -2520,6 +2856,14 @@ export function Dashboard({ user: initialUser, onOpenFAQ }: { user: User; onOpen
       {isAdminUser && (
         <LocksOfTheDay games={filteredGames} predictions={allPredictions} selectedDate={selectedDate} league={activeTab} onSelectLeague={setActiveTab} />
       )}
+
+{activeTab === "NBA" && (
+  <NbaApiSportsPanel
+    gamesWidgetHtml={apiSportsGamesWidgetHtml}
+    gameWidgetHtml={apiSportsGameWidgetHtml}
+    h2hWidgetHtml={apiSportsH2HWidgetHtml}
+  />
+)}
 
       <div className="py-8">
         {mainTab === "bankroll" ? (
