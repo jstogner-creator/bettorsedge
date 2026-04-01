@@ -138,6 +138,11 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /login_errors/{errorId} {
+      allow create: if true;
+      allow read: if isAdmin();
+    }
+
     match /app_config/{configId} {
       // Allow backend to save working configurations even if admin credentials are not fully configured
       allow read, write: if true;

@@ -263,13 +263,10 @@ export const FAQ: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             Our team is here to help you get the most out of Bettors Edge. 
             Drop us an email and we'll get back to you as soon as possible.
           </p>
-          <a 
-            href="mailto:lydia@bettorsedge.ai"
-            className="inline-flex items-center gap-2 px-8 py-3 bg-indigo-500 hover:bg-indigo-400 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-500/20"
-          >
+          <div className="inline-flex items-center gap-2 px-8 py-3 bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-500/20">
             <Mail className="w-5 h-5" />
-            Contact Support
-          </a>
+            lydia@bettorsedge.ai
+          </div>
         </div>
       </main>
     </div>

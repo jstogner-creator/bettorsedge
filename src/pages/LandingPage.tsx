@@ -52,7 +52,6 @@ export function LandingPage({ onEnter }: LandingPageProps) {
       stack: error?.stack,
       customData: error?.customData,
     });
-    alert(`Google login failed: ${error?.code || "unknown_error"}`);
     setIsLoggingIn(false);
   }
 };

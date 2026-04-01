@@ -1,10 +1,31 @@
 import React, { useState } from "react";
-import { Calendar, MapPin, Clock, ChevronDown, ChevronUp, AlertTriangle, TrendingUp, Shield, Brain, CheckCircle, Star, Info, Activity, RefreshCw, Zap, ShieldCheck, CheckCircle2 } from "lucide-react";
+import {
+  Calendar,
+  MapPin,
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  TrendingUp,
+  Shield,
+  ShieldCheck,
+  Brain,
+  CheckCircle,
+  CheckCircle2,
+  Star,
+  Info,
+  Activity,
+  RefreshCw,
+  Zap,
+  DollarSign,
+  Users,
+  BarChart3,
+} from "lucide-react";
 import { format, parseISO } from "date-fns";
-import { Game, Prediction, Bet } from "../types";
-import { cn } from "../lib/utils";
-import { BetSimulator } from "./BetSimulator";
-import { DollarSign } from "lucide-react";
+import { Game, Prediction, Bet } from "./types";
+import { cn } from "./lib/utils";
+import { BetSimulator } from "./components/BetSimulator";
+import { ApiSportsWidgetEmbed } from "./components/ApiSportsWidgets";
 
 interface GameCardProps {
   game: Game;
@@ -13,6 +34,7 @@ interface GameCardProps {
   onReanalyze?: (game: Game) => void;
   onDiscuss?: () => void;
   onLogBet?: (bet: Omit<Bet, 'id' | 'userId' | 'createdAt' | 'status'>) => void;
+  onSelect?: (game: Game) => void;
 }
 
 export const GameCard: React.FC<GameCardProps> = ({ 
@@ -21,9 +43,17 @@ export const GameCard: React.FC<GameCardProps> = ({
   isAnalyzing, 
   onReanalyze, 
   onDiscuss,
-  onLogBet
+  onLogBet,
+  onSelect
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+
+  const handleCardClick = () => {
+    setIsExpanded(!isExpanded);
+    if (onSelect) {
+      onSelect(game);
+    }
+  };
 
   React.useEffect(() => {
     const handleExpand = () => setIsExpanded(true);
@@ -163,7 +193,7 @@ export const GameCard: React.FC<GameCardProps> = ({
       {/* Header - Always Visible */}
       <div 
         className="cursor-pointer hover:bg-slate-800/30 transition-colors"
-        onClick={() => setIsExpanded(!isExpanded)}
+        onClick={handleCardClick}
       >
         <div className="p-3 sm:p-4 border-b border-slate-800/50 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900/50 gap-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -1036,6 +1066,79 @@ export const GameCard: React.FC<GameCardProps> = ({
                   </div>
                 )}
 
+                {/* Player Matchups Section */}
+                {Array.isArray(prediction.playerMatchups) && prediction.playerMatchups.length > 0 && (
+                  <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 shadow-inner mb-4">
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-5 flex items-center gap-2">
+                      <div className="p-1 bg-slate-900 rounded border border-slate-800">
+                        <Users className="w-3.5 h-3.5 text-indigo-400" />
+                      </div>
+                      Key Player Matchups
+                    </h4>
+                    <div className="space-y-4">
+                      {prediction.playerMatchups.map((matchup, idx) => (
+                        <div key={idx} className="p-4 bg-slate-950/40 rounded-lg border border-slate-800/50 hover:border-indigo-500/20 transition-all group">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-sm font-black text-white tracking-tight">{matchup.matchup}</span>
+                            <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                              Advantage: {matchup.advantage}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 leading-relaxed group-hover:text-slate-300 transition-colors">
+                            {matchup.analysis}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Team Stats Comparison Section */}
+                {Array.isArray(prediction.teamStatsComparison) && prediction.teamStatsComparison.length > 0 && (
+                  <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 shadow-inner mb-4">
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-5 flex items-center gap-2">
+                      <div className="p-1 bg-slate-900 rounded border border-slate-800">
+                        <BarChart3 className="w-3.5 h-3.5 text-indigo-400" />
+                      </div>
+                      Team Statistical Comparison
+                    </h4>
+                    <div className="space-y-3">
+                      {prediction.teamStatsComparison.map((stat, idx) => (
+                        <div key={idx} className="flex items-center gap-4">
+                          <div className={cn(
+                            "w-16 text-right text-[11px] font-bold",
+                            stat.advantage === 'away' ? "text-indigo-400" : "text-slate-500"
+                          )}>{stat.awayValue}</div>
+                          <div className="flex-1 h-6 bg-slate-900 rounded-full overflow-hidden flex items-center relative border border-slate-800/50">
+                            <div className="absolute inset-0 flex items-center justify-center z-10">
+                              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">{stat.category}</span>
+                            </div>
+                            <div 
+                              className={cn(
+                                "h-full transition-all duration-1000",
+                                stat.advantage === 'away' ? "bg-indigo-500/40" : "bg-slate-800/40"
+                              )}
+                              style={{ width: '50%' }}
+                            />
+                            <div className="w-px h-full bg-slate-700 z-10" />
+                            <div 
+                              className={cn(
+                                "h-full transition-all duration-1000",
+                                stat.advantage === 'home' ? "bg-indigo-500/40" : "bg-slate-800/40"
+                              )}
+                              style={{ width: '50%' }}
+                            />
+                          </div>
+                          <div className={cn(
+                            "w-16 text-left text-[11px] font-bold",
+                            stat.advantage === 'home' ? "text-indigo-400" : "text-slate-500"
+                          )}>{stat.homeValue}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Strategic Analysis */}
                 <div className="bg-slate-800/30 border border-slate-700/30 rounded-xl p-5 mb-4">
                   <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center">
@@ -1082,6 +1185,92 @@ export const GameCard: React.FC<GameCardProps> = ({
                   <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-4 flex items-center mb-4">
                     <CheckCircle className="w-4 h-4 text-emerald-500 mr-2" />
                     <span className="text-xs text-emerald-400 font-black uppercase tracking-widest">Injuries & Lineups Verified</span>
+                  </div>
+                )}
+
+                {/* API-Sports Widgets (NBA Only) */}
+                {game.league === 'NBA' && game.apiSportsGameId && (
+                  <div className="mt-8 space-y-8 border-t border-slate-800 pt-8">
+                    <div className="flex items-center gap-4">
+                      <div className="h-px flex-1 bg-gradient-to-r from-transparent to-slate-800"></div>
+                      <div className="flex items-center gap-2 px-4 py-1 rounded-full border border-slate-800 bg-slate-900/50">
+                        <Activity className="w-3 h-3 text-indigo-400" />
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">API-Sports Live Data</span>
+                      </div>
+                      <div className="h-px flex-1 bg-gradient-to-l from-transparent to-slate-800"></div>
+                    </div>
+
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                      {/* Game Details Widget */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center">
+                            <Info className="w-4 h-4 mr-2 text-indigo-500" />
+                            Lineups & Injuries
+                          </h4>
+                        </div>
+                        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-2xl">
+                          <ApiSportsWidgetEmbed 
+                            html={`
+                              <api-sports-widget
+                                data-type="game"
+                                data-game-id="${game.apiSportsGameId}"
+                                data-refresh="0"
+                                data-show-toolbar="false"
+                                data-tab="all"
+                                data-game-style="2"
+                              ></api-sports-widget>
+                              <api-sports-widget
+                                data-type="config"
+                                data-key="b2795a8c744b26f971aaf15eb994212e"
+                                data-sport="nba"
+                                data-lang="en"
+                                data-theme="grey"
+                                data-timezone="CST"
+                                data-show-errors="false"
+                                data-show-logos="true"
+                              ></api-sports-widget>
+                            `}
+                          />
+                        </div>
+                      </div>
+
+                      {/* H2H Widget */}
+                      {game.apiSportsHomeTeamId && game.apiSportsAwayTeamId && (
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center">
+                              <TrendingUp className="w-4 h-4 mr-2 text-indigo-500" />
+                              Matchup History
+                            </h4>
+                          </div>
+                          <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-2xl">
+                            <ApiSportsWidgetEmbed 
+                              html={`
+                                <api-sports-widget
+                                  data-type="h2h"
+                                  data-h2h="${game.apiSportsHomeTeamId}-${game.apiSportsAwayTeamId}"
+                                  data-refresh="0"
+                                  data-show-toolbar="false"
+                                  data-tab="all"
+                                  data-h2h-style="2"
+                                ></api-sports-widget>
+                                <api-sports-widget
+                                  data-type="config"
+                                  data-key="b2795a8c744b26f971aaf15eb994212e"
+                                  data-sport="nba"
+                                  data-lang="en"
+                                  data-theme="grey"
+                                  data-timezone="CST"
+                                  data-show-errors="false"
+                                  data-show-logos="true"
+                                ></api-sports-widget>
+                              `}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
             </div>

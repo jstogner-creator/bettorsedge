@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { format, addDays } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { Layout } from "../components/Layout";
-import { GameCard } from "../components/GameCard";
+import { GameCard } from "../GameCard";
 import { espnService } from "../services/espn";
 import { sportsOracle } from "../services/gemini";
 import { kalshiService } from "../services/kalshi";
@@ -55,15 +55,16 @@ import BankrollTracker from "../components/BankrollTracker";
 import { bettingService } from "../services/bettingService";
 import { AdminUsersTab } from "../components/AdminUsersTab";
 import { DailyBriefingModal } from "../components/DailyBriefingModal";
-import { Bracket } from "../components/Bracket";
-import { TournamentTracker } from "../components/TournamentTracker";
-import { GameGridErrorBoundary } from "../components/ErrorBoundary";
 import { loadStripe } from "@stripe/stripe-js";
+import { AdminTab } from "../components/Dashboard/AdminTab";
+import { GameGrid } from "../components/Dashboard/GameGrid";
+import { DashboardHeader } from "../components/Dashboard/DashboardHeader";
+import { apiSportsService } from "../services/apiSports";
 import { Joyride, STATUS } from "react-joyride";
 import type { Step } from "react-joyride";
 // Robust Joyride component retrieval
-const JoyrideComponent = (Joyride as any)?.default || Joyride;
-const JoyrideAny = typeof JoyrideComponent === 'function' ? JoyrideComponent : null;
+const JoyrideComponent = Joyride;
+const JoyrideAny = typeof JoyrideComponent === 'function' ? JoyrideComponent : (Joyride as any)?.default;
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 console.log("[Stripe Debug] Publishable Key Loaded:", stripePublishableKey ? `YES (starts with ${stripePublishableKey.substring(0, 7)}...)` : "NO (undefined)");
@@ -89,163 +90,9 @@ const PAYWALL_ONLY_BYPASS_EMAILS = [
 ];
 
 
-let apiSportsScriptPromise: Promise<void> | null = null;
 
-function loadApiSportsScript() {
-  if (typeof window === "undefined") return Promise.resolve();
 
-  if ((window as any).__apiSportsWidgetsLoaded) {
-    return Promise.resolve();
-  }
-
-  if (!apiSportsScriptPromise) {
-    apiSportsScriptPromise = new Promise((resolve, reject) => {
-      const existing = document.querySelector<HTMLScriptElement>(
-        'script[data-api-sports-widgets="true"]'
-      );
-
-      if (existing) {
-        existing.addEventListener("load", () => {
-          (window as any).__apiSportsWidgetsLoaded = true;
-          resolve();
-        });
-        existing.addEventListener("error", reject);
-        return;
-      }
-
-      const script = document.createElement("script");
-      script.src = "https://widgets.api-sports.io/2.0.3/widgets.js";
-      script.async = true;
-      script.defer = true;
-      script.dataset.apiSportsWidgets = "true";
-
-      script.onload = () => {
-        (window as any).__apiSportsWidgetsLoaded = true;
-        resolve();
-      };
-
-      script.onerror = reject;
-
-      document.body.appendChild(script);
-    });
-  }
-
-  return apiSportsScriptPromise;
-}
-
-type ApiSportsWidgetEmbedProps = {
-  html: string;
-  className?: string;
-};
-
-function ApiSportsWidgetEmbed({ html, className }: ApiSportsWidgetEmbedProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const mount = async () => {
-      await loadApiSportsScript();
-      if (cancelled || !containerRef.current) return;
-
-      containerRef.current.innerHTML = html;
-
-      const maybeRefresh = (window as any)?.ApiSportsWidgets?.refresh;
-      if (typeof maybeRefresh === "function") {
-        maybeRefresh();
-      }
-    };
-
-    mount().catch((err) => {
-      console.error("[API-Sports Widgets] Failed to load widget script:", err);
-    });
-
-    return () => {
-      cancelled = true;
-      if (containerRef.current) {
-        containerRef.current.innerHTML = "";
-      }
-    };
-  }, [html]);
-
-  return <div ref={containerRef} className={className} />;
-}
-
-function NbaApiSportsPanel({
-  gamesWidgetHtml,
-  gameWidgetHtml,
-  h2hWidgetHtml,
-}: {
-  gamesWidgetHtml: string;
-  gameWidgetHtml: string;
-  h2hWidgetHtml: string;
-}) {
-  const [activeWidgetTab, setActiveWidgetTab] = useState<"games" | "game" | "h2h">("games");
-
-  const currentHtml = useMemo(() => {
-    switch (activeWidgetTab) {
-      case "game":
-        return gameWidgetHtml;
-      case "h2h":
-        return h2hWidgetHtml;
-      case "games":
-      default:
-        return gamesWidgetHtml;
-    }
-  }, [activeWidgetTab, gamesWidgetHtml, gameWidgetHtml, h2hWidgetHtml]);
-
-  return (
-    <section className="mb-8 rounded-3xl border border-slate-800 bg-slate-900/70 p-4 md:p-6">
-      <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-xl font-bold text-white">API-Sports NBA Widgets</h3>
-          <p className="text-sm text-slate-400">
-            Live games, single-game detail, and matchup history.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-950/80 p-1">
-          <button
-            onClick={() => setActiveWidgetTab("games")}
-            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
-              activeWidgetTab === "games"
-                ? "bg-indigo-600 text-white"
-                : "text-slate-400 hover:bg-slate-800 hover:text-white"
-            }`}
-          >
-            Games
-          </button>
-
-          <button
-            onClick={() => setActiveWidgetTab("game")}
-            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
-              activeWidgetTab === "game"
-                ? "bg-indigo-600 text-white"
-                : "text-slate-400 hover:bg-slate-800 hover:text-white"
-            }`}
-          >
-            Game
-          </button>
-
-          <button
-            onClick={() => setActiveWidgetTab("h2h")}
-            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${
-              activeWidgetTab === "h2h"
-                ? "bg-indigo-600 text-white"
-                : "text-slate-400 hover:bg-slate-800 hover:text-white"
-            }`}
-          >
-            H2H
-          </button>
-        </div>
-      </div>
-
-      <div className="min-h-[560px] overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-2 md:p-4">
-        <ApiSportsWidgetEmbed html={currentHtml} />
-      </div>
-    </section>
-  );
-}
+// Constants for bypass logic
 
 
 
@@ -257,6 +104,7 @@ export function Dashboard({
   onOpenFAQ: () => void;
 }) {
   const [activeTab, setActiveTab] = useState("NBA");
+  const [apiSportsStatus, setApiSportsStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', count: number, message?: string }>({ status: 'idle', count: 0 });
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(false);
@@ -268,61 +116,11 @@ export function Dashboard({
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
 // API-Sports widget snippets
 // API-Sports widget snippets
-const apiSportsGamesWidgetHtml = `
-  <div class="space-y-4">
-    <api-sports-widget
-      data-type="games"
-      data-date="${format(selectedDate, "yyyy-MM-dd")}"
-      data-refresh="30"
-      data-show-toolbar="true"
-      data-tab="all"
-      data-games-style="2"
-      data-target-game="#api-sports-game-details"
-      data-target-standings="modal"
-    ></api-sports-widget>
-
-    <div
-      id="api-sports-game-details"
-      class="min-h-[500px] rounded-2xl border border-slate-800 bg-slate-950 p-4"
-    >
-      <div class="text-slate-400 text-sm">
-        Click a matchup above to load game details here.
-      </div>
-    </div>
-
-    <api-sports-widget
-      data-type="config"
-      data-key="b2795a8c744b26f971aaf15eb994212e"
-      data-sport="nba"
-      data-lang="en"
-      data-theme="grey"
-      data-timezone="CST"
-      data-show-errors="true"
-      data-show-logos="true"
-      data-favorite="true"
-    ></api-sports-widget>
-  </div>
-`;
-
-const apiSportsGameWidgetHtml = `
-  <div class="rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-400 text-sm">
-    The standalone Game widget requires a data-game-id.
-    For now, use the Games tab and click a matchup to load game details automatically.
-  </div>
-`;
-
-const apiSportsH2HWidgetHtml = `
-  <div class="rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-400 text-sm">
-    The H2H widget requires data-h2h="teamId-teamId".
-    Once you have API-Sports team IDs for the selected matchup, this panel can be wired to update automatically.
-  </div>
-`;-widget>
-`;
 
   // Persistent Logging Helper
   const addDebugLog = (msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
-    const fullMsg = \`[\${timestamp}] \${msg}\`;
+    const fullMsg = `[${timestamp}] ${msg}`;
     console.log(fullMsg);
     setDebugLogs((prev) => [fullMsg, ...prev].slice(0, 50));
 
@@ -355,7 +153,7 @@ const apiSportsH2HWidgetHtml = `
   const [user, setUser] = useState<User | null>(initialUser);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isAdminUser, setIsAdminUser] = useState(false);
-  const [authReady, setAuthReady] = useState(false);
+  const [authReady, setAuthReady] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -393,24 +191,6 @@ const apiSportsH2HWidgetHtml = `
     isOpen: false,
     type: "terms",
   });
-  
-
-   
-      
-      setToast({ 
-        message,
-        type: (nba?.status === 'success' && odds?.status === 'success' && schedule?.status === 'success') ? "success" : "warning"
-      });
-    } catch (err: any) {
-      console.error("Sportradar test failed:", err);
-      setToast({ 
-        message: `Sportradar FAILED: ${err.message || 'Unknown error'}`, 
-        type: "error" 
-      });
-    } finally {
-      setTestingSportradar(false);
-    }
-  };
 
   const walkthroughSteps: Step[] = [
     {
@@ -492,16 +272,14 @@ const apiSportsH2HWidgetHtml = `
     console.log("[Dashboard] Environment:", {
       hostname: window.location.hostname,
       isIframe: window.self !== window.top,
-      userAgent: navigator.userAgent
+      userAgent: navigator.userAgent,
     });
 
-    // Check for Stripe session_id in URL
     const urlParams = new URLSearchParams(window.location.search);
-    const sessionId = urlParams.get('session_id');
+    const sessionId = urlParams.get("session_id");
     if (sessionId) {
       console.log("[Dashboard] Stripe session_id detected:", sessionId);
       setToast({ message: "Subscription successful! Welcome to Premium.", type: "success" });
-      // Clean up URL to prevent reload loops
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
@@ -519,8 +297,8 @@ const apiSportsH2HWidgetHtml = `
       }
 
       const setupProfile = async () => {
-        // 1. Ensure user document exists (one-time check/creation)
         const userRef = doc(db, "users", user.uid);
+
         try {
           const userDoc = await getDoc(userRef);
           if (!userDoc.exists()) {
@@ -530,12 +308,12 @@ const apiSportsH2HWidgetHtml = `
               email: user.email || "",
               displayName: user.displayName || "",
               createdAt: new Date().toISOString(),
-              subscriptionStatus: 'inactive',
+              subscriptionStatus: "inactive",
               subscribedSports: [],
-              acceptedTerms: true, // They must have accepted on LandingPage
+              acceptedTerms: true,
               termsAcceptedAt: new Date().toISOString(),
-              bankroll: 1000, // Default starting bankroll
-              hasSeenWalkthrough: false
+              bankroll: 1000,
+              hasSeenWalkthrough: false,
             });
           }
         } catch (err) {
@@ -543,71 +321,80 @@ const apiSportsH2HWidgetHtml = `
           setProfileError("Failed to initialize your profile. Please check your connection.");
         }
 
-        // 2. Set up real-time profile listener
-        profileUnsubscribe = onSnapshot(userRef, (docSnap) => {
-          console.log("[Dashboard] Profile snapshot received:", docSnap.exists() ? "Exists" : "Not Found");
-          
-          const userEmail = (user.email || "").toLowerCase().trim();
-          const isBypassEmail = BYPASS_EMAILS.includes(userEmail);
+        profileUnsubscribe = onSnapshot(
+          userRef,
+          (docSnap) => {
+            console.log("[Dashboard] Profile snapshot received:", docSnap.exists() ? "Exists" : "Not Found");
 
-          if (docSnap.exists()) {
-            const profile = docSnap.data() as UserProfile;
-            setUserProfile(profile);
-            
-            const isAdmin = profile.role === 'admin' || isBypassEmail;
-            console.log("[Dashboard] Admin Check:", { email: userEmail, isAdmin, role: profile.role, isBypass: isBypassEmail });
-            setIsAdminUser(isAdmin);
+            const currentUserEmail = (user.email || "").toLowerCase().trim();
+            const isBypassEmail = BYPASS_EMAILS.includes(currentUserEmail);
 
-            // Auto-switch to first subscribed sport ONLY ONCE on initial load if current tab is not subscribed and user is not admin
-            const hasAutoSwitched = sessionStorage.getItem('hasAutoSwitched');
-            if (!isAdmin && profile.subscribedSports && profile.subscribedSports.length > 0 && !hasAutoSwitched) {
-              if (!profile.subscribedSports.includes(activeTab) && activeTab !== "Accuracy" && activeTab !== "Users" && activeTab !== "Add Sport") {
-                console.log("[Dashboard] Initial auto-switch to first subscribed sport:", profile.subscribedSports[0]);
-                setActiveTab(profile.subscribedSports[0]);
-                sessionStorage.setItem('hasAutoSwitched', 'true');
+            if (docSnap.exists()) {
+              const profile = docSnap.data() as UserProfile;
+              setUserProfile(profile);
+
+              const isAdmin = profile.role === "admin" || isBypassEmail;
+              console.log("[Dashboard] Admin Check:", {
+                email: currentUserEmail,
+                isAdmin,
+                role: profile.role,
+                isBypass: isBypassEmail,
+              });
+              setIsAdminUser(isAdmin);
+
+              const hasAutoSwitched = sessionStorage.getItem("hasAutoSwitched");
+              if (
+                !isAdmin &&
+                profile.subscribedSports &&
+                profile.subscribedSports.length > 0 &&
+                !hasAutoSwitched
+              ) {
+                if (
+                  !profile.subscribedSports.includes(activeTab) &&
+                  activeTab !== "Accuracy" &&
+                  activeTab !== "Users" &&
+                  activeTab !== "Add Sport"
+                ) {
+                  console.log(
+                    "[Dashboard] Initial auto-switch to first subscribed sport:",
+                    profile.subscribedSports[0]
+                  );
+                  setActiveTab(profile.subscribedSports[0]);
+                  sessionStorage.setItem("hasAutoSwitched", "true");
+                }
               }
+
+              const hasSeenLocal = localStorage.getItem("hasSeenWalkthrough") === "true";
+              const hasSeenRemote = profile.hasSeenWalkthrough === true;
+
+              console.log("[Dashboard] Walkthrough Check:", { hasSeenLocal, hasSeenRemote });
+
+              if (!hasSeenLocal && !hasSeenRemote && !walkthroughTriggeredRef.current) {
+                console.log("[Dashboard] Conditions met for walkthrough. Triggering...");
+                walkthroughTriggeredRef.current = true;
+                setRunWalkthrough(true);
+                localStorage.setItem("hasSeenWalkthrough", "true");
+              }
+            } else {
+              setUserProfile({
+                uid: user.uid,
+                email: user.email || "",
+                subscriptionStatus: "inactive",
+                subscribedSports: [],
+              } as UserProfile);
+              setIsAdminUser(isBypassEmail);
             }
 
-            // Trigger walkthrough if not seen
-            const hasSeenLocal = localStorage.getItem('hasSeenWalkthrough') === 'true';
-            const hasSeenRemote = profile.hasSeenWalkthrough === true;
-            
-            console.log("[Dashboard] Walkthrough Check:", { hasSeenLocal, hasSeenRemote });
+            setAuthReady(true);
+          },
+          (error) => {
+            handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+            setProfileError("Lost connection to your profile. Retrying...");
+            setAuthReady(true);
+          }
+        );
+      };
 
-            if (!hasSeenLocal && !hasSeenRemote && !walkthroughTriggeredRef.current) {
-              console.log("[Dashboard] Conditions met for walkthrough. Triggering...");
-              walkthroughTriggeredRef.current = true;
-              setRunWalkthrough(true);
-              // Set local storage immediately to prevent re-triggering on refresh during walkthrough
-              localStorage.setItem('hasSeenWalkthrough', 'true');
-            }
-          } else {
-            // Fallback if doc was somehow deleted or not yet created
-            profileUnsubscribe = onSnapshot(
-  userRef,
-  (docSnap) => {
-    if (docSnap.exists()) {
-      setUserProfile(docSnap.data() as UserProfile);
-      setIsAdminUser(isBypassEmail);
-    } else {
-      setUserProfile({
-        uid: user.uid,
-        email: user.email || "",
-        subscriptionStatus: "inactive",
-        subscribedSports: [],
-      });
-      setIsAdminUser(isBypassEmail);
-    }
-
-    setAuthReady(true);
-  },
-  (error) => {
-    handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
-    setProfileError("Lost connection to your profile. Retrying...");
-    setAuthReady(true);
-  }
-);
-  
       setupProfile();
     } else {
       setUserProfile(null);
@@ -638,9 +425,10 @@ const apiSportsH2HWidgetHtml = `
     const handleStripeMessage = (event: MessageEvent) => {
       if (event.data?.type === 'STRIPE_SUCCESS') {
         console.log("[Dashboard] Received STRIPE_SUCCESS message");
-        // The onSnapshot listener will handle the profile update, 
-        // but we can show a optimistic message or refresh
         setToast({ message: "Subscription successful! Welcome to Premium.", type: "success" });
+      } else if (event.data?.type === 'STRIPE_CANCELLED') {
+        console.log("[Dashboard] Received STRIPE_CANCELLED message");
+        setToast({ message: "Checkout cancelled. No charges were made.", type: "info" });
       }
     };
     window.addEventListener('message', handleStripeMessage);
@@ -965,39 +753,43 @@ const apiSportsH2HWidgetHtml = `
   // Polling for 30-min alerts
   useEffect(() => {
     const checkGames = async () => {
-      const now = new Date();
-      const thirtyMinsFromNow = new Date(now.getTime() + 30 * 60 * 1000);
-      
-      for (const game of games) {
-        const gameTime = new Date(game.date);
+      try {
+        const now = new Date();
+        const thirtyMinsFromNow = new Date(now.getTime() + 30 * 60 * 1000);
         
-        if (gameTime > now && gameTime <= thirtyMinsFromNow && !alertedGames.has(game.id)) {
-          console.log(`[Alert] Game ${game.id} is starting in 30 mins. Checking for changes...`);
+        for (const game of games) {
+          const gameTime = new Date(game.date);
           
-          // Re-analyze to check for changes
-          const oldPrediction = savedPredictions[game.id];
-          let newPrediction = await sportsOracle.analyzeMatchup(game, game.date, oldPrediction);
-          
-          // Check for significant changes
-          let significantChange = false;
-          if (oldPrediction) {
-            // Check for injury changes
-            const oldInjuries = JSON.stringify(oldPrediction.injuries);
-            const newInjuries = JSON.stringify(newPrediction.injuries);
-            if (oldInjuries !== newInjuries) {
-              significantChange = true;
+          if (gameTime > now && gameTime <= thirtyMinsFromNow && !alertedGames.has(game.id)) {
+            console.log(`[Alert] Game ${game.id} is starting in 30 mins. Checking for changes...`);
+            
+            // Re-analyze to check for changes
+            const oldPrediction = savedPredictions[game.id];
+            let newPrediction = await sportsOracle.analyzeMatchup(game, game.date, oldPrediction);
+            
+            // Check for significant changes
+            let significantChange = false;
+            if (oldPrediction) {
+              // Check for injury changes
+              const oldInjuries = JSON.stringify(oldPrediction.injuries);
+              const newInjuries = JSON.stringify(newPrediction.injuries);
+              if (oldInjuries !== newInjuries) {
+                significantChange = true;
+              }
             }
+            
+            if (significantChange) {
+              sendNotification(
+                "Game Alert: Significant Changes",
+                `${game.awayTeam} @ ${game.homeTeam} starts in 30 mins. Player status has changed.`
+              );
+            }
+            
+            setAlertedGames(prev => new Set(prev).add(game.id));
           }
-          
-          if (significantChange) {
-            sendNotification(
-              "Game Alert: Significant Changes",
-              `${game.awayTeam} @ ${game.homeTeam} starts in 30 mins. Player status has changed.`
-            );
-          }
-          
-          setAlertedGames(prev => new Set(prev).add(game.id));
         }
+      } catch (err) {
+        console.error("[Dashboard] checkGames failed:", err);
       }
     };
 
@@ -1026,57 +818,61 @@ const apiSportsH2HWidgetHtml = `
     if (!games.length || !Object.keys(savedPredictions).length) return;
 
     const resolveGames = async () => {
-      for (const game of games) {
-        if (game.status === 'finished' && game.homeScore !== undefined && game.awayScore !== undefined) {
-          const prediction = savedPredictions[game.id];
-          
-          // Only process if we have a prediction and it hasn't been resolved yet
-          if (prediction && !prediction.outcome) {
-            // Skip "PASS" games or low confidence games from resolution
-            if (prediction.winner?.toUpperCase() === 'PASS' || (prediction.confidence !== undefined && prediction.confidence < 7)) {
-              continue;
-            }
+      try {
+        for (const game of games) {
+          if (game.status === 'finished' && game.homeScore !== undefined && game.awayScore !== undefined) {
+            const prediction = savedPredictions[game.id];
             
-            console.log(`[Resolution] Resolving game ${game.id}: ${game.awayTeam} vs ${game.homeTeam}`);
-            
-            const actualWinner = game.homeScore > game.awayScore ? game.homeTeam : game.awayTeam;
-            const isCorrect = prediction.winner === actualWinner;
-            
-            if (isCorrect) {
-              // Mark as correct
-              try {
-                await sportsOracle.savePrediction(game.id, {
-                  ...prediction,
-                  teams: [game.homeTeam, game.awayTeam],
-                  outcome: 'correct',
-                  actualWinner,
-                  actualScore: { home: game.homeScore, away: game.awayScore }
-                });
-                console.log(`[Resolution] Prediction Correct for ${game.id}`);
-              } catch (e) {
-                console.error("Failed to save correct outcome:", e);
+            // Only process if we have a prediction and it hasn't been resolved yet
+            if (prediction && !prediction.outcome) {
+              // Skip "PASS" games or low confidence games from resolution
+              if (prediction.winner?.toUpperCase() === 'PASS' || (prediction.confidence !== undefined && prediction.confidence < 7)) {
+                continue;
               }
-            } else {
-              // Mark as incorrect and analyze
-              // We update the doc first to avoid loops if analysis fails
-              try {
-                 await sportsOracle.savePrediction(game.id, {
-                  ...prediction,
-                  teams: [game.homeTeam, game.awayTeam],
-                  outcome: 'incorrect',
-                  actualWinner,
-                  actualScore: { home: game.homeScore, away: game.awayScore }
-                });
-                
-                // Trigger AI analysis
-                console.log(`[Resolution] Prediction Incorrect for ${game.id}. Analyzing...`);
-                await sportsOracle.analyzeLoss(game, prediction, { home: game.homeScore, away: game.awayScore });
-              } catch (e) {
-                console.error("Failed to resolve incorrect prediction:", e);
+              
+              console.log(`[Resolution] Resolving game ${game.id}: ${game.awayTeam} vs ${game.homeTeam}`);
+              
+              const actualWinner = game.homeScore > game.awayScore ? game.homeTeam : game.awayTeam;
+              const isCorrect = prediction.winner === actualWinner;
+              
+              if (isCorrect) {
+                // Mark as correct
+                try {
+                  await sportsOracle.savePrediction(game.id, {
+                    ...prediction,
+                    teams: [game.homeTeam, game.awayTeam],
+                    outcome: 'correct',
+                    actualWinner,
+                    actualScore: { home: game.homeScore, away: game.awayScore }
+                  });
+                  console.log(`[Resolution] Prediction Correct for ${game.id}`);
+                } catch (e) {
+                  console.error("Failed to save correct outcome:", e);
+                }
+              } else {
+                // Mark as incorrect and analyze
+                // We update the doc first to avoid loops if analysis fails
+                try {
+                   await sportsOracle.savePrediction(game.id, {
+                    ...prediction,
+                    teams: [game.homeTeam, game.awayTeam],
+                    outcome: 'incorrect',
+                    actualWinner,
+                    actualScore: { home: game.homeScore, away: game.awayScore }
+                  });
+                  
+                  // Trigger AI analysis
+                  console.log(`[Resolution] Prediction Incorrect for ${game.id}. Analyzing...`);
+                  await sportsOracle.analyzeLoss(game, prediction, { home: game.homeScore, away: game.awayScore });
+                } catch (e) {
+                  console.error("Failed to resolve incorrect prediction:", e);
+                }
               }
             }
           }
         }
+      } catch (err) {
+        console.error("[Dashboard] resolveGames failed:", err);
       }
     };
 
@@ -1103,7 +899,7 @@ const fetchGames = async (force: boolean = false) => {
 
     console.log(`[Dashboard] fetchGames: Parallel fetch starting for ${activeTab}...`);
 
-    const [espnGames, aiGames] = await Promise.all([
+    const [espnGames, aiGames, apiSportsGames] = await Promise.all([
       Promise.race([
         espnService.getSchedule(activeTab, selectedDate),
         new Promise<Game[]>((_, reject) =>
@@ -1129,10 +925,54 @@ const fetchGames = async (force: boolean = false) => {
           console.error(`[Dashboard] fetchGames: AI/Firestore fetch failed for ${activeTab}:`, e);
           return [];
         }),
+
+      activeTab === "NBA"
+        ? apiSportsService.getGames(selectedDate).then((res) => {
+            console.log(`[Dashboard] fetchGames: API-Sports fetch SUCCESS: ${res.length} games`);
+            return res;
+          })
+        : Promise.resolve([]),
     ]);
 
     if (Array.isArray(espnGames)) {
       fetchedGames = [...espnGames];
+    }
+
+    // Map API-Sports IDs to games
+    if (activeTab === "NBA" && Array.isArray(apiSportsGames)) {
+      if (apiSportsGames.length > 0) {
+        setApiSportsStatus({ status: 'success', count: apiSportsGames.length });
+        console.log(`[Dashboard] fetchGames: Mapping API-Sports IDs to ${fetchedGames.length} games...`);
+        fetchedGames.forEach((g) => {
+          const apiGame = apiSportsGames.find((ag) => {
+            if (!ag?.teams?.home?.name || !ag?.teams?.away?.name) return false;
+
+            const normalize = (name: string) =>
+              name?.toLowerCase().replace(/[^a-z0-9]/g, "").trim() || "";
+            const agHome = normalize(ag.teams.home.name);
+            const agAway = normalize(ag.teams.away.name);
+            const gHome = normalize(g.homeTeam);
+            const gAway = normalize(g.awayTeam);
+
+            // Fuzzy match team names
+            return (
+              (agHome === gHome && agAway === gAway) ||
+              (agHome.includes(gHome) && agAway.includes(gAway)) ||
+              (gHome.includes(agHome) && gAway.includes(agAway))
+            );
+          });
+
+          if (apiGame?.teams?.home && apiGame?.teams?.away) {
+            g.apiSportsGameId = apiGame.id;
+            g.apiSportsHomeTeamId = apiGame.teams.home.id;
+            g.apiSportsAwayTeamId = apiGame.teams.away.id;
+          }
+        });
+      } else {
+        setApiSportsStatus({ status: 'idle', count: 0, message: "No games found for this date in API-Sports" });
+      }
+    } else if (activeTab === "NBA") {
+      setApiSportsStatus({ status: 'error', count: 0, message: "Failed to fetch from API-Sports" });
     }
 
     if (aiGames && Array.isArray(aiGames) && aiGames.length > 0) {
@@ -2010,6 +1850,15 @@ const fetchGames = async (force: boolean = false) => {
   const handleManageSports = () => {
     setActiveTab("Add Sport");
   };
+ 
+ console.log("[Render Check]", {
+  authReady,
+  hasUser: !!user,
+  hasUserProfile: !!userProfile,
+  profileError,
+  activeTab,
+  gamesCount: games.length,
+});
 
   if (!authReady) {
     return (
@@ -2128,13 +1977,13 @@ const fetchGames = async (force: boolean = false) => {
   const showPaywall = !!(authReady && user && userProfile && isSportTab && (forcePaywall || !isSubscribedToSport(activeTab)));
 
   return (
-    <Layout 
-      activeTab={activeTab} 
+    <Layout
+      activeTab={activeTab}
       onTabChange={(tab) => {
         addDebugLog(`Tab Changed to: ${tab}`);
         setActiveTab(tab);
       }}
-      isAdmin={isAdminUser} 
+      isAdmin={isAdminUser}
       subscribedSports={userProfile?.subscribedSports || []}
       userProfile={userProfile}
       onCancelSubscription={handleCancelSubscription}
@@ -2150,636 +1999,86 @@ const fetchGames = async (force: boolean = false) => {
           callback={handleJoyrideCallback}
           showProgress
           showSkipButton
-          styles={{
-            options: {
-              primaryColor: '#6366f1',
-              backgroundColor: '#0f172a',
-              textColor: '#f8fafc',
-              arrowColor: '#0f172a',
-              overlayColor: 'rgba(0, 0, 0, 0.75)',
-            },
-            tooltipContainer: {
-              textAlign: 'left',
-            },
-            buttonNext: {
-              backgroundColor: '#6366f1',
-              fontSize: '14px',
-              fontWeight: 'bold',
-              borderRadius: '8px',
-              padding: '10px 20px',
-            },
-            buttonBack: {
-              color: '#94a3b8',
-              marginRight: '10px',
-            },
-            buttonSkip: {
-              color: '#94a3b8',
-            },
-          }}
         />
       )}
+
       {showPaywall ? (
-        <Paywall 
-          onSubscribe={handleSubscribe} 
-          initialSports={[...(userProfile?.subscribedSports || []), activeTab].filter(s => s !== "Add Sport")}
+        <Paywall
+          onSubscribe={handleSubscribe}
+          initialSports={[...(userProfile?.subscribedSports || []), activeTab].filter((s) => s !== "Add Sport")}
           existingSports={userProfile?.subscribedSports || []}
         />
       ) : activeTab === "Accuracy" ? (
-        <AccuracyTab 
-          predictions={allPredictions} 
-          onSyncPending={handleSyncPending}
-          isSyncing={loading}
-        />
+        <AccuracyTab predictions={allPredictions} onSyncPending={handleSyncPending} isSyncing={loading} />
       ) : activeTab === "Users" ? (
         <AdminUsersTab />
       ) : activeTab === "Admin" ? (
-        <div className="space-y-8">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8">
-            <div className="flex items-center gap-4 mb-8">
-              <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 flex items-center justify-center">
-                <Shield className="w-6 h-6 text-indigo-500" />
-              </div>
-              <div>
-                <h2 className="text-2xl font-bold text-white">System Diagnostics</h2>
-                <p className="text-slate-400">Verify API connections and system health.</p>
-              </div>
-            </div>
-
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-            <h3 className="text-lg font-bold text-white mb-4">Debug Console (Last 50 Events)</h3>
-            <div className="bg-black rounded-lg p-4 font-mono text-xs h-64 overflow-y-auto space-y-1">
-              {debugLogs.map((log, i) => (
-                <div key={i} className="text-slate-400 border-b border-slate-900 pb-1">
-                  {log}
-                </div>
-              ))}
-              {debugLogs.length === 0 && <div className="text-slate-600 italic">No logs yet...</div>}
-            </div>
-            <button 
-              onClick={() => {
-                localStorage.removeItem('debug_logs');
-                setDebugLogs([]);
-              }}
-              className="mt-4 px-4 py-2 bg-rose-600/20 text-rose-400 rounded-lg text-xs font-bold hover:bg-rose-600/30 transition-colors"
-            >
-              Clear Logs
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-slate-800/50 rounded-2xl p-6 border border-slate-700">
-                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-indigo-400" />
-                 
-              <div className="bg-slate-800/50 rounded-2xl p-6 border border-slate-700">
-                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                  <Shield className="w-5 h-5 text-indigo-400" />
-                  Paywall Testing
-                </h3>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-slate-900/50 border border-slate-800 rounded-xl">
-                    <div>
-                      <h3 className="text-sm font-medium text-white">Force Paywall</h3>
-                      <p className="text-xs text-slate-400">Show paywall even for admins/bypassed users.</p>
-                    </div>
-                    <button
-                      onClick={() => setForcePaywall(!forcePaywall)}
-                      className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${forcePaywall ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
-                    >
-                      {forcePaywall ? 'Paywall Forced' : 'Force Paywall'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-slate-800/50 rounded-2xl p-6 border border-slate-700">
-                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                  <CalendarIcon className="w-5 h-5 text-amber-400" />
-                  Schedule & Cache
-                </h3>
-                <div className="space-y-4">
-                  <button
-                    onClick={() => {
-                      espnService.clearCache();
-                                           fetchGames();
-                      setToast({ message: "Cache cleared. Refreshing schedule...", type: "info" });
-                    }}
-                    className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
-                  >
-                    <Activity className="w-5 h-5" />
-                    Force Refresh Schedule
-                  </button>
-                  <p className="text-xs text-slate-500 text-center">
-                    Clears local cache and re-fetches from all providers.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8">
-            <h3 className="text-xl font-bold text-white mb-6">Recent System Logs</h3>
-            <div className="bg-black/40 rounded-xl p-4 font-mono text-xs text-slate-400 h-64 overflow-y-auto space-y-1">
-              <p className="text-indigo-400">[System] Diagnostics panel active.</p>
-              <p>[Auth] User: {user?.email}</p>
-              <p>[Profile] Role: {userProfile?.role}</p>
-              <p>[Status] Active Tab: {activeTab}</p>
-              <p>[Status] Games Loaded: {games.length}</p>
-              {lastTestResult && (
-                <>
-                 
-                  <p>Key: {lastTestResult.keyInfo?.prefix}... ({lastTestResult.keyInfo?.length} chars)</p>
-                  <p>NBA: <span className={lastTestResult.results?.nba?.status === 'success' ? 'text-green-400' : 'text-red-400'}>{lastTestResult.results?.nba?.status?.toUpperCase()}</span> (Code: {lastTestResult.results?.nba?.code})</p>
-                  <p>MLB: <span className={lastTestResult.results?.mlb?.status === 'success' ? 'text-green-400' : 'text-red-400'}>{lastTestResult.results?.mlb?.status?.toUpperCase()}</span> (Code: {lastTestResult.results?.mlb?.code})</p>
-                  <p>Odds: <span className={lastTestResult.results?.odds?.status === 'success' ? 'text-green-400' : 'text-red-400'}>{lastTestResult.results?.odds?.status?.toUpperCase()}</span> (Code: {lastTestResult.results?.odds?.code})</p>
-                  
-                  <div className="mt-1 flex flex-wrap gap-2">
-                    <span className="text-[10px] text-slate-500">Active Sports:</span>
-                    {Object.entries(lastTestResult.results?.otherSports || {}).map(([sport, status]) => (
-                      <span key={sport} className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400">
-                        {sport.toUpperCase()}
-                      </span>
-                    ))}
-                  </div>
-                  
-                  {lastTestResult.results?.nba?.message && lastTestResult.results?.nba?.status !== 'success' && (
-                    <p className="text-red-400 mt-1">Error: {lastTestResult.results.nba.message}</p>
-                  )}
-                </>
-              )}
-              {error && <p className="text-red-400">[Error] {error}</p>}
-            </div>
-          </div>
-        </div>
+        <AdminTab debugLogs={debugLogs} />
       ) : (
         <>
           <div className="mb-6 bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 flex items-start sm:items-center gap-3">
             <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5 sm:mt-0" />
             <p className="text-sm text-amber-200/80 leading-relaxed">
-              <strong className="text-amber-400 font-semibold mr-1">Betting Disclaimer:</strong> 
-              These AI-generated insights are <span className="underline decoration-amber-500/50 underline-offset-2">predictions, not guarantees</span>. 
-              Sports betting involves significant financial risk. Please bet responsibly and only wager what you can afford to lose.
+              <strong className="text-amber-400 font-semibold mr-1">Betting Disclaimer:</strong>
+              These AI-generated insights are predictions, not guarantees.
             </p>
           </div>
 
-          <div className="mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-2xl font-bold text-white">
-              {activeTab} Schedule
-            </h2>
-            {isAdminUser && (
-          
-            
-            )}
-            {isAdminUser && (
-              <button
-                onClick={() => {
-                  espnService.clearCache();
-                  fetchGames();
-                  setToast({ message: "Cache cleared. Refreshing schedule...", type: "info" });
-                }}
-                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs font-bold rounded-lg border border-slate-700 transition-all flex items-center gap-2"
-                title="Clear Cache & Refresh"
-              >
-                <Activity className="w-3 h-3" />
-                Refresh
-              </button>
-            )}
-          </div>
-          <p className="text-slate-400 text-sm flex items-center">
-            <CalendarIcon className="w-4 h-4 mr-2" />
-            {format(selectedDate, "EEEE, MMMM do, yyyy")}
-          </p>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2">
-            <div className="flex items-center text-[10px] uppercase tracking-wider font-mono">
-              <span className="text-slate-500 mr-2">Kalshi:</span>
-              <span className={cn(
-                "flex items-center",
-                kalshiStatus === "connected" ? "text-emerald-400" : 
-                kalshiStatus === "error" ? "text-red-400" : "text-slate-600"
-              )}>
-                <div className={cn(
-                  "w-1.5 h-1.5 rounded-full mr-1.5",
-                  kalshiStatus === "connected" ? "bg-emerald-400 animate-pulse" : 
-                  kalshiStatus === "error" ? "bg-red-400" : "bg-slate-600"
-                )} />
-                {kalshiStatus}
-              </span>
-            </div>
-            <div className="flex items-center text-[10px] uppercase tracking-wider font-mono">
-           
-                onClick={async () => {
-                  try {
-                    const response = await fetch(`/api/sportradar/odds?sportId=${activeTab === 'NBA' ? 'sr:sport:2' : 'sr:sport:3'}&date=${format(selectedDate, "yyyy-MM-dd")}`, {
-                      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-                    });
-                    const data = await response.json();
-                    if (response.ok) {
-                      alert(`Sportradar Success: Received ${data.sport_events?.length || 0} events for ${activeTab}`);
-                      console.log("Sportradar Data:", data);
-                    } else {
-                      alert(`Sportradar Error: ${data.error} - ${data.details}`);
-                    }
-                  } catch (e: any) {
-                    alert(`Sportradar Fetch Failed: ${e.message}`);
-                  }
-                }}
-                className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 transition-colors"
-              >
-                Test Odds
-              </button>
-              <button 
-                onClick={handleTestSportradar}
-                disabled={testingSportradar}
-                className="ml-2 text-indigo-400 hover:text-indigo-300 disabled:opacity-50 flex items-center gap-1"
-              >
-               
-            </div>
-            <div className="flex items-center text-[10px] uppercase tracking-wider font-mono">
-              <span className="text-slate-500 mr-2">Cache:</span>
-              <button 
-                onClick={() => {
-                  espnService.clearCache();
-                  fetchGames();
-                  setToast({ message: "Cache cleared. Refreshing schedule...", type: "info" });
-                }}
-                className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 transition-colors"
-              >
-                Force Refresh
-              </button>
-            </div>
-            <div className="flex items-center text-[10px] uppercase tracking-wider font-mono">
-              <span className="text-slate-500 mr-2">Predictions:</span>
-              <span className={cn(
-                "flex items-center",
-                Object.keys(savedPredictions).length > 0 ? "text-indigo-400" : "text-slate-600"
-              )}>
-                <div className={cn(
-                  "w-1.5 h-1.5 rounded-full mr-1.5",
-                  Object.keys(savedPredictions).length > 0 ? "bg-indigo-400" : "bg-slate-600"
-                )} />
-                {Object.keys(savedPredictions).length > 0 ? `${Object.keys(savedPredictions).length} Active` : "None"}
-              </span>
-            </div>
-          </div>
-        </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            <div className="flex items-center space-x-1 bg-slate-900/50 p-1 rounded-xl border border-slate-800 mr-4">
-              <button
-                onClick={() => setMainTab("analysis")}
-                className={cn(
-                  "px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2",
-                  mainTab === "analysis" 
-                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" 
-                    : "text-slate-400 hover:text-white hover:bg-slate-800"
-                )}
-              >
-                <Brain className="w-4 h-4" />
-                Analysis
-              </button>
-              <button
-                onClick={() => setMainTab("bankroll")}
-                className={cn(
-                  "px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2",
-                  mainTab === "bankroll" 
-                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" 
-                    : "text-slate-400 hover:text-white hover:bg-slate-800"
-                )}
-              >
-                <TrendingUp className="w-4 h-4" />
-                Bankroll
-              </button>
-            </div>
+          <DashboardHeader
+            activeTab={activeTab}
+            isAdminUser={isAdminUser}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            handleRefresh={handleRefresh}
+            analyzing={analyzing}
+            loading={loading}
+            handleAutoAnalyze={handleAutoAnalyze}
+            setIsBriefingOpen={setIsBriefingOpen}
+            handleImportSchedule={handleImportSchedule}
+            handleStopAnalysis={handleStopAnalysis}
+            apiSportsStatus={apiSportsStatus}
+          />
 
-            {user ? (
-              <div className="flex items-center gap-3 mr-2">
-                <div className="flex flex-col items-end">
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-full border border-slate-700">
-                    {user.photoURL ? (
-                      <img src={user.photoURL} alt={user.displayName || ""} className="w-5 h-5 rounded-full" referrerPolicy="no-referrer" />
-                    ) : (
-                      <UserIcon className="w-4 h-4 text-slate-400" />
-                    )}
-                    <span className="text-xs text-slate-300 font-medium">{user.displayName || user.email}</span>
-                  </div>
-                  {userProfile?.subscriptionStatus === 'active' && (
-                    <div className="flex gap-1 mt-1">
-                      {userProfile.subscribedSports?.map(s => (
-                        <span key={s} className="text-[8px] bg-amber-500/20 text-amber-500 px-1.5 rounded uppercase font-bold border border-amber-500/30">
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <button 
-                  onClick={logout}
-                  className="p-2 text-slate-400 hover:text-white transition-colors"
-                  title="Logout"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
-              </div>
+          {isAdminUser && (
+            <LocksOfTheDay
+              games={filteredGames}
+              predictions={allPredictions}
+              selectedDate={selectedDate}
+              league={activeTab}
+              onSelectLeague={setActiveTab}
+            />
+          )}
+
+          <div className="py-8">
+            {mainTab === "bankroll" ? (
+              <BankrollTracker />
             ) : (
-              <button 
-                onClick={loginWithGoogle}
-                className="flex items-center px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium transition-colors border border-slate-700 mr-2"
-              >
-                <LogIn className="w-4 h-4 mr-2" />
-                Login
-              </button>
-            )}
-
-            {isAdminUser && (
-              <SportControls 
-                league={activeTab}
-                analyzing={analyzing}
+              <GameGrid
                 loading={loading}
-                onAnalyze={(force) => handleAutoAnalyze(force)}
-                onDailyBriefing={() => setIsBriefingOpen(true)}
-                onImportSchedule={handleImportSchedule}
-                onStopAnalysis={handleStopAnalysis}
+                error={error}
+                filteredGames={filteredGames}
+                savedPredictions={savedPredictions}
+                analyzing={analyzing}
+                analysisProgress={analysisProgress}
+                isAdminUser={isAdminUser}
+                handleReanalyzeSingleGame={handleReanalyzeSingleGame}
+                handleDiscussWithSnark={handleDiscussWithSnark}
+                handleLogBet={handleLogBet}
               />
             )}
-
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={() => setSelectedDate(addDays(new Date(), -1))}
-                className={`px-4 py-2 rounded-lg text-sm transition-colors ${
-                  format(selectedDate, 'yyyy-MM-dd') === format(addDays(new Date(), -1), 'yyyy-MM-dd') 
-                  ? 'bg-slate-700 text-white border border-slate-600' 
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
-                }`}
-              >
-                Yesterday
-              </button>
-              <button 
-                onClick={() => setSelectedDate(new Date())}
-                className={`px-4 py-2 rounded-lg text-sm transition-colors ${
-                  format(selectedDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd') 
-                  ? 'bg-slate-700 text-white border border-slate-600' 
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
-                }`}
-              >
-                Today
-              </button>
-              <button 
-                onClick={() => setSelectedDate(addDays(new Date(), 1))}
-                className={`px-4 py-2 rounded-lg text-sm transition-colors ${
-                  format(selectedDate, 'yyyy-MM-dd') === format(addDays(new Date(), 1), 'yyyy-MM-dd')
-                  ? 'bg-slate-700 text-white border border-slate-600'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
-                }`}
-              >
-                Tomorrow
-              </button>
-
-              <button 
-                onClick={handleRefresh}
-                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg transition-colors border border-slate-700"
-                title="Refresh Schedule"
-              >
-                <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
-              </button>
-            </div>
           </div>
-      </div>
-
-      <div className="flex flex-wrap justify-end items-center gap-4 mb-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-slate-400">Sort:</span>
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
-            className="bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors"
-          >
-            <option value="time">Game Time</option>
-            <option value="edge">Highest Edge (Value)</option>
-            <option value="confidence">AI Confidence</option>
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-slate-400">Filter:</span>
-          <select
-            value={timeFilter}
-            onChange={(e) => setTimeFilter(e.target.value as any)}
-            className="bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors"
-          >
-            <option value="all">All Games</option>
-            <option value="early">Early Games (Before 4 PM)</option>
-            <option value="afternoon">Afternoon Games (4 PM - 7 PM)</option>
-            <option value="late">Late Games (After 7 PM)</option>
-          </select>
-        </div>
-      </div>
-
-      {Object.entries(analyzingMap).map(([league, isAnalyzing]) => {
-        const progress = analysisProgressMap[league];
-        if (!isAnalyzing || !progress) return null;
-        
-        return (
-          <div key={league} className="mb-6">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg animate-in slide-in-from-top-2">
-              <div className="flex justify-between items-center mb-2">
-                <div className="flex items-center gap-3">
-                  <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
-                  <span className="font-bold text-white">AI Analysis in Progress ({league})</span>
-                </div>
-                <div className="flex items-center gap-4">
-                  <span className="text-sm text-slate-400 font-mono">
-                    {progress.current} / {progress.total} Games
-                  </span>
-                  {league === activeTab && (
-                    <button 
-                      onClick={handleStopAnalysis}
-                      className="text-xs text-rose-500 hover:text-rose-400 font-bold uppercase tracking-wider"
-                    >
-                      Stop
-                    </button>
-                  )}
-                </div>
-              </div>
-              
-              <div className="w-full bg-slate-800 rounded-full h-2 mb-2 overflow-hidden">
-                <div 
-                  className="bg-indigo-500 h-2 rounded-full transition-all duration-500 ease-out"
-                  style={{ width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%` }}
-                />
-              </div>
-              
-              <p className="text-xs text-slate-400 text-center animate-pulse">
-                {progress.message}
-              </p>
-            </div>
-          </div>
-        );
-      })}
-
-      {/* Sub-tabs for NCAA */}
-      {activeTab === "NCAA" && (
-        <div className="mb-6">
-          <div className="flex items-center gap-1 p-1 bg-slate-900/50 border border-slate-800 rounded-xl w-fit">
-            <button
-              onClick={() => setNcaaSubTab("schedule")}
-              className={cn(
-                "px-6 py-2 rounded-lg text-sm font-bold transition-all",
-                ncaaSubTab === "schedule" 
-                  ? "bg-indigo-600 text-white shadow-lg" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-              )}
-            >
-              Daily Schedule
-            </button>
-            <button
-              onClick={() => setNcaaSubTab("bracket")}
-              className={cn(
-                "px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2",
-                ncaaSubTab === "bracket" 
-                  ? "bg-amber-500 text-slate-900 shadow-lg" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-              )}
-            >
-              <Trophy className="w-4 h-4" />
-              Tournament Bracket
-            </button>
-          </div>
-        </div>
+        </>
       )}
 
-      {/* Locks of the Day Section - Admin Only */}
-      {isAdminUser && (
-        <LocksOfTheDay games={filteredGames} predictions={allPredictions} selectedDate={selectedDate} league={activeTab} onSelectLeague={setActiveTab} />
-      )}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
-{activeTab === "NBA" && (
-  <NbaApiSportsPanel
-    gamesWidgetHtml={apiSportsGamesWidgetHtml}
-    gameWidgetHtml={apiSportsGameWidgetHtml}
-    h2hWidgetHtml={apiSportsH2HWidgetHtml}
-  />
-)}
-
-      <div className="py-8">
-        {mainTab === "bankroll" ? (
-          <BankrollTracker />
-        ) : (
-          <>
-            {activeTab === "NCAA" && ncaaSubTab === "bracket" ? (
-          loadingBracket ? (
-            <div className="flex flex-col items-center justify-center py-20">
-              <Loader2 className="w-12 h-12 text-amber-500 animate-spin mb-4" />
-              <p className="text-slate-400">Fetching the latest March Madness bracket...</p>
-            </div>
-          ) : bracket ? (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <TournamentTracker bracket={bracket} />
-              <Bracket bracket={bracket} />
-            </div>
-          ) : (
-            <div className="text-center py-20 bg-slate-900/50 border border-slate-800 rounded-2xl">
-              <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-              <h3 className="text-xl font-bold text-white mb-2">Bracket Unavailable</h3>
-              <p className="text-slate-400 max-w-md mx-auto mb-6">
-                We couldn't retrieve the bracket data at this time. Please try again later.
-              </p>
-              <button
-                onClick={fetchBracket}
-                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors flex items-center gap-2 mx-auto"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Retry Fetching Bracket
-              </button>
-            </div>
-          )
-        ) : loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="bg-slate-900 border border-slate-800 rounded-xl h-[280px] animate-pulse">
-                <div className="p-6 space-y-4">
-                  <div className="flex justify-between">
-                    <div className="h-4 w-20 bg-slate-800 rounded"></div>
-                    <div className="h-4 w-24 bg-slate-800 rounded"></div>
-                  </div>
-                  <div className="flex justify-between items-center pt-4">
-                    <div className="h-8 w-24 bg-slate-800 rounded"></div>
-                    <div className="h-4 w-8 bg-slate-800 rounded"></div>
-                    <div className="h-8 w-24 bg-slate-800 rounded"></div>
-                  </div>
-                  <div className="h-4 w-full bg-slate-800 rounded mt-8"></div>
-                  <div className="h-12 w-full bg-slate-800 rounded mt-4"></div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : error ? (
-          <div className="text-center py-20 bg-slate-900/50 border border-slate-800 rounded-2xl">
-            <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-white mb-2">Something went wrong</h3>
-            <p className="text-slate-400 max-w-md mx-auto mb-6">
-              {error}
-            </p>
-            <button 
-              onClick={() => fetchGames()}
-              className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors border border-slate-700"
-            >
-              Try Again
-            </button>
-          </div>
-        ) : filteredGames.length === 0 ? (
-          <div className="text-center py-20 bg-slate-900/50 border border-slate-800 rounded-2xl">
-            <CalendarIcon className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-white mb-2">No games found</h3>
-            <p className="text-slate-400 max-w-md mx-auto mb-6">
-              We couldn't find any {activeTab} games for {format(selectedDate, "MMMM do, yyyy")}. 
-              The season may not have started yet, or it could be out of season. 
-              Try another date or league.
-            </p>
-            <button 
-              onClick={() => fetchGames()}
-              className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors border border-slate-700"
-            >
-              Refresh Schedule
-            </button>
-          </div>
-        ) : (
-          <GameGridErrorBoundary>
-            <div id="game-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-              {filteredGames.map((game, index) => (
-                <GameCard 
-                  key={game.id || `game-${index}`} 
-                  game={game} 
-                  prediction={game.id ? savedPredictions[game.id] : null}
-                  isAnalyzing={analyzing && analysisProgress?.analyzingGameIds?.includes(game.id)}
-                  onReanalyze={isAdminUser ? handleReanalyzeSingleGame : undefined}
-                  onDiscuss={() => handleDiscussWithSnark(game)}
-                  onLogBet={handleLogBet}
-                />
-              ))}
-            </div>
-          </GameGridErrorBoundary>
-        )}
-          </>
-        )}
-      </div>
-    </>
-  )}
-
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-        />
-      )}
-      
       {!showPaywall && <ChatPanel games={games} predictions={allPredictions} />}
-      
-      <DailyBriefingModal 
-        isOpen={isBriefingOpen} 
-        onClose={() => setIsBriefingOpen(false)} 
-        league={activeTab} 
-        date={selectedDate} 
+
+      <DailyBriefingModal
+        isOpen={isBriefingOpen}
+        onClose={() => setIsBriefingOpen(false)}
+        league={activeTab}
+        date={selectedDate}
         games={games}
       />
     </Layout>

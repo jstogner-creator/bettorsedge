@@ -16,24 +16,43 @@ export default function App() {
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
     let isMounted = true;
+    let authTimeout: NodeJS.Timeout;
 
     const init = async () => {
+      console.log("[App] Initialization started");
+      
+      // Safety timeout: if auth doesn't ready in 12 seconds, force it
+      // This ensures the app renders even if Firebase is slow or hangs
+      authTimeout = setTimeout(() => {
+        if (isMounted && !isAuthReady) {
+          console.warn("[App] Auth initialization timed out. Forcing ready state.");
+          setIsAuthReady(true);
+        }
+      }, 12000);
+
       try {
-        console.log("[App] Before handleGoogleRedirectResult");
-        await handleGoogleRedirectResult();
+        console.log("[App] Checking for redirect result...");
+        const redirectUser = await handleGoogleRedirectResult();
+        if (redirectUser && isMounted) {
+          console.log("[App] Found user from redirect:", redirectUser.email);
+          setUser(redirectUser);
+        }
       } catch (err) {
         console.error("[App] Redirect result error:", err);
       }
 
       if (!isMounted) return;
 
-      unsubscribe = onAuthStateChanged(getAuthInstance(), (currentUser) => {
+      console.log("[App] Attaching onAuthStateChanged listener");
+      const auth = getAuthInstance();
+      unsubscribe = onAuthStateChanged(auth, (currentUser) => {
         console.log(
           "[App] Auth State Changed:",
           currentUser ? `Logged In (${currentUser.email})` : "Logged Out"
         );
 
         if (!isMounted) return;
+        clearTimeout(authTimeout);
         setUser(currentUser);
         setIsAuthReady(true);
       });
@@ -44,6 +63,7 @@ export default function App() {
     return () => {
       isMounted = false;
       if (unsubscribe) unsubscribe();
+      if (authTimeout) clearTimeout(authTimeout);
     };
   }, []);
 

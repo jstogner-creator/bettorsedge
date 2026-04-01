@@ -142,6 +142,19 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["status", "timestamp"]
+    },
+    "LoginError": {
+      "title": "Login Error",
+      "description": "Log of authentication errors.",
+      "type": "object",
+      "properties": {
+        "error": { "type": "string" },
+        "code": { "type": "string" },
+        "context": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "userAgent": { "type": "string" }
+      },
+      "required": ["error", "code", "context", "timestamp"]
     }
   },
   "firestore": {
@@ -176,6 +189,10 @@
     "/source_health_checks/{checkId}": {
       "schema": "SourceHealthCheck",
       "description": "Collection of source health checks."
+    },
+    "/login_errors/{errorId}": {
+      "schema": "LoginError",
+      "description": "Collection of login errors."
     }
   }
 }

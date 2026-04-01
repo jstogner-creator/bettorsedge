@@ -141,32 +141,116 @@ async function startServer() {
     }
   };
   
-  // Stripe success page for AI Studio dev mode
+  // Stripe success/cancel page for AI Studio
   app.get("/success", (req, res) => {
+    const isCancelled = req.query.cancelled === 'true';
+    const title = isCancelled ? "Checkout Cancelled" : "Success!";
+    const message = isCancelled 
+      ? "Your checkout was cancelled. No charges were made. You can now close this window and return to the app."
+      : "Your subscription is active. You can now close this window and return to the Bettors Edge app.";
+    const iconColor = isCancelled ? "#f43f5e" : "#4f46e5";
+    const iconSvg = isCancelled 
+      ? `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: white;"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`
+      : `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: white;"><path d="M20 6 9 17l-5-5"/></svg>`;
+
     res.send(`
+      <!DOCTYPE html>
       <html>
         <head>
-          <title>Subscription Successful</title>
+          <title>${title}</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <style>
-            body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: #0f172a; color: white; text-align: center; padding: 20px; }
-            .card { background: #1e293b; padding: 40px; border-radius: 16px; border: 1px solid #334155; max-width: 400px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-            h1 { color: #818cf8; margin-bottom: 16px; }
-            p { color: #94a3b8; line-height: 1.6; margin-bottom: 24px; }
-            .btn { background: #4f46e5; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; cursor: pointer; text-decoration: none; transition: background 0.2s; }
-            .btn:hover { background: #4338ca; }
+            body { 
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+              display: flex; 
+              flex-direction: column; 
+              align-items: center; 
+              justify-content: center; 
+              min-height: 100vh; 
+              background: #020617; 
+              color: white; 
+              text-align: center; 
+              padding: 20px; 
+              margin: 0;
+            }
+            .card { 
+              background: #0f172a; 
+              padding: 40px; 
+              border-radius: 24px; 
+              border: 1px solid #1e293b; 
+              max-width: 440px; 
+              width: 100%;
+              box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); 
+              animation: slideUp 0.5s ease-out;
+            }
+            @keyframes slideUp {
+              from { opacity: 0; transform: translateY(20px); }
+              to { opacity: 1; transform: translateY(0); }
+            }
+            .icon {
+              width: 64px;
+              height: 64px;
+              background: ${iconColor};
+              border-radius: 20px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              margin: 0 auto 24px;
+              box-shadow: 0 0 20px ${iconColor}66;
+            }
+            h1 { color: #f8fafc; margin-bottom: 16px; font-size: 24px; font-weight: 800; letter-spacing: -0.025em; }
+            p { color: #94a3b8; line-height: 1.6; margin-bottom: 32px; font-size: 16px; }
+            .btn { 
+              background: #4f46e5; 
+              color: white; 
+              border: none; 
+              padding: 14px 28px; 
+              border-radius: 12px; 
+              font-weight: 700; 
+              cursor: pointer; 
+              text-decoration: none; 
+              transition: all 0.2s; 
+              display: inline-block;
+              font-size: 15px;
+              box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            }
+            .btn:hover { background: #4338ca; transform: translateY(-1px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+            .btn:active { transform: translateY(0); }
+            .status { margin-top: 24px; font-size: 12px; color: #475569; font-weight: 500; }
           </style>
         </head>
         <body>
           <div class="card">
-            <h1>Subscription Successful!</h1>
-            <p>Your subscription has been processed. You can now close this tab and return to the Bettors Edge app in AI Studio. Your dashboard will update automatically.</p>
-            <button onclick="window.close()" class="btn">Close Tab</button>
+            <div class="icon">
+              ${iconSvg}
+            </div>
+            <h1>${title}</h1>
+            <p>${message}</p>
+            <button onclick="window.close()" class="btn">Return to App</button>
+            <div class="status" id="status">Closing automatically in 5 seconds...</div>
           </div>
           <script>
-            // Try to notify the opener if possible
+            // Notify the opener (AI Studio iframe)
             if (window.opener) {
-              window.opener.postMessage({ type: 'STRIPE_SUCCESS' }, '*');
+              const messageType = ${isCancelled ? "'STRIPE_CANCELLED'" : "'STRIPE_SUCCESS'"};
+              window.opener.postMessage({ type: messageType }, '*');
+              console.log('Notified opener of ' + messageType);
+            } else {
+              console.warn('No opener found to notify');
             }
+
+            // Auto-close countdown
+            let seconds = 5;
+            const statusEl = document.getElementById('status');
+            const interval = setInterval(() => {
+              seconds--;
+              if (seconds <= 0) {
+                clearInterval(interval);
+                window.close();
+              } else {
+                statusEl.textContent = 'Closing automatically in ' + seconds + ' seconds...';
+              }
+            }, 1000);
           </script>
         </body>
       </html>
@@ -376,13 +460,8 @@ async function startServer() {
       
       console.log(`[Stripe] Using App URL for redirects: ${appUrl} (isDev: ${isDev}, isPre: ${isPre})`);
 
-      const successUrl = isDev 
-        ? `${appUrl}/success?session_id={CHECKOUT_SESSION_ID}`
-        : `${appUrl}/dashboard?session_id={CHECKOUT_SESSION_ID}`;
-      
-      const cancelUrl = isDev
-        ? `${appUrl}/success?cancelled=true`
-        : `${appUrl}/dashboard`;
+      const successUrl = `${appUrl}/success?session_id={CHECKOUT_SESSION_ID}`;
+      const cancelUrl = `${appUrl}/success?cancelled=true`;
 
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ["card"],

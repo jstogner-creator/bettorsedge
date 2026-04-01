@@ -23,6 +23,9 @@ export interface Game {
   awayScore?: number;
   kalshiTicker?: string;
   kalshiMarketTitle?: string;
+  apiSportsGameId?: number;
+  apiSportsHomeTeamId?: number;
+  apiSportsAwayTeamId?: number;
   kalshiOdds?: {
     yes: number;
     no: number;
@@ -149,6 +152,20 @@ export interface Prediction {
     homeOU?: string;
     awayOU?: string;
   };
+
+  // Detailed Matchup Data
+  playerMatchups?: {
+    matchup: string;
+    analysis: string;
+    advantage: string;
+  }[];
+
+  teamStatsComparison?: {
+    category: string;
+    homeValue: number | string;
+    awayValue: number | string;
+    advantage: 'home' | 'away' | 'neutral';
+  }[];
 
   // Market Odds from Sportradar
   marketOdds?: {

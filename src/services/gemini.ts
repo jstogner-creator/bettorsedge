@@ -1224,7 +1224,7 @@ OPERATIONAL GUIDELINES:
           "confidence": 1-10,
           "winProbability": 0.00-1.00,
           "scorePrediction": {"home": 105, "away": 98},
-          "reasoning": "Direct summary of edge.",
+          "reasoning": "Direct summary of edge. MUST be 300 characters or less.",
           "devilsAdvocate": "The strongest case for the opposing team.",
           "marketSentiment": "Summary of line movement and sharp vs public alignment.",
           "situationalFactors": "Rest, travel, and schedule impact.",
@@ -1239,6 +1239,20 @@ OPERATIONAL GUIDELINES:
             "summary": "Overall pitching analysis summary."
           },
           "previousMatchups": [{"date": "YYYY-MM-DD", "homeTeam": "Name", "awayTeam": "Name", "homeScore": 100, "awayScore": 90}],
+          "matchupRankings": {
+            "homeRank": 5,
+            "awayRank": 12,
+            "homeOffenseRank": 3,
+            "awayOffenseRank": 15,
+            "homeDefenseRank": 10,
+            "awayDefenseRank": 8
+          },
+          "playerMatchups": [
+            {"matchup": "Player A vs Player B", "analysis": "Detailed breakdown", "advantage": "Home Team"}
+          ],
+          "teamStatsComparison": [
+            {"category": "PPG", "homeValue": 115.4, "awayValue": 110.2, "advantage": "home"}
+          ],
           "trends": {
             "homeATS": "5-2 ATS last 10",
             "awayATS": "3-4 ATS last 10",
