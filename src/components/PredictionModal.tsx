@@ -308,6 +308,23 @@ export function PredictionModal({ game, prediction, onClose }: PredictionModalPr
                     </li>
                   ))}
                 </ul>
+                
+                {prediction.appliedLessons && prediction.appliedLessons.length > 0 && (
+                  <div className="mt-6">
+                    <h3 className="text-sm font-mono text-emerald-400 uppercase mb-3 flex items-center">
+                      <Zap className="w-4 h-4 mr-2" />
+                      AI Learning Adjustments
+                    </h3>
+                    <ul className="space-y-2">
+                      {prediction.appliedLessons.map((lesson, i) => (
+                        <li key={i} className="flex items-start text-sm text-slate-300 bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20">
+                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-1.5 mr-2 flex-shrink-0" />
+                          {lesson}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
               <div>
                 <h3 className="text-sm font-mono text-slate-400 uppercase mb-3 flex items-center justify-between">

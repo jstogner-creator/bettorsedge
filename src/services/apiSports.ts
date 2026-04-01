@@ -77,6 +77,42 @@ class ApiSportsService {
       return [];
     }
   }
+
+  async getTeamStats(teamId: number, season: string): Promise<any> {
+    try {
+      const token = await getIdToken();
+      const response = await axios.get(`${this.baseUrl}/teams/statistics`, {
+        params: { id: teamId, season },
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+
+      if (response.data && response.data.response) {
+        return response.data.response;
+      }
+      return null;
+    } catch (error) {
+      console.error(`[API-Sports Service] Error fetching stats for team ${teamId}:`, error);
+      return null;
+    }
+  }
+
+  async getInjuries(teamId: number, season: string): Promise<any[]> {
+    try {
+      const token = await getIdToken();
+      const response = await axios.get(`${this.baseUrl}/injuries`, {
+        params: { team: teamId, season },
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+
+      if (response.data && response.data.response) {
+        return response.data.response;
+      }
+      return [];
+    } catch (error) {
+      console.error(`[API-Sports Service] Error fetching injuries for team ${teamId}:`, error);
+      return [];
+    }
+  }
 }
 
 export const apiSportsService = new ApiSportsService();

@@ -42,6 +42,14 @@ export interface Game {
     underOdds?: number;
     source?: string;
   };
+  allBookmakers?: Array<{
+    id: number;
+    name: string;
+    homeML?: number;
+    awayML?: number;
+    spread?: number;
+    total?: number;
+  }>;
 }
 
 export interface Prediction {
@@ -58,6 +66,7 @@ export interface Prediction {
   situationalFactors?: string;
   hedgingAdvice: string;
   keyFactors: string[];
+  appliedLessons?: string[];
   injuries: {
     team: string;
     player: string;
@@ -167,7 +176,7 @@ export interface Prediction {
     advantage: 'home' | 'away' | 'neutral';
   }[];
 
-  // Market Odds from Sportradar
+  // Market Odds
   marketOdds?: {
     homeML?: number;
     awayML?: number;
@@ -184,8 +193,6 @@ export interface Prediction {
   sourceAudit?: {
     googleDriveAccessed: boolean;
     nbaOfficialAccessed: boolean;
-    sportradarInjuriesUsed?: boolean;
-    sportradarSummaryUsed?: boolean;
     lastAuditTime: string;
     auditNotes?: string;
   };

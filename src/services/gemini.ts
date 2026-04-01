@@ -5,7 +5,7 @@ import { doc, getDoc, setDoc, addDoc, collection, query, where, getDocs, limit, 
 import { Game, Prediction, TournamentBracket } from "../types";
 import { logError, logApiCall, logSourceAudit } from "./logger";
 import { espnService } from "./espn";
-import { sportradarService } from "./sportradar";
+import { apiSportsService } from "./apiSports";
 import { NBA_ROSTER_DATABASE, GLOBAL_INJURY_LINKS, GLOBAL_ROSTER_LINKS } from "../data/nbaRosters";
 import { handleFirestoreError, OperationType } from "../lib/firestoreErrors";
 
@@ -964,131 +964,52 @@ export class SportsOracle {
         .then(games => games.filter(g => g.status === 'finished'))
         .catch(e => { console.warn("Failed to fetch yesterday's results", e); return []; });
 
-      const sportradarSummaryPromise = (game.league === 'NBA' || game.league === 'MLB') 
-        ? sportradarService.findGame(game.homeTeam, game.awayTeam, new Date(gameDateStr), game.league)
-            .then(async g => {
-              if (!g) return null;
-              const [summary, markets, h2h] = await Promise.all([
-                sportradarService.getGameSummary(g.id, game.league),
-                sportradarService.getEventMarkets(g.id),
-                (g.homeId && g.awayId) ? sportradarService.getHeadToHead(g.homeId, g.awayId, game.league) : Promise.resolve(null)
-              ]);
-              return { summary, markets, h2h };
-            })
-            .catch(e => { console.warn(`Failed to fetch Sportradar ${game.league} data`, e); return null; })
-        : Promise.resolve(null);
+      let apiSportsHomeStatsPromise = Promise.resolve(null);
+      let apiSportsAwayStatsPromise = Promise.resolve(null);
+      let apiSportsHomeInjuriesPromise = Promise.resolve([]);
+      let apiSportsAwayInjuriesPromise = Promise.resolve([]);
 
-      const sportradarOddsPromise = (game.league === 'NBA' || game.league === 'MLB')
-        ? sportradarService.getDailyOdds(game.league, gameDateStr)
-            .then(oddsMap => {
-              const home = game.homeTeam.toLowerCase();
-              const away = game.awayTeam.toLowerCase();
-              
-              const keysToTry = [`${home}_vs_${away}`, `${away}_vs_${home}`];
-              let match = null;
-              for (const key of keysToTry) {
-                if (oddsMap[key]) {
-                  match = oddsMap[key];
-                  break;
-                }
-              }
-              
-              if (!match) {
-                const homeKeywords = home.split(' ').filter(w => w.length > 2);
-                const awayKeywords = away.split(' ').filter(w => w.length > 2);
-                const fuzzyKey = Object.keys(oddsMap).find(k => {
-                  const [seHome, seAway] = k.split('_vs_');
-                  const matchHome = homeKeywords.some(kw => seHome.includes(kw));
-                  const matchAway = awayKeywords.some(kw => seAway.includes(kw));
-                  return matchHome && matchAway;
-                });
-                if (fuzzyKey) match = oddsMap[fuzzyKey];
-              }
-              return match;
-            })
-            .catch(e => { console.warn(`Failed to fetch Sportradar ${game.league} odds`, e); return null; })
-        : Promise.resolve(null);
+      if (game.league === 'NBA' && game.apiSportsHomeTeamId && game.apiSportsAwayTeamId) {
+        const season = new Date().getFullYear().toString(); // Basic season logic
+        apiSportsHomeStatsPromise = apiSportsService.getTeamStats(game.apiSportsHomeTeamId, season);
+        apiSportsAwayStatsPromise = apiSportsService.getTeamStats(game.apiSportsAwayTeamId, season);
+        apiSportsHomeInjuriesPromise = apiSportsService.getInjuries(game.apiSportsHomeTeamId, season);
+        apiSportsAwayInjuriesPromise = apiSportsService.getInjuries(game.apiSportsAwayTeamId, season);
+      }
 
-      const [reports, previousMatchups, finishedGames, sportradarInjuries, sportradarSummary, sportradarOdds] = await Promise.all([
+      const [
+        reports, 
+        previousMatchups, 
+        finishedGames,
+        apiHomeStats,
+        apiAwayStats,
+        apiHomeInjuries,
+        apiAwayInjuries
+      ] = await Promise.all([
         reportsPromise,
         matchupsPromise,
         yesterdayPromise,
-        (game.league === 'NBA' || game.league === 'MLB') ? sportradarService.getInjuries(game.league) : Promise.resolve([]),
-        sportradarSummaryPromise,
-        sportradarOddsPromise
+        apiSportsHomeStatsPromise,
+        apiSportsAwayStatsPromise,
+        apiSportsHomeInjuriesPromise,
+        apiSportsAwayInjuriesPromise
       ]);
 
       const reportsText = reports.length > 0 ? `\n\nCRITICAL: User reports of incorrect player status for this game: ${reports.join("; ")}. PLEASE VERIFY THESE CLAIMS.` : "";
-      
-      let sportradarInjuriesText = "";
-      if ((game.league === 'NBA' || game.league === 'MLB') && sportradarInjuries.length > 0) {
-        const homeInjuries = sportradarInjuries.find(t => game.homeTeam.includes(t.name) || t.name.includes(game.homeTeam));
-        const awayInjuries = sportradarInjuries.find(t => game.awayTeam.includes(t.name) || t.name.includes(game.awayTeam));
-        
-        if (homeInjuries || awayInjuries) {
-          sportradarInjuriesText = `\nOFFICIAL SPORTRADAR INJURY DATA:\n`;
-          if (homeInjuries) {
-            sportradarInjuriesText += `- ${game.homeTeam}: ${homeInjuries.players.map(p => `${p.full_name} (${p.status}: ${p.desc})`).join(', ')}\n`;
-          }
-          if (awayInjuries) {
-            sportradarInjuriesText += `- ${game.awayTeam}: ${awayInjuries.players.map(p => `${p.full_name} (${p.status}: ${p.desc})`).join(', ')}\n`;
-          }
-        }
-      }
 
-      let sportradarSummaryText = "";
-      if (sportradarSummary?.summary) {
-        const summary = sportradarSummary.summary;
-        const homeLineup = summary.home?.players?.filter((p: any) => p.starter).map((p: any) => p.full_name).join(', ') || "N/A";
-        const awayLineup = summary.away?.players?.filter((p: any) => p.starter).map((p: any) => p.full_name).join(', ') || "N/A";
-        
-        sportradarSummaryText = `\nOFFICIAL SPORTRADAR LINEUPS & STATS:\n`;
-        sportradarSummaryText += `- ${game.homeTeam} Starters: ${homeLineup}\n`;
-        sportradarSummaryText += `- ${game.awayTeam} Starters: ${awayLineup}\n`;
-        
-        // Add some key stats if available
-        const homeStats = summary.home?.statistics;
-        const awayStats = summary.away?.statistics;
-        if (homeStats && awayStats) {
-          if (game.league === 'NBA') {
-            sportradarSummaryText += `- Season Stats (Home): FG% ${homeStats.field_goals_pct}%, 3P% ${homeStats.three_points_pct}%, Reb ${homeStats.rebounds}, Ast ${homeStats.assists}\n`;
-            sportradarSummaryText += `- Season Stats (Away): FG% ${awayStats.field_goals_pct}%, 3P% ${awayStats.three_points_pct}%, Reb ${awayStats.rebounds}, Ast ${awayStats.assists}\n`;
-          } else if (game.league === 'MLB') {
-            sportradarSummaryText += `- Season Stats (Home): AVG ${homeStats.batting?.avg || 'N/A'}, OBP ${homeStats.batting?.obp || 'N/A'}, SLG ${homeStats.batting?.slg || 'N/A'}, ERA ${homeStats.pitching?.era || 'N/A'}\n`;
-            sportradarSummaryText += `- Season Stats (Away): AVG ${awayStats.batting?.avg || 'N/A'}, OBP ${awayStats.batting?.obp || 'N/A'}, SLG ${awayStats.batting?.slg || 'N/A'}, ERA ${awayStats.pitching?.era || 'N/A'}\n`;
-          }
-        }
-      }
-
-      let sportradarMarketsText = "";
-      if (sportradarSummary?.markets) {
-        sportradarMarketsText = `\nOFFICIAL SPORTRADAR MARKET ODDS (GRANULAR):\n${JSON.stringify(sportradarSummary.markets, null, 2)}\n`;
-      }
-
-      let sportradarOddsText = "";
-      if (sportradarOdds) {
-        sportradarOddsText = `\nOFFICIAL SPORTRADAR ODDS FOR THIS SPECIFIC GAME:\n${JSON.stringify(sportradarOdds, null, 2)}\n`;
-        // Also include markets if we have them from the other call
-        if (sportradarSummary?.markets) {
-          sportradarOddsText += `\nDETAILED MARKET DATA:\n${JSON.stringify(sportradarSummary.markets, null, 2)}\n`;
-        }
+      let apiSportsContext = "";
+      if (apiHomeStats || apiAwayStats || apiHomeInjuries.length > 0 || apiAwayInjuries.length > 0) {
+        apiSportsContext = `\nAPI-SPORTS DATA (HIGH PRIORITY SOURCE):\n`;
+        if (apiHomeStats) apiSportsContext += `- ${game.homeTeam} Stats: ${JSON.stringify(apiHomeStats)}\n`;
+        if (apiAwayStats) apiSportsContext += `- ${game.awayTeam} Stats: ${JSON.stringify(apiAwayStats)}\n`;
+        if (apiHomeInjuries.length > 0) apiSportsContext += `- ${game.homeTeam} Injuries: ${JSON.stringify(apiHomeInjuries)}\n`;
+        if (apiAwayInjuries.length > 0) apiSportsContext += `- ${game.awayTeam} Injuries: ${JSON.stringify(apiAwayInjuries)}\n`;
       }
 
       let previousMatchupsText = "";
       if (previousMatchups.length > 0) {
-        previousMatchupsText = `\nPREVIOUS MATCHUPS (FROM OUR DATABASE):\n${previousMatchups.map(p => `- ${p.date}: ${p.teams![0]} ${p.actualScore?.home} - ${p.teams![1]} ${p.actualScore?.away}`).join('\n')}\n`;
+        previousMatchupsText = `\nPREVIOUS MATCHUPS (AI PREDICTIONS):\n${previousMatchups.map(p => `- ${p.date}: ${p.awayTeam} ${p.actualScore?.away} @ ${p.homeTeam} ${p.actualScore?.home} (Predicted: ${p.projectedWinner} ${p.projectedScore?.away}-${p.projectedScore?.home})`).join('\n')}\n`;
       }
-
-      if (sportradarSummary?.h2h) {
-        const h2h = sportradarSummary.h2h;
-        if (h2h.last_meetings && h2h.last_meetings.length > 0) {
-          previousMatchupsText += `\nOFFICIAL SPORTRADAR HEAD-TO-HEAD HISTORY:\n`;
-          h2h.last_meetings.slice(0, 5).forEach((m: any) => {
-            previousMatchupsText += `- ${m.scheduled.split('T')[0]}: ${m.home.name} ${m.home_points} - ${m.away.name} ${m.away_points} (Status: ${m.status})\n`;
-          });
-        }
-      }
-
       previousMatchupsText += `\nCRITICAL: ZERO TOLERANCE FOR HALLUCINATIONS. You MUST only use the provided previous matchup data. If no data is provided, do NOT invent scores or dates. If you use your search tool, you MUST verify the scores from at least two independent sources (e.g., ESPN and Baseball-Reference).`;
 
       let yesterdayResultsText = "";
@@ -1195,14 +1116,11 @@ OPERATIONAL GUIDELINES:
         ${statsContext} 
         ${lessonsText}
         ${reportsText}
-        ${sportradarInjuriesText}
-        ${sportradarSummaryText}
-        ${sportradarMarketsText}
-        ${sportradarOddsText}
         ${previousMatchupsText}
         ${yesterdayResultsText}
         ${existingInjuriesText}
         ${rosterDatabaseContext}
+        ${apiSportsContext}
         
         TASK:
         1. LATEST INJURIES: Use your search tool to find the latest status of key players. Check the Official NBA Injury Report, Rotowire (https://www.rotowire.com/basketball/injury-report.php), and reputable news sites. If you can access the Google Drive folder (1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9), look specifically for the file 'NBA_Injury_Report_Latest' and use it as your primary reference. If not, ensure you have cross-referenced at least two other sources to confirm player availability. Quantify the impact on team efficiency.
@@ -1216,6 +1134,7 @@ OPERATIONAL GUIDELINES:
            - Potential outcomes: How to lock in profit or minimize loss based on live odds movement.
            - Betting strategies: Specific advice for different risk profiles (e.g., "If you bet Team A at -110, consider a live hedge on Team B at +250 if they lead at halftime").
            - Probability-based triggers: When to pull the trigger on a hedge.
+        8. LESSONS LEARNED: Explicitly state how you adjusted your prediction weighting based on the "LEARN FROM YOUR PAST MISTAKES" context.
         
         Return JSON:
         {
@@ -1230,6 +1149,7 @@ OPERATIONAL GUIDELINES:
           "situationalFactors": "Rest, travel, and schedule impact.",
           "hedgingAdvice": "Detailed hedging strategy based on probabilities and scenarios. Use markdown formatting (bullet points, bold text) for readability.",
           "keyFactors": ["Factor 1", "Factor 2"],
+          "appliedLessons": ["How I adjusted my algorithm based on past mistake 1", "How I adjusted based on past mistake 2"],
           "injuries": [{"team": "Team", "player": "Name", "status": "Status", "impact": "PSI value"}],
           "pitcherMatchup": {
             "homePitcher": {"name": "Name", "era": 3.45, "whip": 1.12, "xERA": 3.21, "fip": 3.50, "k9": 9.5, "barrelRate": 6.5, "recentForm": "Summary"},
@@ -1267,12 +1187,9 @@ OPERATIONAL GUIDELINES:
             "awaySpreadOdds": -110,
             "total": 220.5,
             "overOdds": -110,
-            "underOdds": -110,
-            "source": "Sportradar"
+            "underOdds": -110
           }
         }
-        
-        CRITICAL: If Sportradar odds data is provided in the CONTEXT, you MUST extract the Moneyline, Spread, and Total into the "marketOdds" field. If multiple books are provided, use a consensus or the most reputable one.
       `;
 
       const fullPrompt = `${systemInstruction}\n\n${prompt}`;
@@ -1292,7 +1209,7 @@ OPERATIONAL GUIDELINES:
         if (!text) throw new Error("No response from OpenAI");
 
         const cost = this.calculateOpenAICost(response.usage);
-        return this.processAIResponse(game, text, cost, dateStr, [], existingPrediction, [], !!sportradarInjuries.length, !!sportradarSummary);
+        return this.processAIResponse(game, text, cost, dateStr, [], existingPrediction, []);
       }
 
       onProgress?.(`Running AI analysis for ${game.awayTeam} @ ${game.homeTeam}...`);
@@ -1364,7 +1281,7 @@ OPERATIONAL GUIDELINES:
         return null;
       }).filter(Boolean) || [];
 
-      return this.processAIResponse(game, text, cost, dateStr, previousMatchups, existingPrediction, groundingUrls, !!sportradarInjuries.length, !!sportradarSummary);
+      return this.processAIResponse(game, text, cost, dateStr, previousMatchups, existingPrediction, groundingUrls);
     } catch (error) {
       console.error("Error analyzing matchup:", error);
       throw error;
@@ -1378,9 +1295,7 @@ OPERATIONAL GUIDELINES:
     dateStr?: string, 
     previousMatchups: any[] = [], 
     existingPrediction?: any, 
-    groundingUrls: any[] = [],
-    sportradarInjuriesUsed: boolean = false,
-    sportradarSummaryUsed: boolean = false
+    groundingUrls: any[] = []
   ): any {
     try {
       const cleanedText = this.cleanJson(text);
@@ -1528,8 +1443,6 @@ OPERATIONAL GUIDELINES:
       const sourceAudit = {
         googleDriveAccessed: groundingUrls.some(u => u.uri.includes(driveLink)),
         nbaOfficialAccessed: groundingUrls.some(u => u.uri.includes(nbaOfficialLink)),
-        sportradarInjuriesUsed,
-        sportradarSummaryUsed,
         lastAuditTime: new Date().toISOString(),
         auditNotes: ""
       };
@@ -1538,14 +1451,8 @@ OPERATIONAL GUIDELINES:
         if (game.league === 'NBA' && !sourceAudit.googleDriveAccessed) {
           sourceAudit.auditNotes += "WARNING: Google Drive Injury Report not explicitly grounded. ";
         }
-        if (!sportradarInjuriesUsed) {
-          sourceAudit.auditNotes += `WARNING: Sportradar ${game.league} Injury data missing for this game. `;
-        }
-        if (!sportradarSummaryUsed) {
-          sourceAudit.auditNotes += `WARNING: Sportradar ${game.league} Game Summary (Lineups) missing for this game. `;
-        }
 
-        const status = (game.league === 'NBA' ? (sourceAudit.googleDriveAccessed && sportradarInjuriesUsed && sportradarSummaryUsed) : (sportradarInjuriesUsed && sportradarSummaryUsed)) ? 'success' : 'warning';
+        const status = (game.league === 'NBA' ? sourceAudit.googleDriveAccessed : true) ? 'success' : 'warning';
         logSourceAudit(String(game.id), game.league, { ...sourceAudit, status });
       }
       
@@ -1743,19 +1650,6 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 
     onProgress?.(`Found ${allGames.length} ${league} games. Starting analysis...`);
 
-    // Pre-fetch league-wide data to speed up individual game analysis
-    if (league === 'NBA' || league === 'MLB') {
-      onProgress?.(`Pre-fetching ${league} injury and odds data...`);
-      try {
-        await Promise.all([
-          sportradarService.getInjuries(league),
-          sportradarService.getDailyOdds(league, date)
-        ]);
-      } catch (e) {
-        console.warn(`Failed to pre-fetch ${league} data:`, e);
-      }
-    }
-
     // Process in batches to improve performance while respecting rate limits
     const CONCURRENCY = 3;
     for (let i = 0; i < allGames.length; i += CONCURRENCY) {
@@ -1833,29 +1727,6 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 
       const batchGames = games.slice(i, i + BATCH_SIZE);
       const teams = batchGames.map(g => `${g.awayTeam} and ${g.homeTeam}`).join(", ");
-      
-      let sportradarInjuriesText = "";
-      if (league === 'NBA') {
-        try {
-          const sportradarInjuries = await sportradarService.getInjuries();
-          if (sportradarInjuries.length > 0) {
-            sportradarInjuriesText = "\nOFFICIAL SPORTRADAR INJURY DATA (FOR REFERENCE):\n";
-            batchGames.forEach(game => {
-              const homeInjuries = sportradarInjuries.find(t => game.homeTeam.includes(t.name) || t.name.includes(game.homeTeam));
-              const awayInjuries = sportradarInjuries.find(t => game.awayTeam.includes(t.name) || t.name.includes(game.awayTeam));
-              
-              if (homeInjuries) {
-                sportradarInjuriesText += `- ${game.homeTeam}: ${homeInjuries.players.map(p => `${p.full_name} (${p.status}: ${p.desc})`).join(', ')}\n`;
-              }
-              if (awayInjuries) {
-                sportradarInjuriesText += `- ${game.awayTeam}: ${awayInjuries.players.map(p => `${p.full_name} (${p.status}: ${p.desc})`).join(', ')}\n`;
-              }
-            });
-          }
-        } catch (e) {
-          console.warn("Failed to fetch Sportradar injuries for batch", e);
-        }
-      }
 
       const leagueSearchQuery = league === 'NCAA' 
         ? `"NCAA basketball injury report rotowire", "college basketball line movement ${batchGames.map(g => g.homeTeam).join(' or ')}", "sharp money college basketball today"` 
@@ -1864,8 +1735,6 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
       const prompt = `
         TASK: Use your search tool to find the LATEST injury reports and MARKET MOVEMENT for these ${league} teams playing on ${date}: ${teams}.
         ${league === 'NCAA' ? 'For NCAA, a primary source is https://www.rotowire.com/cbasketball/injury-report.php.' : `Search queries should be like: ${leagueSearchQuery}. For NBA, use https://www.rotowire.com/basketball/injury-report.php and look specifically for the file 'NBA_Injury_Report_Latest' in the Google Drive folder 1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9.`}
-        
-        ${sportradarInjuriesText}
 
         INSTRUCTIONS:
         1. ZERO TOLERANCE FOR INCORRECT INJURY ADVICE: You MUST be 100% certain of a player's status before marking them as 'In'. If there is ANY conflicting information (e.g., one source says 'Out' and another says 'Clear'), you MUST prioritize the more conservative status ('Out' or 'Doubtful'). A player who is 'Out' in several recent reports but 'Clear' in one should be treated as 'Out' unless there is an official team announcement confirming their return.

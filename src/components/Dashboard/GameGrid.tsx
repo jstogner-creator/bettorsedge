@@ -80,7 +80,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
             game={game}
             prediction={game.id ? savedPredictions[game.id] : null}
             isAnalyzing={analyzing && analysisProgress?.analyzingGameIds?.includes(game.id)}
-            onReanalyze={isAdminUser ? handleReanalyzeSingleGame : undefined}
+            onReanalyze={handleReanalyzeSingleGame}
             onDiscuss={() => handleDiscussWithSnark(game)}
             onLogBet={handleLogBet}
           />

@@ -47,6 +47,7 @@ export const GameCard: React.FC<GameCardProps> = ({
   onSelect
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedBookmakerId, setSelectedBookmakerId] = useState<number | null>(null);
 
   const handleCardClick = () => {
     setIsExpanded(!isExpanded);
@@ -169,8 +170,21 @@ export const GameCard: React.FC<GameCardProps> = ({
     }
   };
 
-  const awayML = prediction?.marketOdds?.awayML || game.marketOdds?.awayML;
-  const homeML = prediction?.marketOdds?.homeML || game.marketOdds?.homeML;
+  const selectedBookmaker = React.useMemo(() => {
+    if (!game.allBookmakers || game.allBookmakers.length === 0) return null;
+    if (selectedBookmakerId) {
+      return game.allBookmakers.find(b => b.id === selectedBookmakerId) || game.allBookmakers[0];
+    }
+    // Default to the one matching marketOdds.source or the first one
+    return game.allBookmakers.find(b => b.name === game.marketOdds?.source) || game.allBookmakers[0];
+  }, [game.allBookmakers, selectedBookmakerId, game.marketOdds?.source]);
+
+  const awayML = prediction?.marketOdds?.awayML || selectedBookmaker?.awayML || game.marketOdds?.awayML;
+  const homeML = prediction?.marketOdds?.homeML || selectedBookmaker?.homeML || game.marketOdds?.homeML;
+  const spread = prediction?.marketOdds?.spread || selectedBookmaker?.spread || game.marketOdds?.spread;
+  const total = prediction?.marketOdds?.total || selectedBookmaker?.total || game.marketOdds?.total;
+  const oddsSource = prediction?.marketOdds?.source || selectedBookmaker?.name || game.marketOdds?.source || 'Sportsbook';
+
   const awayImplied = getImpliedProbability(awayML);
   const homeImplied = getImpliedProbability(homeML);
 
@@ -230,12 +244,6 @@ export const GameCard: React.FC<GameCardProps> = ({
               <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-indigo-500/10 text-indigo-400 border-indigo-500/20 flex items-center">
                 <ShieldCheck className="w-3 h-3 mr-1" />
                 QA Corrected
-              </span>
-            )}
-            {prediction?.sourceAudit?.sportradarInjuriesUsed && prediction?.sourceAudit?.sportradarSummaryUsed && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-emerald-500/10 text-emerald-400 border-emerald-500/20 flex items-center">
-                <CheckCircle2 className="w-4 h-4 mr-1" />
-                Sportradar Verified
               </span>
             )}
           </div>
@@ -393,48 +401,74 @@ export const GameCard: React.FC<GameCardProps> = ({
           </div>
         </div>
 
-        {/* Quick Action Bar (Only if not analyzed) */}
-        {onReanalyze && !prediction && (
+        {/* Quick Action Bar */}
+        {(onReanalyze || game.marketOdds || game.allBookmakers) && (
           <div className="px-4 pb-4 pt-2">
-            {game.marketOdds && (
+            {(game.marketOdds || game.allBookmakers) && (
               <div className="mb-3 p-2.5 bg-slate-800/40 rounded-lg border border-slate-700/50">
                 <div className="text-[9px] uppercase text-slate-500 font-bold mb-2 flex justify-between items-center">
-                  <span>Market Odds ({game.marketOdds.source || 'Sportradar'})</span>
+                  <div className="flex items-center gap-2">
+                    <span>Market Odds</span>
+                    {game.allBookmakers && game.allBookmakers.length > 0 ? (
+                      <select 
+                        className="bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5 text-[9px] outline-none focus:border-indigo-500"
+                        value={selectedBookmakerId || ''}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setSelectedBookmakerId(Number(e.target.value));
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {game.allBookmakers.map(b => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-slate-400">({oddsSource})</span>
+                    )}
+                  </div>
                   <TrendingUp className="w-3 h-3" />
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div>
                     <div className="text-[8px] text-slate-500 uppercase mb-0.5">Moneyline</div>
                     <div className="text-[10px] text-slate-300 font-mono bg-slate-900/50 py-1 rounded">
-                      {game.marketOdds.awayML ? (game.marketOdds.awayML > 0 ? `+${game.marketOdds.awayML}` : game.marketOdds.awayML) : '-'} / {game.marketOdds.homeML ? (game.marketOdds.homeML > 0 ? `+${game.marketOdds.homeML}` : game.marketOdds.homeML) : '-'}
+                      {awayML ? (awayML > 0 ? `+${awayML}` : awayML) : '-'} / {homeML ? (homeML > 0 ? `+${homeML}` : homeML) : '-'}
                     </div>
                   </div>
                   <div>
                     <div className="text-[8px] text-slate-500 uppercase mb-0.5">Spread</div>
                     <div className="text-[10px] text-slate-300 font-mono bg-slate-900/50 py-1 rounded">
-                      {game.marketOdds.spread ? (game.marketOdds.spread > 0 ? `+${game.marketOdds.spread}` : game.marketOdds.spread) : '-'}
+                      {spread ? (spread > 0 ? `+${spread}` : spread) : '-'} / {spread ? (spread > 0 ? `-${spread}` : `+${Math.abs(spread)}`) : '-'}
                     </div>
                   </div>
                   <div>
                     <div className="text-[8px] text-slate-500 uppercase mb-0.5">Total</div>
                     <div className="text-[10px] text-slate-300 font-mono bg-slate-900/50 py-1 rounded">
-                      {game.marketOdds.total || '-'}
+                      {total || '-'}
                     </div>
                   </div>
                 </div>
               </div>
             )}
+            {onReanalyze && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onReanalyze(game);
               }}
               disabled={isAnalyzing}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg flex items-center justify-center transition-all font-bold text-sm shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+              className={cn(
+                "w-full py-2.5 rounded-lg flex items-center justify-center transition-all font-bold text-sm shadow-lg disabled:opacity-50",
+                prediction 
+                  ? "bg-slate-700 hover:bg-slate-600 text-slate-200 shadow-slate-900/20" 
+                  : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/20"
+              )}
             >
               <Brain className={cn("w-4 h-4 mr-2", isAnalyzing && "animate-bounce")} />
-              {isAnalyzing ? "Analyzing..." : "Analyze Matchup"}
+              {isAnalyzing ? "Analyzing..." : (prediction ? "Reanalyze Matchup" : "Analyze Matchup")}
             </button>
+            )}
           </div>
         )}
       </div>
@@ -636,95 +670,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                 </div>
               </div>
 
-                {/* Market Odds Section */}
-                {((prediction.marketOdds && Object.keys(prediction.marketOdds).length > 1) || (game.marketOdds && Object.keys(game.marketOdds).length > 1)) && (
-                  <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 shadow-inner">
-                    <div className="text-[10px] uppercase text-slate-400 font-black mb-5 tracking-widest flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
-                        <span>Market Consensus ({ (prediction.marketOdds?.source || game.marketOdds?.source) || 'Sportradar' })</span>
-                      </div>
-                      <div className="bg-slate-900 px-2.5 py-1 rounded text-[8px] border border-slate-800 font-bold text-slate-500">LIVE DATA</div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="text-center">
-                        <div className="text-[9px] text-slate-500 uppercase font-black mb-3 tracking-tighter">Moneyline</div>
-                        <div className="flex flex-col gap-2">
-                          <div className={cn(
-                            "text-[11px] text-slate-200 font-mono bg-slate-950/50 py-2 rounded-lg border relative group/odds transition-all duration-300",
-                            awayValue ? "border-emerald-500/40 bg-emerald-500/5 shadow-[0_0_15px_rgba(16,185,129,0.1)]" : "border-slate-800/50"
-                          )}>
-                            <div className="flex flex-col items-center">
-                              <span className="text-[7px] text-slate-600 font-black uppercase mb-0.5">AWAY</span>
-                              <span className="font-bold">{awayML ? (awayML > 0 ? `+${awayML}` : awayML) : '-'}</span>
-                            </div>
-                            {awayImplied && (
-                              <div className="absolute -top-2 -right-1 bg-slate-900 text-[7px] px-1.5 py-0.5 rounded border border-slate-700 text-slate-500 font-black group-hover/odds:text-slate-300 transition-colors shadow-sm">
-                                {awayImplied.toFixed(0)}%
-                              </div>
-                            )}
-                            {awayValue && (
-                              <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-emerald-500 text-[7px] px-2 py-0.5 rounded-full font-black text-slate-950 uppercase tracking-widest shadow-lg animate-pulse">
-                                VALUE
-                              </div>
-                            )}
-                          </div>
-                          <div className={cn(
-                            "text-[11px] text-slate-200 font-mono bg-slate-950/50 py-2 rounded-lg border relative group/odds transition-all duration-300",
-                            homeValue ? "border-emerald-500/40 bg-emerald-500/5 shadow-[0_0_15px_rgba(16,185,129,0.1)]" : "border-slate-800/50"
-                          )}>
-                            <div className="flex flex-col items-center">
-                              <span className="text-[7px] text-slate-600 font-black uppercase mb-0.5">HOME</span>
-                              <span className="font-bold">{homeML ? (homeML > 0 ? `+${homeML}` : homeML) : '-'}</span>
-                            </div>
-                            {homeImplied && (
-                              <div className="absolute -top-2 -right-1 bg-slate-900 text-[7px] px-1.5 py-0.5 rounded border border-slate-700 text-slate-500 font-black group-hover/odds:text-slate-300 transition-colors shadow-sm">
-                                {homeImplied.toFixed(0)}%
-                              </div>
-                            )}
-                            {homeValue && (
-                              <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-emerald-500 text-[7px] px-2 py-0.5 rounded-full font-black text-slate-950 uppercase tracking-widest shadow-lg animate-pulse">
-                                VALUE
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-[9px] text-slate-500 uppercase font-black mb-3 tracking-tighter">Spread</div>
-                        <div className="flex flex-col gap-2">
-                          <div className="text-[11px] text-slate-200 font-mono bg-slate-950/50 py-2 rounded-lg border border-slate-800/50 flex flex-col items-center">
-                            <span className="text-[7px] text-slate-600 font-black uppercase mb-0.5">AWAY</span>
-                            <span className="font-bold">
-                              {(prediction.marketOdds?.spread || game.marketOdds?.spread) ? 
-                                ((prediction.marketOdds?.spread || game.marketOdds?.spread)! > 0 ? `+${prediction.marketOdds?.spread || game.marketOdds?.spread}` : (prediction.marketOdds?.spread || game.marketOdds?.spread)) : '-'}
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-slate-200 font-mono bg-slate-950/50 py-2 rounded-lg border border-slate-800/50 flex flex-col items-center">
-                            <span className="text-[7px] text-slate-600 font-black uppercase mb-0.5">HOME</span>
-                            <span className="font-bold">
-                              {(prediction.marketOdds?.spread || game.marketOdds?.spread) ? 
-                                ((prediction.marketOdds?.spread || game.marketOdds?.spread)! > 0 ? `-${prediction.marketOdds?.spread || game.marketOdds?.spread}` : `+${Math.abs((prediction.marketOdds?.spread || game.marketOdds?.spread)!)}`) : '-'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-[9px] text-slate-500 uppercase font-black mb-3 tracking-tighter">Total</div>
-                        <div className="flex flex-col gap-2">
-                          <div className="text-[11px] text-slate-200 font-mono bg-slate-950/50 py-2 rounded-lg border border-slate-800/50 flex flex-col items-center">
-                            <span className="text-[7px] text-slate-600 font-black uppercase mb-0.5">OVER</span>
-                            <span className="font-bold">{(prediction.marketOdds?.total || game.marketOdds?.total) || '-'}</span>
-                          </div>
-                          <div className="text-[11px] text-slate-200 font-mono bg-slate-950/50 py-2 rounded-lg border border-slate-800/50 flex flex-col items-center">
-                            <span className="text-[7px] text-slate-600 font-black uppercase mb-0.5">UNDER</span>
-                            <span className="font-bold">{(prediction.marketOdds?.total || game.marketOdds?.total) || '-'}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                {/* Market Odds Section removed as it's now in the Quick Action Bar */}
 
                 {/* Trends Section */}
                 {prediction.trends && (
@@ -815,7 +761,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                       <div className="p-1 bg-slate-900 rounded border border-slate-800">
                         <Activity className="w-3.5 h-3.5 text-indigo-400" />
                       </div>
-                      Matchup Rankings
+                      Current Team Stat Standing Comparisons
                     </h4>
                     <div className="space-y-5">
                       {[

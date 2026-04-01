@@ -97,8 +97,8 @@ export const FAQ: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           icon: <TrendingUp className="w-4 h-4" />
         },
         {
-          question: "What are Kalshi and Sportradar odds?",
-          answer: "Kalshi provides prediction market data, which often reflects 'wisdom of the crowd' sentiment. Sportradar provides professional-grade sportsbook odds. Comparing these helps identify where the market might be mispriced.",
+          question: "What are Kalshi and Sportsbook odds?",
+          answer: "Kalshi provides prediction market data, which often reflects 'wisdom of the crowd' sentiment. We also pull professional-grade sportsbook odds. Comparing these helps identify where the market might be mispriced.",
           icon: <BarChart3 className="w-4 h-4" />
         }
       ]

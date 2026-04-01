@@ -186,6 +186,10 @@ export function LandingPage({ onEnter }: LandingPageProps) {
           Please bet responsibly and only wager what you can afford to lose. If you or someone you know has a gambling problem, call 1-800-GAMBLER.
         </p>
         <p>© 2026 Bettors Edge. All rights reserved.</p>
+        <div className="mt-2 flex items-center justify-center space-x-4">
+          <a href="mailto:lydia@bettorsedge.ai" className="hover:text-indigo-400 transition-colors">Contact Us</a>
+          <a href="mailto:lydia@bettorsedge.ai?subject=Bug%20Report%20/%20Feedback" className="hover:text-indigo-400 transition-colors">Report a Bug / Feedback</a>
+        </div>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Trophy, Calendar, Settings, Activity, LogOut, Shield, FileText, Plus, HelpCircle } from "lucide-react";
+import { Trophy, Calendar, Settings, Activity, LogOut, Shield, FileText, Plus, HelpCircle, Mail, MessageSquare } from "lucide-react";
 import { cn } from "../lib/utils";
 import { SettingsModal } from "./SettingsModal";
 import { LegalModal } from "./LegalModal";
@@ -75,18 +75,18 @@ export function Layout({
               </h1>
             </div>
           </div>
-          <nav id="league-nav" className="hidden md:flex space-x-8">
+          <nav id="league-nav" className="hidden md:flex items-center bg-slate-800/30 p-1 rounded-xl border border-slate-700/30">
             {tabs.map((league) => (
               <button
                 key={league}
                 onClick={() => onTabChange(league)}
                 className={cn(
-                  "text-sm font-medium transition-colors hover:text-indigo-400 flex items-center gap-1.5",
+                  "px-4 py-1.5 text-xs font-bold transition-all rounded-lg flex items-center gap-2",
                   activeTab === league
-                    ? "text-indigo-400 border-b-2 border-indigo-400"
+                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
                     : league === "Add Sport" 
-                      ? "text-amber-500 hover:text-amber-400"
-                      : "text-slate-400"
+                      ? "text-amber-500 hover:bg-amber-500/10"
+                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
                 )}
               >
                 {league === "Add Sport" && <Plus className="w-3 h-3" />}
@@ -132,18 +132,18 @@ export function Layout({
         </div>
         
         {/* Mobile Navigation */}
-        <nav className="md:hidden border-t border-slate-800 px-4 py-2 flex flex-nowrap overflow-x-auto no-scrollbar gap-6 items-center">
+        <nav className="md:hidden border-t border-slate-800 px-4 py-2 flex items-center bg-slate-900/80 backdrop-blur-sm overflow-x-auto no-scrollbar gap-2">
           {tabs.map((league) => (
             <button
               key={league}
               onClick={() => onTabChange(league)}
               className={cn(
-                "text-sm font-medium transition-colors whitespace-nowrap py-1 flex items-center gap-1.5 shrink-0",
+                "px-4 py-1.5 text-xs font-bold transition-all rounded-lg flex items-center gap-2 whitespace-nowrap",
                 activeTab === league
-                  ? "text-indigo-400 border-b-2 border-indigo-400"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
                   : league === "Add Sport"
-                    ? "text-amber-500 hover:text-amber-400"
-                    : "text-slate-400"
+                    ? "text-amber-500 hover:bg-amber-500/10"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
               )}
             >
               {league === "Add Sport" && <Plus className="w-3 h-3" />}
@@ -165,7 +165,7 @@ export function Layout({
             If you or someone you know has a gambling problem, please call 1-800-GAMBLER.
           </p>
           <p>© {new Date().getFullYear()} Bettors Edge. All rights reserved.</p>
-          <div className="mt-4 flex items-center justify-center space-x-6">
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
             <button
               onClick={() => setLegalModal({ isOpen: true, type: "terms" })}
               className="text-slate-500 hover:text-indigo-400 transition-colors flex items-center gap-1.5"
@@ -180,6 +180,20 @@ export function Layout({
               <Shield className="w-3 h-3" />
               Privacy Policy
             </button>
+            <a
+              href="mailto:lydia@bettorsedge.ai"
+              className="text-slate-500 hover:text-indigo-400 transition-colors flex items-center gap-1.5"
+            >
+              <Mail className="w-3 h-3" />
+              Contact Us
+            </a>
+            <a
+              href="mailto:lydia@bettorsedge.ai?subject=Bug%20Report%20/%20Feedback"
+              className="text-slate-500 hover:text-indigo-400 transition-colors flex items-center gap-1.5"
+            >
+              <MessageSquare className="w-3 h-3" />
+              Report a Bug / Feedback
+            </a>
           </div>
         </div>
       </footer>

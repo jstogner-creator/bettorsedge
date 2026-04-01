@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, deleteDoc, addDoc } from 'firebase/firestore';
 import { getDb } from '../firebase';
-import { Users, Shield, ShieldAlert, Trash2, Edit2, Check, X } from 'lucide-react';
+import { Users, Shield, ShieldAlert, Trash2, Edit2, Check, X, Plus } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { UserProfile } from '../types';
 
@@ -14,6 +14,13 @@ export function AdminUsersTab() {
   const [loading, setLoading] = useState(true);
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<UserProfile>>({});
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [newUserForm, setNewUserForm] = useState<Partial<UserProfile>>({
+    email: '',
+    role: 'user',
+    subscriptionStatus: 'inactive',
+    subscribedSports: []
+  });
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -35,6 +42,28 @@ export function AdminUsersTab() {
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  const handleAddUser = async () => {
+    try {
+      const db = getDb();
+      await addDoc(collection(db, 'users'), {
+        ...newUserForm,
+        createdAt: new Date().toISOString(),
+        hasSeenWalkthrough: false,
+        acceptedTerms: false
+      });
+      setShowAddUserModal(false);
+      setNewUserForm({
+        email: '',
+        role: 'user',
+        subscriptionStatus: 'inactive',
+        subscribedSports: []
+      });
+      fetchUsers();
+    } catch (error) {
+      console.error('Error adding user:', error);
+    }
+  };
 
   const handleEdit = (user: UserWithId) => {
     setEditingUser(user.id);
@@ -109,10 +138,63 @@ export function AdminUsersTab() {
           </div>
           <h2 className="text-2xl font-bold text-white">User Database</h2>
         </div>
-        <div className="text-sm text-slate-400">
-          Total Users: {users.length}
+        <div className="flex items-center gap-4">
+          <div className="text-sm text-slate-400">
+            Total Users: {users.length}
+          </div>
+          <button
+            onClick={() => setShowAddUserModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add User
+          </button>
         </div>
       </div>
+
+      {showAddUserModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-4">Add New User</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={newUserForm.email}
+                  onChange={(e) => setNewUserForm({ ...newUserForm, email: e.target.value })}
+                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg p-2"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-1">Role</label>
+                <select
+                  value={newUserForm.role}
+                  onChange={(e) => setNewUserForm({ ...newUserForm, role: e.target.value as any })}
+                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg p-2"
+                >
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => setShowAddUserModal(false)}
+                  className="px-4 py-2 rounded-xl font-medium text-slate-300 hover:bg-slate-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddUser}
+                  className="px-4 py-2 rounded-xl font-medium bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
+                >
+                  Add User
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">

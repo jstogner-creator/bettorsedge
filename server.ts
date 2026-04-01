@@ -1,4 +1,3 @@
-import { resolveInjuryTruth } from "./injuryResolver";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -427,6 +426,35 @@ async function startServer() {
     }
   });
 
+  app.post('/api/admin/bypass-paywall', authenticate, async (req, res) => {
+    const { userId } = req.body;
+    const adminUser = (req as any).user;
+
+    try {
+      // Check if the requester is an admin
+      const userDoc = await db.collection('users').doc(adminUser.uid).get();
+      const userData = userDoc.data();
+      
+      // Check if the requester is the default admin or has the 'admin' role
+      const isAdmin = userData?.role === 'admin' || adminUser.email === 'jstogner@risenetworkcabling.com';
+      
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      // Update the target user's subscription status
+      await db.collection('users').doc(userId).update({
+        subscriptionStatus: 'active',
+        subscriptionType: 'lifetime'
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[Admin] Error bypassing paywall:', error);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
   app.post("/api/create-checkout-session", authenticate, async (req, res) => {
     const { sports } = req.body;
     const user = (req as any).user;
@@ -441,7 +469,7 @@ async function startServer() {
     }
 
     const numSports = sports.length;
-    const totalAmount = (16 + (numSports - 1) * 8) * 100; // in cents
+    const totalAmount = (12 + (numSports - 1) * 9) * 100; // in cents
 
     if (!stripe) {
       console.error("[Stripe] Error: Stripe not configured (missing secret key)");
@@ -900,6 +928,39 @@ async function startServer() {
     }
   });
 
+  // API-Sports Basketball v1 API
+  const apiSportsBasketballBaseUrl = "https://v1.basketball.api-sports.io";
+
+  app.get("/api/basketball/:endpoint*", authenticate, async (req, res) => {
+    try {
+      const endpoint = req.params.endpoint + (req.params[0] || "");
+      const queryParams = new URLSearchParams(req.query as any).toString();
+      const url = `${apiSportsBasketballBaseUrl}/${endpoint}${queryParams ? `?${queryParams}` : ""}`;
+      
+      // Use shorter cache for odds, longer for bookmakers
+      const isOdds = endpoint.includes("odds");
+      const ttlMs = isOdds ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000; // 5 mins for odds, 24 hours for others
+      
+      const cacheKey = `api-sports-basketball-${url}`;
+      const cachedData = apiCache.get(cacheKey);
+      if (cachedData) return res.json(cachedData);
+
+      console.log(`[API-Sports Basketball] Fetching: ${url}`);
+      const response = await axios.get(url, {
+        headers: {
+          "x-apisports-key": apiSportsKey
+        },
+        timeout: 30000
+      });
+
+      apiCache.set(cacheKey, response.data, ttlMs);
+      res.json(response.data);
+    } catch (error: any) {
+      console.error(`[API-Sports Basketball] Error fetching ${req.params.endpoint}:`, error.response?.data || error.message);
+      res.status(error.response?.status || 500).json(error.response?.data || { error: error.message });
+    }
+  });
+
   app.get("/api/nba/test-connection", authenticate, async (req, res) => {
     try {
       const url = `${apiSportsBaseUrl}/status`;
@@ -978,13 +1039,7 @@ const fetchKalshiWithRetry = async (
   }
 };
 
-// Legacy provider routes removed
-app.use("/api/sportradar", authenticate, (req, res) => {
-  return res.status(410).json({
-    error: "Legacy API removed",
-    message: "Sportradar routes have been removed. Use API-Sports instead.",
-  });
-});
+
 
   let vite: any;
   const distPath = path.join(__dirname, "dist");

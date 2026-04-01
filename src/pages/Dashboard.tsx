@@ -60,6 +60,7 @@ import { AdminTab } from "../components/Dashboard/AdminTab";
 import { GameGrid } from "../components/Dashboard/GameGrid";
 import { DashboardHeader } from "../components/Dashboard/DashboardHeader";
 import { apiSportsService } from "../services/apiSports";
+import { apiSportsBasketballService } from "../services/apiSportsBasketball";
 import { Joyride, STATUS } from "react-joyride";
 import type { Step } from "react-joyride";
 // Robust Joyride component retrieval
@@ -942,32 +943,169 @@ const fetchGames = async (force: boolean = false) => {
     if (activeTab === "NBA" && Array.isArray(apiSportsGames)) {
       if (apiSportsGames.length > 0) {
         setApiSportsStatus({ status: 'success', count: apiSportsGames.length });
-        console.log(`[Dashboard] fetchGames: Mapping API-Sports IDs to ${fetchedGames.length} games...`);
-        fetchedGames.forEach((g) => {
-          const apiGame = apiSportsGames.find((ag) => {
-            if (!ag?.teams?.home?.name || !ag?.teams?.away?.name) return false;
+        
+        if (fetchedGames.length === 0) {
+          console.log(`[Dashboard] fetchGames: ESPN returned 0 games. Using API-Sports games instead.`);
+          fetchedGames = apiSportsGames.map(ag => {
+            const statusStr = ag.status?.short || 'NS';
+            let status: 'scheduled' | 'live' | 'finished' = 'scheduled';
+            if (['1Q', '2Q', '3Q', '4Q', 'OT', 'HT'].includes(statusStr)) status = 'live';
+            if (['FT', 'AOT'].includes(statusStr)) status = 'finished';
 
-            const normalize = (name: string) =>
-              name?.toLowerCase().replace(/[^a-z0-9]/g, "").trim() || "";
-            const agHome = normalize(ag.teams.home.name);
-            const agAway = normalize(ag.teams.away.name);
-            const gHome = normalize(g.homeTeam);
-            const gAway = normalize(g.awayTeam);
+            const safeDateStr = ag.date ? ag.date.split("T")[0] : dateStrIso;
+            const timeStr = ag.time || (ag.date ? ag.date.split("T")[1]?.substring(0, 5) : "00:00");
 
-            // Fuzzy match team names
-            return (
-              (agHome === gHome && agAway === gAway) ||
-              (agHome.includes(gHome) && agAway.includes(gAway)) ||
-              (gHome.includes(agHome) && gAway.includes(agAway))
-            );
+            return {
+              id: `nba-${ag.teams.away.name}-${ag.teams.home.name}-${safeDateStr}`.toLowerCase().replace(/[^a-z0-9]/g, "-"),
+              league: 'NBA',
+              homeTeam: ag.teams.home.name,
+              awayTeam: ag.teams.away.name,
+              homeLogo: ag.teams.home.logo,
+              awayLogo: ag.teams.away.logo,
+              date: safeDateStr,
+              time: timeStr,
+              location: ag.venue || "Unknown",
+              status: status,
+              homeScore: ag.scores?.home?.total,
+              awayScore: ag.scores?.away?.total,
+              apiSportsGameId: ag.id,
+              apiSportsHomeTeamId: ag.teams.home.id,
+              apiSportsAwayTeamId: ag.teams.away.id,
+            };
           });
+        } else {
+          console.log(`[Dashboard] fetchGames: Mapping API-Sports IDs to ${fetchedGames.length} games...`);
+          fetchedGames.forEach((g) => {
+            const apiGame = apiSportsGames.find((ag) => {
+              if (!ag?.teams?.home?.name || !ag?.teams?.away?.name) return false;
 
-          if (apiGame?.teams?.home && apiGame?.teams?.away) {
-            g.apiSportsGameId = apiGame.id;
-            g.apiSportsHomeTeamId = apiGame.teams.home.id;
-            g.apiSportsAwayTeamId = apiGame.teams.away.id;
+              const normalize = (name: string) =>
+                name?.toLowerCase().replace(/[^a-z0-9]/g, "").trim() || "";
+              const agHome = normalize(ag.teams.home.name);
+              const agAway = normalize(ag.teams.away.name);
+              const gHome = normalize(g.homeTeam);
+              const gAway = normalize(g.awayTeam);
+
+              // Fuzzy match team names
+              return (
+                (agHome === gHome && agAway === gAway) ||
+                (agHome.includes(gHome) && agAway.includes(gAway)) ||
+                (gHome.includes(agHome) && gAway.includes(agAway))
+              );
+            });
+
+            if (apiGame?.teams?.home && apiGame?.teams?.away) {
+              g.apiSportsGameId = apiGame.id;
+              g.apiSportsHomeTeamId = apiGame.teams.home.id;
+              g.apiSportsAwayTeamId = apiGame.teams.away.id;
+            }
+          });
+        }
+        
+        // Fetch odds for all NBA games
+        console.log(`[Dashboard] fetchGames: Fetching odds for ${fetchedGames.length} NBA games...`);
+        const gamesWithOdds = await Promise.all(fetchedGames.map(async (g) => {
+          if (g.apiSportsGameId) {
+            try {
+              const oddsData = await apiSportsBasketballService.getOddsForGame(g.apiSportsGameId);
+              if (oddsData && oddsData.length > 0) {
+                const gameOdds = oddsData[0];
+                
+                // Populate all bookmakers
+                g.allBookmakers = gameOdds.bookmakers.map(b => {
+                  const homeAwayBet = b.bets.find(bet => bet.betName === 'Home/Away');
+                  const homeOddStr = homeAwayBet?.values.find(v => v.value === 'Home')?.odd;
+                  const awayOddStr = homeAwayBet?.values.find(v => v.value === 'Away')?.odd;
+                  
+                  // Convert decimal odds to American odds
+                  const toAmerican = (decimal: string | undefined) => {
+                    if (!decimal) return undefined;
+                    const dec = parseFloat(decimal);
+                    if (isNaN(dec)) return undefined;
+                    if (dec >= 2.0) {
+                      return Math.round((dec - 1) * 100);
+                    } else {
+                      return Math.round(-100 / (dec - 1));
+                    }
+                  };
+
+                  const homeOdd = toAmerican(homeOddStr);
+                  const awayOdd = toAmerican(awayOddStr);
+                  
+                  // Try to find spread (Handicap)
+                  const handicapBet = b.bets.find(bet => bet.betName === 'Handicap Result' || bet.betName === 'Asian Handicap');
+                  let spreadVal: number | undefined;
+                  if (handicapBet && handicapBet.values.length > 0) {
+                    // Extract spread from value like "Home -5.5" or "-5.5"
+                    const val = handicapBet.values[0].value;
+                    const match = val.match(/[-+]?[0-9]*\.?[0-9]+/);
+                    if (match) spreadVal = parseFloat(match[0]);
+                  }
+
+                  // Try to find total (Over/Under)
+                  const totalBet = b.bets.find(bet => bet.betName === 'Over/Under');
+                  let totalVal: number | undefined;
+                  if (totalBet && totalBet.values.length > 0) {
+                    const val = totalBet.values[0].value;
+                    const match = val.match(/[-+]?[0-9]*\.?[0-9]+/);
+                    if (match) totalVal = parseFloat(match[0]);
+                  }
+                  
+                  return {
+                    id: b.bookmakerId,
+                    name: b.bookmakerName,
+                    homeML: homeOdd,
+                    awayML: awayOdd,
+                    spread: spreadVal,
+                    total: totalVal,
+                  };
+                }).filter(b => b.homeML !== undefined && b.awayML !== undefined);
+
+                // Try to find a reputable bookmaker, e.g., Betcris, bet365, Bovada, Pinnacle
+                const bookmaker = gameOdds.bookmakers.find(b => 
+                  ['bet365', 'Bovada', 'Pinnacle', 'Betcris'].includes(b.bookmakerName)
+                ) || gameOdds.bookmakers[0];
+                
+                if (bookmaker) {
+                  const homeAwayBet = bookmaker.bets.find(bet => bet.betName === 'Home/Away');
+                  if (homeAwayBet && homeAwayBet.values.length >= 2) {
+                    const homeOddStr = homeAwayBet.values.find(v => v.value === 'Home')?.odd;
+                    const awayOddStr = homeAwayBet.values.find(v => v.value === 'Away')?.odd;
+                    
+                    const toAmerican = (decimal: string | undefined) => {
+                      if (!decimal) return undefined;
+                      const dec = parseFloat(decimal);
+                      if (isNaN(dec)) return undefined;
+                      if (dec >= 2.0) {
+                        return Math.round((dec - 1) * 100);
+                      } else {
+                        return Math.round(-100 / (dec - 1));
+                      }
+                    };
+
+                    const homeOdd = toAmerican(homeOddStr);
+                    const awayOdd = toAmerican(awayOddStr);
+                    
+                    if (homeOdd && awayOdd) {
+                      g.marketOdds = {
+                        ...g.marketOdds,
+                        homeML: homeOdd,
+                        awayML: awayOdd,
+                        source: bookmaker.bookmakerName
+                      };
+                    }
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn(`[Dashboard] fetchGames: Failed to fetch odds for game ${g.id}`, err);
+            }
           }
-        });
+          return g;
+        }));
+        
+        fetchedGames = gamesWithOdds;
+
       } else {
         setApiSportsStatus({ status: 'idle', count: 0, message: "No games found for this date in API-Sports" });
       }
