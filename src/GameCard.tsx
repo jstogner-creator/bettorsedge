@@ -31,6 +31,7 @@ interface GameCardProps {
   game: Game;
   prediction?: Prediction | null;
   isAnalyzing?: boolean;
+  isAdminUser?: boolean;
   onReanalyze?: (game: Game) => void;
   onDiscuss?: () => void;
   onLogBet?: (bet: Omit<Bet, 'id' | 'userId' | 'createdAt' | 'status'>) => void;
@@ -41,6 +42,7 @@ export const GameCard: React.FC<GameCardProps> = ({
   game, 
   prediction, 
   isAnalyzing, 
+  isAdminUser,
   onReanalyze, 
   onDiscuss,
   onLogBet,
@@ -222,6 +224,9 @@ export const GameCard: React.FC<GameCardProps> = ({
             )}>
               {game.status}
             </span>
+            <span title="This card displays game details, betting odds, and AI-driven analysis for the matchup.">
+              <Info className="w-3 h-3 text-slate-500 cursor-help" />
+            </span>
             {hasInjuries && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-amber-500/10 text-amber-500 border-amber-500/20 flex items-center">
                 <AlertTriangle className="w-3 h-3 mr-1" />
@@ -259,7 +264,7 @@ export const GameCard: React.FC<GameCardProps> = ({
           </div>
         </div>
 
-        <div className="p-4 space-y-3">
+        <div className="p-4 space-y-4">
           {/* Away Team Row */}
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -286,9 +291,10 @@ export const GameCard: React.FC<GameCardProps> = ({
                   )}
                 </div>
                 {game.awayTeamStats && (
-                  <div className="text-[10px] text-slate-500 font-mono flex items-center mt-0.5 gap-2">
-                    <span className="bg-slate-800/50 px-1.5 py-0.5 rounded border border-slate-700/30 text-slate-400 font-bold">{game.awayTeamStats.record}</span>
-                    <span className="text-slate-500">Last 5: <span className="text-slate-400 font-bold">{game.awayTeamStats.last5}</span></span>
+                  <div className="text-[10px] text-slate-500 font-mono flex flex-wrap items-center mt-1 gap-x-3 gap-y-1">
+                    <span className="bg-slate-800/50 px-2 py-0.5 rounded border border-slate-700/30 text-slate-400 font-bold">{game.awayTeamStats.record}</span>
+                    {game.awayTeamStats.winPercentage && <span className="text-slate-500">Win%: <span className="text-slate-400 font-bold">{game.awayTeamStats.winPercentage}</span></span>}
+                    {game.awayTeamStats.last5 !== "N/A" && <span className="text-slate-500">Last 5: <span className="text-slate-400 font-bold">{game.awayTeamStats.last5}</span></span>}
                     {game.awayTeamStats.ats && <span className="text-slate-500">ATS: <span className="text-slate-400 font-bold">{game.awayTeamStats.ats}</span></span>}
                   </div>
                 )}
@@ -335,9 +341,10 @@ export const GameCard: React.FC<GameCardProps> = ({
                   )}
                 </div>
                 {game.homeTeamStats && (
-                  <div className="text-[10px] text-slate-500 font-mono flex items-center mt-0.5 gap-2">
-                    <span className="bg-slate-800/50 px-1.5 py-0.5 rounded border border-slate-700/30 text-slate-400 font-bold">{game.homeTeamStats.record}</span>
-                    <span className="text-slate-500">Last 5: <span className="text-slate-400 font-bold">{game.homeTeamStats.last5}</span></span>
+                  <div className="text-[10px] text-slate-500 font-mono flex flex-wrap items-center mt-1 gap-x-3 gap-y-1">
+                    <span className="bg-slate-800/50 px-2 py-0.5 rounded border border-slate-700/30 text-slate-400 font-bold">{game.homeTeamStats.record}</span>
+                    {game.homeTeamStats.winPercentage && <span className="text-slate-500">Win%: <span className="text-slate-400 font-bold">{game.homeTeamStats.winPercentage}</span></span>}
+                    {game.homeTeamStats.last5 !== "N/A" && <span className="text-slate-500">Last 5: <span className="text-slate-400 font-bold">{game.homeTeamStats.last5}</span></span>}
                     {game.homeTeamStats.ats && <span className="text-slate-500">ATS: <span className="text-slate-400 font-bold">{game.homeTeamStats.ats}</span></span>}
                   </div>
                 )}
@@ -409,6 +416,9 @@ export const GameCard: React.FC<GameCardProps> = ({
                 <div className="text-[9px] uppercase text-slate-500 font-bold mb-2 flex justify-between items-center">
                   <div className="flex items-center gap-2">
                     <span>Market Odds</span>
+                    <span title="Current betting odds from available bookmakers, including Moneyline, Spread, and Total.">
+                      <Info className="w-3 h-3 text-slate-500 cursor-help" />
+                    </span>
                     {game.allBookmakers && game.allBookmakers.length > 0 ? (
                       <select 
                         className="bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5 text-[9px] outline-none focus:border-indigo-500"
@@ -451,7 +461,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                 </div>
               </div>
             )}
-            {onReanalyze && (
+            {isAdminUser && onReanalyze && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -468,6 +478,18 @@ export const GameCard: React.FC<GameCardProps> = ({
               <Brain className={cn("w-4 h-4 mr-2", isAnalyzing && "animate-bounce")} />
               {isAnalyzing ? "Analyzing..." : (prediction ? "Reanalyze Matchup" : "Analyze Matchup")}
             </button>
+            )}
+            {isAdminUser && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  console.log("Confirm Injuries");
+                }}
+                className="w-full py-2.5 mt-2 rounded-lg flex items-center justify-center transition-all font-bold text-sm bg-rose-600 hover:bg-rose-500 text-white shadow-rose-500/20"
+              >
+                <CheckCircle className="w-4 h-4 mr-2" />
+                Confirm Injuries
+              </button>
             )}
           </div>
         )}
@@ -639,33 +661,6 @@ export const GameCard: React.FC<GameCardProps> = ({
                         Discuss
                       </button>
                     )}
-                    {onLogBet && prediction && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // Default to ML bet for the predicted winner
-                          const odds = prediction.winProbability ? (1 / prediction.winProbability) : 2.0;
-                          onLogBet({
-                            gameId: game.id,
-                            league: game.league,
-                            date: game.date,
-                            team: prediction.winner,
-                            type: 'ML',
-                            amount: 100, // Default amount
-                            odds: Number(odds.toFixed(2)),
-                            gameInfo: {
-                              homeTeam: game.homeTeam,
-                              awayTeam: game.awayTeam
-                            }
-                          });
-                        }}
-                        className="flex-1 sm:flex-none p-2.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg transition-colors flex items-center justify-center gap-2 text-xs font-bold border border-emerald-600/20"
-                        title="Log this as a simulated bet"
-                      >
-                        <DollarSign className="w-3.5 h-3.5" />
-                        Log Bet
-                      </button>
-                    )}
                   </div>
                 </div>
               </div>
@@ -727,33 +722,6 @@ export const GameCard: React.FC<GameCardProps> = ({
                   </div>
                 )}
 
-                {/* Previous Matchups - Moved to top under score prediction */}
-                {Array.isArray(prediction.previousMatchups) && prediction.previousMatchups.length > 0 && (
-                  <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-5 mb-4 shadow-lg shadow-indigo-500/5 transition-all hover:shadow-indigo-500/10">
-                    <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center">
-                      <Activity className="w-4 h-4 mr-2" />
-                      Recent Head-to-Head
-                    </h4>
-                    <div className="space-y-3">
-                      {prediction.previousMatchups.map((match, idx) => (
-                        <div key={idx} className="flex justify-between items-center text-xs border-b border-slate-800/30 last:border-0 pb-2 last:pb-0 hover:bg-slate-800/20 px-2 -mx-2 rounded transition-colors">
-                          <span className="text-slate-500 font-bold uppercase tracking-tighter">{match.date}</span>
-                          <div className="flex items-center gap-3">
-                            <span className="text-slate-300 font-mono font-bold">
-                              {match.awayTeam} {match.awayScore} - {match.homeScore} {match.homeTeam}
-                            </span>
-                            {match.awayScore > match.homeScore ? (
-                              <span className="text-[8px] bg-indigo-500/10 text-indigo-400 px-1 py-0.5 rounded border border-indigo-500/20 font-black uppercase tracking-tighter">AWAY W</span>
-                            ) : match.homeScore > match.awayScore ? (
-                              <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1 py-0.5 rounded border border-emerald-500/20 font-black uppercase tracking-tighter">HOME W</span>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {/* Matchup Rankings Section */}
                 {prediction.matchupRankings && (
                   <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 shadow-inner mb-4">
@@ -762,6 +730,9 @@ export const GameCard: React.FC<GameCardProps> = ({
                         <Activity className="w-3.5 h-3.5 text-indigo-400" />
                       </div>
                       Current Team Stat Standing Comparisons
+                      <span title="Compares team rankings in key statistical categories to highlight potential advantages.">
+                        <Info className="w-3 h-3 text-slate-500 cursor-help" />
+                      </span>
                     </h4>
                     <div className="space-y-5">
                       {[
@@ -812,6 +783,36 @@ export const GameCard: React.FC<GameCardProps> = ({
                   </div>
                 )}
 
+                {/* Previous Matchups - Moved to top under score prediction */}
+                {Array.isArray(prediction.previousMatchups) && prediction.previousMatchups.length > 0 && (
+                  <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-5 mb-4 shadow-lg shadow-indigo-500/5 transition-all hover:shadow-indigo-500/10">
+                    <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center">
+                      <Activity className="w-4 h-4 mr-2" />
+                      Recent Head-to-Head
+                      <span title="Results of previous matchups between these two teams.">
+                        <Info className="w-3 h-3 text-indigo-500/50 cursor-help ml-2" />
+                      </span>
+                    </h4>
+                    <div className="space-y-3">
+                      {prediction.previousMatchups.map((match, idx) => (
+                        <div key={idx} className="flex justify-between items-center text-xs border-b border-slate-800/30 last:border-0 pb-2 last:pb-0 hover:bg-slate-800/20 px-2 -mx-2 rounded transition-colors">
+                          <span className="text-slate-500 font-bold uppercase tracking-tighter">{match.date}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-slate-300 font-mono font-bold">
+                              {match.awayTeam} {match.awayScore} - {match.homeScore} {match.homeTeam}
+                            </span>
+                            {match.awayScore > match.homeScore ? (
+                              <span className="text-[8px] bg-indigo-500/10 text-indigo-400 px-1 py-0.5 rounded border border-indigo-500/20 font-black uppercase tracking-tighter">AWAY W</span>
+                            ) : match.homeScore > match.awayScore ? (
+                              <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1 py-0.5 rounded border border-emerald-500/20 font-black uppercase tracking-tighter">HOME W</span>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Key Factors Section */}
                 {Array.isArray(prediction.keyFactors) && prediction.keyFactors.length > 0 && (
                   <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-5 shadow-sm mb-4">
@@ -820,6 +821,9 @@ export const GameCard: React.FC<GameCardProps> = ({
                         <Zap className="w-3.5 h-3.5 fill-current" />
                       </div>
                       Key Advantages
+                      <span title="Key factors identified by the AI that may influence the game outcome.">
+                        <Info className="w-3 h-3 text-indigo-500/50 cursor-help" />
+                      </span>
                     </h4>
                     <div className="space-y-2.5">
                       {prediction.keyFactors.map((factor, idx) => (

@@ -35,7 +35,7 @@ export function Paywall({ onSubscribe, initialSports = ['NBA'], existingSports =
 
   const calculatePrice = () => {
     if (selectedSports.length === 0) return 0;
-    return 16 + (selectedSports.length - 1) * 8;
+    return 12 + (selectedSports.length - 1) * 9;
   };
 
   const handleSubscribe = async () => {
@@ -139,12 +139,12 @@ export function Paywall({ onSubscribe, initialSports = ['NBA'], existingSports =
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-slate-400">
                 <Check className="w-3 h-3 text-emerald-500" />
-                <span>$16.00 for the first sport</span>
+                <span>$12.00 for the first sport</span>
               </div>
               {selectedSports.length > 1 && (
                 <div className="flex items-center gap-2 text-xs text-slate-400">
                   <Check className="w-3 h-3 text-emerald-500" />
-                  <span>$8.00 per additional sport (x{selectedSports.length - 1})</span>
+                  <span>$9.00 per additional sport (x{selectedSports.length - 1})</span>
                 </div>
               )}
               {existingSports.length > 0 && newSportsCount > 0 && (

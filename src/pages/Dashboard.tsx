@@ -798,6 +798,57 @@ export function Dashboard({
     return () => clearInterval(interval);
   }, [games, savedPredictions, alertedGames]);
 
+  // Scheduler for daily analysis
+  useEffect(() => {
+    const runScheduledAnalysis = async () => {
+      const lastRunDate = localStorage.getItem("lastScheduledAnalysisDate");
+      const today = format(new Date(), "yyyy-MM-dd");
+      
+      if (lastRunDate === today) {
+        console.log("[Scheduler] Analysis already run today.");
+        return;
+      }
+
+      const now = new Date();
+      const scheduledTime = new Date();
+      scheduledTime.setHours(8, 0, 0, 0); // 8:00 AM
+
+      if (now >= scheduledTime) {
+        console.log("[Scheduler] It's time for daily analysis. Running...");
+        await analyzeAllSports();
+        localStorage.setItem("lastScheduledAnalysisDate", today);
+      }
+    };
+
+    // Check every minute
+    const interval = setInterval(runScheduledAnalysis, 60000);
+    runScheduledAnalysis(); // Run on mount
+    return () => clearInterval(interval);
+  }, [user, allPredictions]); // Re-run if user or predictions change
+
+  const analyzeAllSports = async () => {
+    const leagues = ["NBA", "NFL", "MLB", "NHL", "NCAA"];
+    console.log("[Scheduler] Starting analysis for all sports:", leagues);
+    
+    for (const league of leagues) {
+      console.log(`[Scheduler] Analyzing ${league}...`);
+      // We need to trigger the analysis for each league.
+      // Since handleAutoAnalyze is tied to activeTab, we can temporarily set activeTab.
+      setActiveTab(league);
+      
+      // Wait for activeTab to update and games to be fetched
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Trigger analysis
+      await handleAutoAnalyze(true); // Force analyze
+      
+      // Wait for analysis to finish (basic check)
+      await new Promise(resolve => setTimeout(resolve, 10000));
+    }
+    console.log("[Scheduler] All sports analyzed.");
+  };
+
+
   // Polling for Kalshi Odds
   useEffect(() => {
     // Only poll if we have games loaded
@@ -1596,8 +1647,8 @@ const fetchGames = async (force: boolean = false) => {
 
       let completedCount = filteredGames.length - gamesToAnalyze.length;
 
-      // Process in batches of 3 to improve performance while respecting rate limits
-      const CONCURRENCY = 3;
+      // Process in batches of 1 to improve performance while respecting rate limits
+      const CONCURRENCY = 1;
       for (let i = 0; i < gamesToAnalyze.length; i += CONCURRENCY) {
         if (cancelAnalysisRef.current[targetLeague]) {
           setToast({ message: "Analysis stopped by user.", type: "info" });

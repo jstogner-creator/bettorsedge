@@ -33,8 +33,8 @@ export type ApiError = {
   details?: unknown;
 };
 
-class ApiSportsBasketballService {
-  private baseUrl = "/api/basketball";
+class ApiSportsMlbService {
+  private baseUrl = "/api/mlb";
   private bookmakersCache: Bookmaker[] | null = null;
   private bookmakersCacheTime: number = 0;
   private readonly BOOKMAKERS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
@@ -42,18 +42,11 @@ class ApiSportsBasketballService {
   private oddsCache: Map<string, { data: NormalizedOddsResponse[], timestamp: number }> = new Map();
   private readonly ODDS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-  /**
-   * Helper to get auth headers
-   */
   private async getHeaders() {
     const token = await getIdToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
-  /**
-   * Get the full list of supported bookmakers.
-   * Caches the result in memory for 24 hours.
-   */
   async getBookmakers(): Promise<Bookmaker[]> {
     if (this.bookmakersCache && Date.now() - this.bookmakersCacheTime < this.BOOKMAKERS_CACHE_TTL) {
       return this.bookmakersCache;
@@ -75,14 +68,11 @@ class ApiSportsBasketballService {
       }
       return [];
     } catch (error: any) {
-      console.error("[API-Sports Basketball] Error fetching bookmakers:", error);
+      console.error("[API-Sports MLB] Error fetching bookmakers:", error);
       throw this.formatError(error);
     }
   }
 
-  /**
-   * Get odds with optional filters.
-   */
   async getOdds(filters: {
     season?: string;
     league?: number | string;
@@ -112,34 +102,12 @@ class ApiSportsBasketballService {
       }
       return [];
     } catch (error: any) {
-      console.error("[API-Sports Basketball] Error fetching odds:", error);
+      console.error("[API-Sports MLB] Error fetching odds:", error);
       throw this.formatError(error);
     }
   }
 
-  /**
-   * Helper to get odds for a specific game.
-   */
-  async getOddsForGame(
-    gameId: number | string,
-    options?: {
-      season?: string;
-      league?: number | string;
-      bookmaker?: number | string;
-      bet?: number | string;
-    }
-  ): Promise<NormalizedOddsResponse[]> {
-    return this.getOdds({
-      game: gameId,
-      ...options,
-    });
-  }
-
-  /**
-   * Normalizes the raw API odds response into a cleaner structure.
-   */
   async normalizeOddsResponse(apiResponse: any[]): Promise<NormalizedOddsResponse[]> {
-    // Ensure we have bookmakers to map IDs to names
     let bookmakersMap: Record<number, string> = {};
     try {
       const bookmakers = await this.getBookmakers();
@@ -148,7 +116,7 @@ class ApiSportsBasketballService {
         return acc;
       }, {} as Record<number, string>);
     } catch (e) {
-      console.warn("[API-Sports Basketball] Failed to fetch bookmakers for mapping, names will fallback to 'Unknown'");
+      console.warn("[API-Sports MLB] Failed to fetch bookmakers for mapping, names will fallback to 'Unknown'");
     }
 
     return apiResponse.map((item: any) => {
@@ -183,9 +151,6 @@ class ApiSportsBasketballService {
     });
   }
 
-  /**
-   * Formats Axios errors into a clean ApiError structure.
-   */
   private formatError(error: any): ApiError {
     if (error.response) {
       return {
@@ -205,4 +170,4 @@ class ApiSportsBasketballService {
   }
 }
 
-export const apiSportsBasketballService = new ApiSportsBasketballService();
+export const apiSportsMlbService = new ApiSportsMlbService();

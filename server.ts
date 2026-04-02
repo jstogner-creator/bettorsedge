@@ -77,19 +77,16 @@ async function startServer() {
     console.warn("[Stripe] WARNING: STRIPE_SECRET_KEY is not set. Payments will not work.");
   }
 
-  /*
   // Security Middlewares
   app.use(helmet({
     contentSecurityPolicy: false, // Disable CSP for development/Vite compatibility
     crossOriginEmbedderPolicy: false,
     frameguard: false, // Allow rendering in iframes (AI Studio)
   }));
-  */
 
-  /*
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per windowMs
+    max: 1000, // Increased limit to 1000 requests per windowMs for better usability
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Too many requests, please try again later." }
@@ -97,7 +94,6 @@ async function startServer() {
 
   // Apply rate limiting to all API routes
   app.use("/api/", limiter);
-  */
 
   // Standard Middlewares
   app.use(express.json());
@@ -930,22 +926,26 @@ async function startServer() {
 
   // API-Sports Basketball v1 API
   const apiSportsBasketballBaseUrl = "https://v1.basketball.api-sports.io";
+  // API-Sports MLB v1 API
+  const apiSportsMlbBaseUrl = "https://v1.baseball.api-sports.io";
+  // API-Sports NHL v2 API (as requested)
+  const apiSportsNhlBaseUrl = "https://v2.nba.api-sports.io";
 
-  app.get("/api/basketball/:endpoint*", authenticate, async (req, res) => {
+  const proxyApiSports = async (req: express.Request, res: express.Response, baseUrl: string, name: string) => {
     try {
       const endpoint = req.params.endpoint + (req.params[0] || "");
       const queryParams = new URLSearchParams(req.query as any).toString();
-      const url = `${apiSportsBasketballBaseUrl}/${endpoint}${queryParams ? `?${queryParams}` : ""}`;
+      const url = `${baseUrl}/${endpoint}${queryParams ? `?${queryParams}` : ""}`;
       
       // Use shorter cache for odds, longer for bookmakers
       const isOdds = endpoint.includes("odds");
       const ttlMs = isOdds ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000; // 5 mins for odds, 24 hours for others
       
-      const cacheKey = `api-sports-basketball-${url}`;
+      const cacheKey = `api-sports-${name}-${url}`;
       const cachedData = apiCache.get(cacheKey);
       if (cachedData) return res.json(cachedData);
 
-      console.log(`[API-Sports Basketball] Fetching: ${url}`);
+      console.log(`[API-Sports ${name}] Fetching: ${url}`);
       const response = await axios.get(url, {
         headers: {
           "x-apisports-key": apiSportsKey
@@ -956,9 +956,21 @@ async function startServer() {
       apiCache.set(cacheKey, response.data, ttlMs);
       res.json(response.data);
     } catch (error: any) {
-      console.error(`[API-Sports Basketball] Error fetching ${req.params.endpoint}:`, error.response?.data || error.message);
+      console.error(`[API-Sports ${name}] Error fetching ${req.params.endpoint}:`, error.response?.data || error.message);
       res.status(error.response?.status || 500).json(error.response?.data || { error: error.message });
     }
+  };
+
+  app.get("/api/basketball/:endpoint*", authenticate, async (req, res) => {
+    await proxyApiSports(req, res, apiSportsBasketballBaseUrl, "Basketball");
+  });
+
+  app.get("/api/mlb/:endpoint*", authenticate, async (req, res) => {
+    await proxyApiSports(req, res, apiSportsMlbBaseUrl, "MLB");
+  });
+
+  app.get("/api/nhl/:endpoint*", authenticate, async (req, res) => {
+    await proxyApiSports(req, res, apiSportsNhlBaseUrl, "NHL");
   });
 
   app.get("/api/nba/test-connection", authenticate, async (req, res) => {
