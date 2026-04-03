@@ -71,7 +71,7 @@ export function Paywall({ onSubscribe, initialSports = ['NBA'], existingSports =
         className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl relative"
       >
         <button 
-          onClick={handleLogout}
+          onClick={() => handleLogout().catch(console.error)}
           className="absolute top-6 right-6 p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-full transition-colors"
           title="Sign Out"
         >
@@ -157,7 +157,7 @@ export function Paywall({ onSubscribe, initialSports = ['NBA'], existingSports =
           </div>
 
           <button
-            onClick={handleSubscribe}
+            onClick={() => handleSubscribe().catch(console.error)}
             disabled={newSportsCount === 0 || isLoading}
             className="w-full h-14 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-900 font-bold rounded-2xl transition-all flex items-center justify-center gap-2 text-lg"
           >

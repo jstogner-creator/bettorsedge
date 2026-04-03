@@ -7,6 +7,9 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react(), tailwindcss()],
+    build: {
+      outDir: 'dist',
+    },
     // NOTE: Gemini key is now used server-side only (see server.ts).
     resolve: {
       alias: {

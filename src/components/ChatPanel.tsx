@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MessageSquare, X, Send, Loader2, User, Bot, ChevronDown, Zap, Activity, Trophy } from 'lucide-react';
 import { ChatMessage, Game, Prediction } from '../types';
-import { sportsOracle } from '../services/gemini';
+import { bettorsEdge } from '../services/gemini';
 import { cn } from '../lib/utils';
 import ReactMarkdown from 'react-markdown';
 
@@ -17,7 +17,7 @@ export function ChatPanel({ games, predictions }: ChatPanelProps) {
     {
       id: 'initial',
       role: 'assistant',
-      content: "I'm Snark. I analyze the numbers, find the edge, and tell it like it is. What do you want to know?",
+      content: "I'm Snark. I analyze the numbers, find the value, and tell it like it is. What do you want to know?",
       timestamp: new Date().toISOString(),
     }
   ]);
@@ -63,7 +63,7 @@ export function ChatPanel({ games, predictions }: ChatPanelProps) {
 
     try {
       const history = messages.map(m => ({ role: m.role, content: m.content }));
-      const response = await sportsOracle.chat(input, history, { games, predictions });
+      const response = await bettorsEdge.chat(input, history, { games, predictions });
 
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -125,10 +125,10 @@ export function ChatPanel({ games, predictions }: ChatPanelProps) {
                   </div>
                   <h4 className="text-xl font-bold text-white mb-3">Consult Snark</h4>
                   <p className="text-slate-400 text-sm leading-relaxed">
-                    Ask about specific matchups, injury impacts, or betting value. I have the data, you just need to ask.
+                    Ask about specific matchups, injury impacts, or analytical value. I have the data, you just need to ask.
                   </p>
                   <div className="mt-8 grid grid-cols-1 gap-2 w-full">
-                    {['"Who has the edge in the Lakers game?"', '"Analyze the injury impact for the Celtics"', '"Find me a high-value underdog today"'].map((suggestion) => (
+                    {['"Who has the edge in the Lakers game?"', '"Analyze the injury impact for the Celtics"', '"Find me a high-potential upset today"'].map((suggestion) => (
                       <button
                         key={suggestion}
                         onClick={() => setInput(suggestion.replace(/"/g, ''))}
@@ -180,7 +180,7 @@ export function ChatPanel({ games, predictions }: ChatPanelProps) {
             </div>
 
             {/* Input */}
-            <form onSubmit={handleSend} className="p-4 border-t border-slate-800 bg-slate-900/50">
+            <form onSubmit={(e) => handleSend(e).catch(console.error)} className="p-4 border-t border-slate-800 bg-slate-900/50">
               <div className="relative">
                 <input
                   type="text"

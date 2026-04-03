@@ -67,12 +67,12 @@ export const FAQ: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       items: [
         {
           question: "What is Bettors Edge?",
-          answer: "Bettors Edge is an AI-powered decision engine designed to help sports bettors identify positive expected value (+EV) opportunities. We analyze thousands of data points across team strength, matchups, injuries, and market odds to provide clear, actionable insights.",
+          answer: "Bettors Edge is an AI-powered decision engine designed to help sports enthusiasts identify positive expected value (+EV) opportunities. We analyze thousands of data points across team strength, matchups, injuries, and market trends to provide clear, actionable insights.",
           icon: <Zap className="w-4 h-4" />
         },
         {
           question: "Is this financial advice?",
-          answer: "No. All information provided by Bettors Edge is for informational and entertainment purposes only. Sports betting involves significant risk, and you should never bet more than you can afford to lose. We provide data-driven analysis, but final decisions are yours.",
+          answer: "No. All information provided by Bettors Edge is for informational and entertainment purposes only. Sports analysis involves significant uncertainty, and you should never make decisions based solely on AI predictions. We provide data-driven analysis, but final decisions are yours.",
           icon: <ShieldAlert className="w-4 h-4" />
         },
         {
@@ -104,12 +104,12 @@ export const FAQ: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       ]
     },
     {
-      title: "Betting Strategy",
+      title: "Analysis Strategy",
       icon: <TrendingUp className="w-5 h-5" />,
       items: [
         {
           question: "What does 'Positive Expected Value (+EV)' mean?",
-          answer: "A bet has +EV when the probability of it winning is higher than the probability implied by the odds. Over the long term, consistently betting +EV opportunities is the key to profitable sports wagering.",
+          answer: "An analysis has +EV when the probability of an outcome is higher than the probability implied by market trends. Over the long term, consistently identifying +EV opportunities is the key to accurate sports predictions.",
           icon: <TrendingUp className="w-4 h-4" />
         },
         {
@@ -145,7 +145,7 @@ export const FAQ: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               <p>If your question wasn't answered here, please feel free to contact our support team directly.</p>
               <div className="flex items-center gap-2 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-indigo-300">
                 <Mail className="w-4 h-4" />
-                <span className="font-medium">lydia@bettorsedge.ai</span>
+                <span className="font-medium">support@bettorsedge.ai</span>
               </div>
               <p className="text-xs text-slate-500 italic">Please allow 24-48 hours for a response to non-urgent inquiries.</p>
             </div>
@@ -265,7 +265,7 @@ export const FAQ: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           </p>
           <div className="inline-flex items-center gap-2 px-8 py-3 bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-500/20">
             <Mail className="w-5 h-5" />
-            lydia@bettorsedge.ai
+            support@bettorsedge.ai
           </div>
         </div>
       </main>

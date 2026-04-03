@@ -33,9 +33,9 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && 
              (('email' in request.auth.token && 
-               (request.auth.token.email.lower() == "jstogner@risenetworkcabling.com" || 
-                request.auth.token.email.lower() == "jesslandry35@gmail.com" ||
-                request.auth.token.email.lower() == "nousiharatl82@gmail.com")) ||
+               (request.auth.token.email.toLower() == "jstogner@risenetworkcabling.com" || 
+                request.auth.token.email.toLower() == "jesslandry35@gmail.com" ||
+                request.auth.token.email.toLower() == "nousiharatl82@gmail.com")) ||
               (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
     }

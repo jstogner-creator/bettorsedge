@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, TrendingUp, AlertTriangle, ShieldCheck, BrainCircuit, DollarSign, Calculator, Coins, Flag, Scale, Zap, Activity, ExternalLink } from "lucide-react";
+import { X, TrendingUp, AlertTriangle, ShieldCheck, BrainCircuit, Coins, Flag, Scale, Zap, Activity, ExternalLink } from "lucide-react";
 import { Prediction, Game } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import ReactMarkdown from "react-markdown";
@@ -14,7 +14,6 @@ interface PredictionModalProps {
 }
 
 export function PredictionModal({ game, prediction, onClose }: PredictionModalProps) {
-  const [betAmount, setBetAmount] = useState<number>(100);
   const [showReportForm, setShowReportForm] = useState(false);
   const [reportText, setReportText] = useState("");
 
@@ -36,30 +35,6 @@ export function PredictionModal({ game, prediction, onClose }: PredictionModalPr
       console.error("Error submitting report:", error);
     }
   };
-
-  // Determine price: Use real Kalshi odds if available, otherwise AI estimate
-  let price = prediction.kalshiPrice || 0.50;
-  let isRealOdds = false;
-
-  if (game.kalshiOdds && game.kalshiMarketTitle) {
-    const marketTitle = game.kalshiMarketTitle.toLowerCase();
-    const winner = prediction.winner.toLowerCase();
-    // Check if prediction winner is the subject of the market (e.g. "Lakers" in "Lakers to win")
-    // Simple heuristic: check if any significant word from winner name is in market title
-    const winnerWords = winner.split(" ").filter(w => w.length > 3);
-    const isYes = winnerWords.some(w => marketTitle.includes(w)) || marketTitle.includes(winner);
-    
-    const realPrice = isYes ? game.kalshiOdds.yes : game.kalshiOdds.no;
-    if (realPrice) {
-      price = realPrice / 100; // Kalshi prices are in cents (1-99), convert to 0.01-0.99
-      isRealOdds = true;
-    }
-  }
-
-  const contracts = Math.floor(betAmount / price);
-  const payout = contracts * 1.00;
-  const profit = payout - betAmount;
-  const roi = betAmount > 0 ? (profit / betAmount) * 100 : 0;
 
   return (
     <AnimatePresence>
@@ -174,7 +149,7 @@ export function PredictionModal({ game, prediction, onClose }: PredictionModalPr
                       Cancel
                     </button>
                     <button
-                      onClick={handleReport}
+                      onClick={() => handleReport().catch(console.error)}
                       className="px-3 py-1 bg-indigo-600 text-white rounded text-xs hover:bg-indigo-700"
                     >
                       Submit Report
@@ -182,55 +157,6 @@ export function PredictionModal({ game, prediction, onClose }: PredictionModalPr
                   </div>
                 </div>
               )}
-            </div>
-
-            {/* Kalshi Calculator */}
-            <div className="bg-slate-800/30 rounded-xl p-6 border border-indigo-500/20">
-              <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-                <Calculator className="w-5 h-5 text-indigo-400 mr-2" />
-                Kalshi Payout Simulator
-              </h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-2">
-                    Bet Amount ($)
-                  </label>
-                  <div className="relative">
-                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                    <input
-                      type="number"
-                      value={betAmount}
-                      onChange={(e) => setBetAmount(Math.max(0, Number(e.target.value)))}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-white focus:outline-none focus:border-indigo-500 transition-colors"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-2">
-                    Est. Price {isRealOdds && <span className="ml-1 text-emerald-400 font-bold">(Real-Time)</span>}
-                  </label>
-                  <div className="text-xl font-mono text-slate-300">
-                    {(price * 100).toFixed(0)}¢
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1">
-                    Implied Prob: {(price * 100).toFixed(0)}%
-                  </div>
-                </div>
-
-                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
-                  <label className="block text-xs font-mono text-emerald-400 uppercase mb-1">
-                    Potential Profit
-                  </label>
-                  <div className="text-2xl font-bold text-emerald-400">
-                    ${profit.toFixed(2)}
-                  </div>
-                  <div className="text-xs text-emerald-500/70">
-                    ROI: {roi.toFixed(1)}%
-                  </div>
-                </div>
-              </div>
             </div>
 
             {/* Reasoning */}

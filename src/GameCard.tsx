@@ -22,9 +22,8 @@ import {
   BarChart3,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
-import { Game, Prediction, Bet } from "./types";
+import { Game, Prediction } from "./types";
 import { cn } from "./lib/utils";
-import { BetSimulator } from "./components/BetSimulator";
 import { ApiSportsWidgetEmbed } from "./components/ApiSportsWidgets";
 
 interface GameCardProps {
@@ -34,7 +33,6 @@ interface GameCardProps {
   isAdminUser?: boolean;
   onReanalyze?: (game: Game) => void;
   onDiscuss?: () => void;
-  onLogBet?: (bet: Omit<Bet, 'id' | 'userId' | 'createdAt' | 'status'>) => void;
   onSelect?: (game: Game) => void;
 }
 
@@ -45,11 +43,10 @@ export const GameCard: React.FC<GameCardProps> = ({
   isAdminUser,
   onReanalyze, 
   onDiscuss,
-  onLogBet,
   onSelect
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [selectedBookmakerId, setSelectedBookmakerId] = useState<number | null>(null);
+  const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
 
   const handleCardClick = () => {
     setIsExpanded(!isExpanded);
@@ -64,11 +61,11 @@ export const GameCard: React.FC<GameCardProps> = ({
     return () => window.removeEventListener(`expand-game-${game.id}`, handleExpand);
   }, [game.id]);
 
-  // Determine favorite based on Kalshi odds
+  // Determine favorite based on Kalshi expectations
   // Kalshi prices are typically 0-100 (cents) or 0-1 (probability)
   // We'll normalize to 0-1 for internal logic
-  const yesProb = game.kalshiOdds ? (game.kalshiOdds.yes > 1 ? game.kalshiOdds.yes / 100 : game.kalshiOdds.yes) : null;
-  const noProb = game.kalshiOdds ? (game.kalshiOdds.no > 1 ? game.kalshiOdds.no / 100 : game.kalshiOdds.no) : null;
+  const yesProb = game.kalshiExpectations ? (game.kalshiExpectations.yes > 1 ? game.kalshiExpectations.yes / 100 : game.kalshiExpectations.yes) : null;
+  const noProb = game.kalshiExpectations ? (game.kalshiExpectations.no > 1 ? game.kalshiExpectations.no / 100 : game.kalshiExpectations.no) : null;
 
   const isHomeFav = yesProb !== null ? yesProb > 0.5 : false;
   const isAwayFav = yesProb !== null ? yesProb < 0.5 : false;
@@ -103,14 +100,14 @@ export const GameCard: React.FC<GameCardProps> = ({
   }, [game.date]);
 
   // Parse Kalshi Market Title to find which team YES refers to
-  const { homeOdds, awayOdds } = React.useMemo(() => {
+  const { homeExpectation, awayExpectation } = React.useMemo(() => {
     let home = null;
     let away = null;
     
-    if (game.kalshiOdds && game.kalshiMarketTitle) {
+    if (game.kalshiExpectations && game.kalshiMarketTitle) {
       const title = game.kalshiMarketTitle;
-      const yesProb = game.kalshiOdds.yes > 1 ? game.kalshiOdds.yes / 100 : game.kalshiOdds.yes;
-      const noProb = game.kalshiOdds.no > 1 ? game.kalshiOdds.no / 100 : game.kalshiOdds.no;
+      const yesProb = game.kalshiExpectations.yes > 1 ? game.kalshiExpectations.yes / 100 : game.kalshiExpectations.yes;
+      const noProb = game.kalshiExpectations.no > 1 ? game.kalshiExpectations.no / 100 : game.kalshiExpectations.no;
       
       // Extract keywords (words > 2 chars)
       const getKeywords = (name: string) => (name && typeof name === 'string') ? name.split(" ").filter(w => w.length > 2) : [];
@@ -143,8 +140,8 @@ export const GameCard: React.FC<GameCardProps> = ({
       }
     }
     
-    return { homeOdds: home, awayOdds: away };
-  }, [game.kalshiMarketTitle, game.kalshiOdds, game.homeTeam, game.awayTeam]);
+    return { homeExpectation: home, awayExpectation: away };
+  }, [game.kalshiMarketTitle, game.kalshiExpectations, game.homeTeam, game.awayTeam]);
 
   const hasInjuries = Array.isArray(prediction?.injuries) && prediction.injuries.length > 0;
   
@@ -172,20 +169,20 @@ export const GameCard: React.FC<GameCardProps> = ({
     }
   };
 
-  const selectedBookmaker = React.useMemo(() => {
-    if (!game.allBookmakers || game.allBookmakers.length === 0) return null;
-    if (selectedBookmakerId) {
-      return game.allBookmakers.find(b => b.id === selectedBookmakerId) || game.allBookmakers[0];
+  const selectedSource = React.useMemo(() => {
+    if (!game.allSources || game.allSources.length === 0) return null;
+    if (selectedSourceId) {
+      return game.allSources.find(b => b.id === selectedSourceId) || game.allSources[0];
     }
-    // Default to the one matching marketOdds.source or the first one
-    return game.allBookmakers.find(b => b.name === game.marketOdds?.source) || game.allBookmakers[0];
-  }, [game.allBookmakers, selectedBookmakerId, game.marketOdds?.source]);
+    // Default to the one matching marketExpectations.source or the first one
+    return game.allSources.find(b => b.name === game.marketExpectations?.source) || game.allSources[0];
+  }, [game.allSources, selectedSourceId, game.marketExpectations?.source]);
 
-  const awayML = prediction?.marketOdds?.awayML || selectedBookmaker?.awayML || game.marketOdds?.awayML;
-  const homeML = prediction?.marketOdds?.homeML || selectedBookmaker?.homeML || game.marketOdds?.homeML;
-  const spread = prediction?.marketOdds?.spread || selectedBookmaker?.spread || game.marketOdds?.spread;
-  const total = prediction?.marketOdds?.total || selectedBookmaker?.total || game.marketOdds?.total;
-  const oddsSource = prediction?.marketOdds?.source || selectedBookmaker?.name || game.marketOdds?.source || 'Sportsbook';
+  const awayML = prediction?.marketExpectations?.awayWinProb || selectedSource?.awayWinProb || game.marketExpectations?.awayWinProb;
+  const homeML = prediction?.marketExpectations?.homeWinProb || selectedSource?.homeWinProb || game.marketExpectations?.homeWinProb;
+  const spread = prediction?.marketExpectations?.margin || selectedSource?.margin || game.marketExpectations?.margin;
+  const total = prediction?.marketExpectations?.total || selectedSource?.total || game.marketExpectations?.total;
+  const expectationsSource = prediction?.marketExpectations?.source || selectedSource?.name || game.marketExpectations?.source || 'Expert Consensus';
 
   const awayImplied = getImpliedProbability(awayML);
   const homeImplied = getImpliedProbability(homeML);
@@ -224,7 +221,7 @@ export const GameCard: React.FC<GameCardProps> = ({
             )}>
               {game.status}
             </span>
-            <span title="This card displays game details, betting odds, and AI-driven analysis for the matchup.">
+            <span title="This card displays game details, market expectations, and AI-driven analysis for the matchup.">
               <Info className="w-3 h-3 text-slate-500 cursor-help" />
             </span>
             {hasInjuries && (
@@ -295,7 +292,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                     <span className="bg-slate-800/50 px-2 py-0.5 rounded border border-slate-700/30 text-slate-400 font-bold">{game.awayTeamStats.record}</span>
                     {game.awayTeamStats.winPercentage && <span className="text-slate-500">Win%: <span className="text-slate-400 font-bold">{game.awayTeamStats.winPercentage}</span></span>}
                     {game.awayTeamStats.last5 !== "N/A" && <span className="text-slate-500">Last 5: <span className="text-slate-400 font-bold">{game.awayTeamStats.last5}</span></span>}
-                    {game.awayTeamStats.ats && <span className="text-slate-500">ATS: <span className="text-slate-400 font-bold">{game.awayTeamStats.ats}</span></span>}
+                    {game.awayTeamStats.vsExp && <span className="text-slate-500">vs Exp: <span className="text-slate-400 font-bold">{game.awayTeamStats.vsExp}</span></span>}
                   </div>
                 )}
               </div>
@@ -304,12 +301,12 @@ export const GameCard: React.FC<GameCardProps> = ({
               {game.status === 'finished' && (
                 <span className="text-xl font-black text-white font-mono">{game.awayScore}</span>
               )}
-              {awayOdds !== null && (
+              {awayExpectation !== null && (
                 <div className={cn(
                   "px-2 py-1 rounded border min-w-[50px] text-center",
                   isAwayFav ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-500" : "bg-slate-800/50 border-slate-700/50 text-slate-400"
                 )}>
-                  <span className="text-xs font-mono font-bold">{(awayOdds * 100).toFixed(0)}¢</span>
+                  <span className="text-xs font-mono font-bold">{(awayExpectation * 100).toFixed(0)}¢</span>
                 </div>
               )}
             </div>
@@ -345,7 +342,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                     <span className="bg-slate-800/50 px-2 py-0.5 rounded border border-slate-700/30 text-slate-400 font-bold">{game.homeTeamStats.record}</span>
                     {game.homeTeamStats.winPercentage && <span className="text-slate-500">Win%: <span className="text-slate-400 font-bold">{game.homeTeamStats.winPercentage}</span></span>}
                     {game.homeTeamStats.last5 !== "N/A" && <span className="text-slate-500">Last 5: <span className="text-slate-400 font-bold">{game.homeTeamStats.last5}</span></span>}
-                    {game.homeTeamStats.ats && <span className="text-slate-500">ATS: <span className="text-slate-400 font-bold">{game.homeTeamStats.ats}</span></span>}
+                    {game.homeTeamStats.vsExp && <span className="text-slate-500">vs Exp: <span className="text-slate-400 font-bold">{game.homeTeamStats.vsExp}</span></span>}
                   </div>
                 )}
               </div>
@@ -354,12 +351,12 @@ export const GameCard: React.FC<GameCardProps> = ({
               {game.status === 'finished' && (
                 <span className="text-xl font-black text-white font-mono">{game.homeScore}</span>
               )}
-              {homeOdds !== null && (
+              {homeExpectation !== null && (
                 <div className={cn(
                   "px-2 py-1 rounded border min-w-[50px] text-center",
                   isHomeFav ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-500" : "bg-slate-800/50 border-slate-700/50 text-slate-400"
                 )}>
-                  <span className="text-xs font-mono font-bold">{(homeOdds * 100).toFixed(0)}¢</span>
+                  <span className="text-xs font-mono font-bold">{(homeExpectation * 100).toFixed(0)}¢</span>
                 </div>
               )}
             </div>
@@ -409,17 +406,17 @@ export const GameCard: React.FC<GameCardProps> = ({
         </div>
 
         {/* Quick Action Bar */}
-        {(onReanalyze || game.marketOdds || game.allBookmakers) && (
+        {(onReanalyze || game.marketExpectations || game.allSources) && (
           <div className="px-4 pb-4 pt-2">
-            {(game.marketOdds || game.allBookmakers) && (
+            {(game.marketExpectations || game.allSources) && (
               <div className="mb-3 p-2.5 bg-slate-800/40 rounded-lg border border-slate-700/50">
                 <div className="text-[9px] uppercase text-slate-500 font-bold mb-2 flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    <span>Market Odds</span>
-                    <span title="Current betting odds from available bookmakers, including Moneyline, Spread, and Total.">
+                    <span>Market Expectations</span>
+                    <span title="Current market expectations from available sources, including Win Prob, Margin, and Total.">
                       <Info className="w-3 h-3 text-slate-500 cursor-help" />
                     </span>
-                    {game.allBookmakers && game.allBookmakers.length > 0 ? (
+                    {game.allSources && game.allSources.length > 0 ? (
                       <select 
                         className="bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5 text-[9px] outline-none focus:border-indigo-500"
                         value={selectedBookmakerId || ''}
@@ -429,7 +426,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                         }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        {game.allBookmakers.map(b => (
+                        {game.allSources.map(b => (
                           <option key={b.id} value={b.id}>{b.name}</option>
                         ))}
                       </select>
@@ -441,13 +438,13 @@ export const GameCard: React.FC<GameCardProps> = ({
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div>
-                    <div className="text-[8px] text-slate-500 uppercase mb-0.5">Moneyline</div>
+                    <div className="text-[8px] text-slate-500 uppercase mb-0.5">Win Prob</div>
                     <div className="text-[10px] text-slate-300 font-mono bg-slate-900/50 py-1 rounded">
                       {awayML ? (awayML > 0 ? `+${awayML}` : awayML) : '-'} / {homeML ? (homeML > 0 ? `+${homeML}` : homeML) : '-'}
                     </div>
                   </div>
                   <div>
-                    <div className="text-[8px] text-slate-500 uppercase mb-0.5">Spread</div>
+                    <div className="text-[8px] text-slate-500 uppercase mb-0.5">Margin</div>
                     <div className="text-[10px] text-slate-300 font-mono bg-slate-900/50 py-1 rounded">
                       {spread ? (spread > 0 ? `+${spread}` : spread) : '-'} / {spread ? (spread > 0 ? `-${spread}` : `+${Math.abs(spread)}`) : '-'}
                     </div>
@@ -575,9 +572,9 @@ export const GameCard: React.FC<GameCardProps> = ({
                         prediction.outcome === 'incorrect' ? "text-red-400" :
                         "text-indigo-400"
                       )}>
-                        {prediction.outcome === 'correct' ? "Correct Prediction" :
-                         prediction.outcome === 'incorrect' ? "Incorrect Prediction" :
-                         "AI Prediction Engine"}
+                        {prediction.outcome === 'correct' ? "Correct Analysis" :
+                         prediction.outcome === 'incorrect' ? "Incorrect Analysis" :
+                         "AI Analysis Engine"}
                       </span>
                       <div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">
                         Confidence Score: {prediction.confidence}/10
@@ -673,16 +670,16 @@ export const GameCard: React.FC<GameCardProps> = ({
                     <div className="bg-slate-800/40 p-3 rounded-lg border border-slate-700/50">
                       <div className="text-[10px] uppercase text-slate-500 font-bold mb-2 tracking-wider">Home Trends</div>
                       <div className="flex flex-col gap-2">
-                        {prediction.trends.homeATS && (
+                        {prediction.trends.homeVsExp && (
                           <div className="flex justify-between text-xs">
-                            <span className="text-slate-400">ATS:</span>
-                            <span className="text-indigo-300 font-mono font-bold">{prediction.trends.homeATS}</span>
+                            <span className="text-slate-400">vs Exp:</span>
+                            <span className="text-indigo-300 font-mono font-bold">{prediction.trends.homeVsExp}</span>
                           </div>
                         )}
-                        {prediction.trends.homeOU && (
+                        {prediction.trends.homeTotal && (
                           <div className="flex justify-between text-xs">
-                            <span className="text-slate-400">O/U:</span>
-                            <span className="text-indigo-300 font-mono font-bold">{prediction.trends.homeOU}</span>
+                            <span className="text-slate-400">Total:</span>
+                            <span className="text-indigo-300 font-mono font-bold">{prediction.trends.homeTotal}</span>
                           </div>
                         )}
                       </div>
@@ -690,16 +687,16 @@ export const GameCard: React.FC<GameCardProps> = ({
                     <div className="bg-slate-800/40 p-3 rounded-lg border border-slate-700/50">
                       <div className="text-[10px] uppercase text-slate-500 font-bold mb-2 tracking-wider">Away Trends</div>
                       <div className="flex flex-col gap-2">
-                        {prediction.trends.awayATS && (
+                        {prediction.trends.awayVsExp && (
                           <div className="flex justify-between text-xs">
-                            <span className="text-slate-400">ATS:</span>
-                            <span className="text-indigo-300 font-mono font-bold">{prediction.trends.awayATS}</span>
+                            <span className="text-slate-400">vs Exp:</span>
+                            <span className="text-indigo-300 font-mono font-bold">{prediction.trends.awayVsExp}</span>
                           </div>
                         )}
-                        {prediction.trends.awayOU && (
+                        {prediction.trends.awayTotal && (
                           <div className="flex justify-between text-xs">
-                            <span className="text-slate-400">O/U:</span>
-                            <span className="text-indigo-300 font-mono font-bold">{prediction.trends.awayOU}</span>
+                            <span className="text-slate-400">Total:</span>
+                            <span className="text-indigo-300 font-mono font-bold">{prediction.trends.awayTotal}</span>
                           </div>
                         )}
                       </div>
@@ -707,10 +704,10 @@ export const GameCard: React.FC<GameCardProps> = ({
                   </div>
                 )}
 
-                {/* Predicted Score */}
+                {/* Projected Score */}
                 {prediction.scorePrediction && (
                   <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 mb-4 shadow-lg shadow-slate-950/20">
-                    <div className="text-[10px] uppercase text-slate-500 font-black mb-2 tracking-widest">Score Prediction</div>
+                    <div className="text-[10px] uppercase text-slate-500 font-black mb-2 tracking-widest">Score Projection</div>
                     <div className="text-lg font-mono font-bold text-white">
                       {prediction.scorePrediction.away} - {prediction.scorePrediction.home}
                       {prediction.actualScore && (

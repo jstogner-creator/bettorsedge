@@ -3,6 +3,7 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
   getRedirectResult,
   signOut,
   browserLocalPersistence,
@@ -17,6 +18,7 @@ import {
   collection,
   addDoc,
   serverTimestamp,
+  enableIndexedDbPersistence,
 } from 'firebase/firestore';
 
 import firebaseConfig from '../firebase-applet-config.json';
@@ -34,6 +36,21 @@ function getFirebase() {
     dbInstance = firebaseConfig.firestoreDatabaseId
       ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
       : getFirestore(app);
+
+    // Enable offline persistence for Firestore
+    if (typeof window !== 'undefined') {
+      enableIndexedDbPersistence(dbInstance).catch((err) => {
+        if (err.code === 'failed-precondition') {
+          // Multiple tabs open, persistence can only be enabled in one tab at a time.
+          console.warn('[Firebase] Persistence failed: Multiple tabs open');
+        } else if (err.code === 'unimplemented') {
+          // The current browser does not support all of the features required to enable persistence
+          console.warn('[Firebase] Persistence failed: Browser not supported');
+        } else {
+          console.error('[Firebase] Persistence failed:', err);
+        }
+      });
+    }
 
     // Set persistence once during initialization
     setPersistence(authInstance, browserLocalPersistence)
@@ -78,23 +95,31 @@ export async function logLoginError(error: any, context: string) {
 
 export async function loginWithGoogle(): Promise<void> {
   const auth = getAuthInstance();
-  console.log('[Auth] Starting Google sign-in flow');
+  console.log('[Auth] Starting Google sign-in flow (Popup)');
   
   try {
-    // Try popup first as it's better UX in iframes if allowed
-    await signInWithPopup(auth, googleProvider);
-    console.log('[Auth] Popup sign-in successful');
+    const result = await signInWithPopup(auth, googleProvider);
+    console.log('[Auth] Popup sign-in successful for:', result.user.email);
   } catch (error: any) {
     console.warn('[Auth] signInWithPopup failed:', error.code, error.message);
     await logLoginError(error, 'signInWithPopup');
     
-    if (error.code === 'auth/popup-blocked') {
-      alert('Sign-in popup was blocked by your browser. Please allow popups for this site or open the app in a new tab.');
-    } else if (error.code === 'auth/unauthorized-domain') {
-      alert('This domain is not authorized for Firebase Auth. Please add it in the Firebase Console.');
-    } else {
-      alert(`Google sign-in failed: ${error.message}`);
+    // Fallback to redirect ONLY if popup is blocked and we are NOT in an iframe
+    // But in AI Studio, we are almost always in an iframe, so redirect will likely fail too.
+    // The best advice is to open in a new tab.
+    if (error.code === 'auth/popup-blocked' || error.code === 'auth/cancelled-popup-request') {
+      console.error('[Auth] Popup blocked or cancelled.');
+      
+      const inIframe = window.self !== window.top;
+      if (!inIframe) {
+        console.log('[Auth] Not in iframe, falling back to signInWithRedirect');
+        await signInWithRedirect(auth, googleProvider);
+        return;
+      } else {
+        console.error('[Auth] In iframe, cannot fallback to redirect. User must open in new tab.');
+      }
     }
+    
     throw error;
   }
 }
@@ -130,12 +155,16 @@ export const getIdToken = async () => {
 async function testConnection() {
   try {
     const db = getDb();
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    // Use a non-blocking check
+    getDocFromServer(doc(db, 'test', 'connection')).catch((error) => {
+      if (error instanceof Error && error.message.includes('the client is offline')) {
+        console.error('Please check your Firebase configuration. The client is offline.');
+      }
+    });
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration. The client is offline.');
-    }
+    // Ignore initialization errors here
   }
 }
 
-testConnection();
+// Don't run on module load to avoid blocking or causing issues in iframes
+// testConnection();

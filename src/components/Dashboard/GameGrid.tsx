@@ -12,7 +12,6 @@ interface GameGridProps {
   isAdminUser: boolean;
   handleReanalyzeSingleGame: (game: Game) => void;
   handleDiscussWithSnark: (game: Game) => void;
-  handleLogBet: (bet: any) => void;
 }
 
 class GameGridErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
@@ -57,7 +56,6 @@ export const GameGrid: React.FC<GameGridProps> = ({
   isAdminUser,
   handleReanalyzeSingleGame,
   handleDiscussWithSnark,
-  handleLogBet,
 }) => {
   if (loading) {
     return <div className="text-slate-400">Loading games...</div>;
@@ -82,7 +80,6 @@ export const GameGrid: React.FC<GameGridProps> = ({
             isAnalyzing={analyzing && analysisProgress?.analyzingGameIds?.includes(game.id)}
             onReanalyze={handleReanalyzeSingleGame}
             onDiscuss={() => handleDiscussWithSnark(game)}
-            onLogBet={handleLogBet}
             isAdminUser={isAdminUser}
           />
         ))}

@@ -41,18 +41,17 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
         <div className="space-y-1">
           <div className="flex items-center gap-3">
             <h2 className="text-3xl font-black text-white tracking-tight">{activeTab}</h2>
-            {isAdminUser && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleRefresh}
-                  className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded-xl border border-slate-800 transition-all shadow-sm"
-                  title="Refresh Schedule"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-                
-                {activeTab === "NBA" && apiSportsStatus && (
-                  <div className={cn(
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRefresh}
+                className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded-xl border border-slate-800 transition-all shadow-sm"
+                title="Refresh Schedule"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+              
+              {isAdminUser && activeTab === "NBA" && apiSportsStatus && (
+                <div className={cn(
                     "px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-xl border flex items-center gap-2 shadow-sm",
                     apiSportsStatus.status === 'success' ? "bg-emerald-500/5 border-emerald-500/10 text-emerald-400" :
                     apiSportsStatus.status === 'error' ? "bg-rose-500/5 border-rose-500/10 text-rose-400" :
@@ -69,7 +68,6 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                   </div>
                 )}
               </div>
-            )}
           </div>
           <div className="flex items-center gap-2 text-slate-400">
             <CalendarIcon className="w-4 h-4 text-indigo-400" />

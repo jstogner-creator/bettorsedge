@@ -59,9 +59,9 @@ export function LegalModal({ isOpen, onClose, type }: LegalModalProps) {
                     </p>
                   </section>
                   <section>
-                    <h3 className="text-white font-bold">2. Betting Disclaimer</h3>
+                    <h3 className="text-white font-bold">2. Analysis Disclaimer</h3>
                     <p className="text-slate-400">
-                      Bettors Edge provides AI-driven sports analysis and predictions for informational and entertainment purposes only. We do not provide gambling services. Sports betting involves significant financial risk. We are not responsible for any financial losses incurred based on our predictions.
+                      Bettors Edge provides AI-driven sports analysis and predictions for informational and entertainment purposes only. We do not provide gambling services. We are not responsible for any decisions made based on our predictions.
                     </p>
                   </section>
                   <section>

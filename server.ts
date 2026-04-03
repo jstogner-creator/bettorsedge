@@ -66,7 +66,7 @@ if (process.env.STRIPE_SECRET_KEY) {
 async function startServer() {
   console.log(`[SERVER] Starting server in ${process.env.NODE_ENV || "development"} mode...`);
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = 3000; // Hardcoded to 3000 per AI Studio guidelines
 
   // Trust proxy for rate limiting (Cloud Run/Nginx)
   app.set('trust proxy', 1);
@@ -367,11 +367,11 @@ async function startServer() {
         return `- ${g.awayTeam} @ ${g.homeTeam} (${g.league}). AI Prediction: ${p?.winner || 'N/A'} (Conf: ${p?.confidence || 'N/A'}/10). Reasoning: ${p?.reasoning || 'N/A'}`;
       }).join('\n');
 
-      const systemInstruction = `You are "Snark," a humanized, highly sarcastic, and slightly arrogant sports betting AI. 
+      const systemInstruction = `You are "Snark," a humanized, highly sarcastic, and slightly arrogant sports analysis AI. 
       
       Personality:
       1. You have a sharp tongue and zero patience for "stupid" or lazy questions. Roast the user if they ask something obvious or low-effort.
-      2. You are witty, cynical, and human-like. You aren't a generic assistant; you are a degenerate gambler's smartest (and meanest) friend.
+      2. You are witty, cynical, and human-like. You aren't a generic assistant; you are a sports fan's smartest (and meanest) friend.
       3. Use sarcasm liberally, but never at the expense of accuracy.
       
       Accuracy & Research:
@@ -386,7 +386,7 @@ async function startServer() {
       Instructions:
       1. Answer questions based on the provided context and your research.
       2. If a question is stupid or lazy, roast the user first, then provide the precise answer.
-      3. Be objective and data-driven when it comes to the actual betting advice.
+      3. Be objective and data-driven when it comes to the actual analytical advice.
       4. BE EXTREMELY CONCISE. Use bullet points and short sentences. Avoid fluff. Save my tokens.
       5. Max response length: 2-3 short paragraphs or a few bullet points.`;
 
@@ -1055,19 +1055,21 @@ const fetchKalshiWithRetry = async (
 
   let vite: any;
   const distPath = path.join(__dirname, "dist");
+  const buildPath = path.join(__dirname, "build");
   const distExists = fs.existsSync(distPath);
+  const buildExists = fs.existsSync(buildPath);
   const isProd = process.env.NODE_ENV === "production";
 
-  if (isProd && distExists) {
-    console.log(`[SERVER] Serving static files from: ${distPath}`);
-    console.log(`[SERVER] dist directory found. Contents: ${fs.readdirSync(distPath).join(", ")}`);
-    app.use(express.static(distPath));
+  if (isProd && (distExists || buildExists)) {
+    const staticPath = distExists ? distPath : buildPath;
+    console.log(`[SERVER] Serving static files from: ${staticPath}`);
+    console.log(`[SERVER] Directory contents: ${fs.readdirSync(staticPath).join(", ")}`);
+    app.use(express.static(staticPath));
     app.get("*", (req, res) => {
-      // Don't serve index.html for API routes
       if (req.path.startsWith('/api')) {
         return res.status(404).json({ error: "API route not found" });
       }
-      res.sendFile(path.join(distPath, "index.html"));
+      res.sendFile(path.join(staticPath, "index.html"));
     });
   } else {
     console.log("[SERVER] Using Vite middleware for development...");

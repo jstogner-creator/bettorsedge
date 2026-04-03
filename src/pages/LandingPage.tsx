@@ -12,6 +12,7 @@ export function LandingPage({ onEnter }: LandingPageProps) {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [showTermsError, setShowTermsError] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [legalModal, setLegalModal] = useState<{ isOpen: boolean; type: "terms" | "privacy" }>({
     isOpen: false,
     type: "terms",
@@ -36,25 +37,37 @@ export function LandingPage({ onEnter }: LandingPageProps) {
   }
 
   const handleLogin = async () => {
-  if (!acceptedTerms) {
-    setShowTermsError(true);
-    return;
-  }
+    if (!acceptedTerms) {
+      setShowTermsError(true);
+      return;
+    }
 
-  setIsLoggingIn(true);
+    setIsLoggingIn(true);
+    setLoginError(null);
 
-  try {
-    await loginWithGoogle();
-  } catch (error: any) {
-    console.error("Login failed:", {
-      code: error?.code,
-      message: error?.message,
-      stack: error?.stack,
-      customData: error?.customData,
-    });
-    setIsLoggingIn(false);
-  }
-};
+    try {
+      console.log("[LandingPage] Initiating login...");
+      await loginWithGoogle();
+      console.log("[LandingPage] Login function returned successfully");
+    } catch (error: any) {
+      console.error("Login failed:", {
+        code: error?.code,
+        message: error?.message,
+        stack: error?.stack,
+      });
+      setIsLoggingIn(false);
+      
+      if (error?.code === 'auth/popup-blocked' || error?.code === 'auth/cancelled-popup-request') {
+        setLoginError("The sign-in popup was blocked or closed. Please try opening the app in a new tab using the button below.");
+      } else {
+        setLoginError("Login failed. Please try again or open in a new tab.");
+      }
+    }
+  };
+
+  const openInNewTab = () => {
+    window.open(window.location.href, '_blank');
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans flex flex-col relative overflow-hidden">
@@ -79,7 +92,7 @@ export function LandingPage({ onEnter }: LandingPageProps) {
             <span className="bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-cyan-400 to-emerald-400">
               Bettors Edge
             </span>
-            <span className="block text-white mt-2 text-2xl sm:text-4xl font-semibold">Find the edge before you bet.</span>
+            <span className="block text-white mt-2 text-2xl sm:text-4xl font-semibold">Advanced AI Sports Analysis.</span>
           </h1>
         </motion.div>
 
@@ -110,13 +123,27 @@ export function LandingPage({ onEnter }: LandingPageProps) {
           </div>
 
           <button
-            onClick={handleLogin}
+            onClick={() => handleLogin().catch(console.error)}
             disabled={isLoggingIn}
             className="group w-full px-8 py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed text-white rounded-xl font-bold text-lg transition-all duration-200 shadow-lg shadow-indigo-500/25 flex items-center justify-center"
           >
             {isLoggingIn ? "Signing In..." : "Sign In with Google"}
             {!isLoggingIn && <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />}
           </button>
+
+          <button
+            onClick={openInNewTab}
+            className="w-full px-8 py-3 bg-slate-900 hover:bg-slate-800 text-slate-400 rounded-xl font-medium text-sm transition-all border border-slate-800 flex items-center justify-center gap-2"
+          >
+            <Zap className="w-4 h-4" />
+            Open in New Tab (Fixes Sign-in Loops)
+          </button>
+
+          {loginError && (
+            <div className="mt-4 p-3 bg-rose-500/10 border border-rose-500/30 rounded-lg text-rose-400 text-sm text-center">
+              {loginError}
+            </div>
+          )}
         </motion.div>
 
         <motion.div
@@ -129,21 +156,21 @@ export function LandingPage({ onEnter }: LandingPageProps) {
             <TrendingUp className="w-8 h-8 text-emerald-400 mb-4" />
             <h3 className="text-lg font-bold text-white mb-2">AI-Powered Alpha</h3>
             <p className="text-slate-400 text-sm">
-              Deep analysis of rosters, injuries, and historical data to find the edge Vegas missed.
+              Deep analysis of rosters, injuries, and historical data to find the value others missed.
             </p>
           </div>
           <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
             <Shield className="w-8 h-8 text-indigo-400 mb-4" />
-            <h3 className="text-lg font-bold text-white mb-2">Smart Hedging</h3>
+            <h3 className="text-lg font-bold text-white mb-2">Scenario Analysis</h3>
             <p className="text-slate-400 text-sm">
-              Don't just bet. Hedge. Our algorithms suggest safety nets for your high-risk plays.
+              Analyze multiple outcomes. Our algorithms suggest potential scenarios for every matchup.
             </p>
           </div>
           <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
             <Zap className="w-8 h-8 text-amber-400 mb-4" />
             <h3 className="text-lg font-bold text-white mb-2">Real-Time Data</h3>
             <p className="text-slate-400 text-sm">
-              Live updates on injuries and line movements ensure you're never betting on stale info.
+              Live updates on injuries and market trends ensure you're never analyzing stale info.
             </p>
           </div>
         </motion.div>
@@ -182,13 +209,13 @@ export function LandingPage({ onEnter }: LandingPageProps) {
       <div className="absolute bottom-4 w-full text-center text-slate-600 text-xs px-4">
         <p className="mb-1 max-w-3xl mx-auto">
           <strong>Disclaimer:</strong> Bettors Edge provides predictions and analysis for informational and entertainment purposes only. 
-          These are only predictions and not guarantees of future outcomes. Sports betting involves significant financial risk. 
-          Please bet responsibly and only wager what you can afford to lose. If you or someone you know has a gambling problem, call 1-800-GAMBLER.
+          These are only predictions and not guarantees of future outcomes. 
+          We are not responsible for any decisions made based on our analysis.
         </p>
-        <p>© 2026 Bettors Edge. All rights reserved.</p>
+        <p>© {new Date().getFullYear()} Bettors Edge. All rights reserved.</p>
         <div className="mt-2 flex items-center justify-center space-x-4">
-          <a href="mailto:lydia@bettorsedge.ai" className="hover:text-indigo-400 transition-colors">Contact Us</a>
-          <a href="mailto:lydia@bettorsedge.ai?subject=Bug%20Report%20/%20Feedback" className="hover:text-indigo-400 transition-colors">Report a Bug / Feedback</a>
+          <a href="mailto:support@bettorsedge.ai" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors">Contact Us</a>
+          <a href="mailto:support@bettorsedge.ai?subject=Bug%20Report%20/%20Feedback" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors">Report a Bug / Feedback</a>
         </div>
       </div>
     </div>

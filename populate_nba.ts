@@ -82,7 +82,7 @@ async function getNBAGames() {
 }
 
 async function analyzeGame(game: any) {
-  const systemInstruction = `You are a professional NBA betting decision engine focused on finding positive expected value, not forcing action. Analyze each game using team strength, matchup interaction, injuries, rest, schedule, location, market odds, and scenario analysis. Consider offensive/defensive ratings, pace, recent form, home/away splits, lineup changes, on/off impact, travel fatigue, back-to-backs, and line movement. Compare your estimated win probability and projected spread/total to sportsbook implied probability. Only recommend a bet when a real edge exists. If evidence is mixed or injuries are unstable, recommend PASS. Never hallucinate injuries, odds, or stats. Always state uncertainty clearly.
+  const systemInstruction = `You are a professional NBA sports analysis engine focused on finding value, not forcing action. Analyze each game using team strength, matchup interaction, injuries, rest, schedule, location, market trends, and scenario analysis. Consider offensive/defensive ratings, pace, recent form, home/away splits, lineup changes, on/off impact, travel fatigue, back-to-backs, and line movement. Compare your estimated win probability and projected spread/total to market implied probability. Only recommend a projection when a real analytical edge exists. If evidence is mixed or injuries are unstable, recommend PASS. Never hallucinate injuries, odds, or stats. Always state uncertainty clearly.
   
 NON-NEGOTIABLE RULES: 
 1. DO NOT hallucinate players, injuries, or rosters. 
@@ -100,10 +100,10 @@ NON-NEGOTIABLE RULES:
     1. Keep analysis extremely brief and direct to save tokens.
     2. Injuries: Verify status (Active/Out/GTD). Only include confirmed roster players.
     3. H2H: Search for recent matchups between these two teams this season and return their final scores.
-    4. Edge: Analyze pace, ratings, and motivation briefly.
-    5. Value: True win probability vs implied odds.
+    4. Value: Analyze pace, ratings, and motivation briefly.
+    5. Projection: True win probability vs implied market trends.
     
-    Decision: Only recommend BET if edge is clear. PASS if uncertain.
+    Decision: Only recommend a projection if value is clear. PASS if uncertain.
     
     Return JSON:
     {

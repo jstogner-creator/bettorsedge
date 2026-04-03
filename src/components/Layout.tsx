@@ -122,7 +122,7 @@ export function Layout({
               <Settings className="w-5 h-5" />
             </button>
             <button 
-              onClick={handleLogout}
+              onClick={() => handleLogout().catch(console.error)}
               className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-rose-400"
               title="Sign Out"
             >
@@ -159,10 +159,9 @@ export function Layout({
       <footer className="border-t border-slate-800 bg-slate-950 py-6 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-slate-500">
           <p className="mb-2 max-w-4xl mx-auto leading-relaxed">
-            <strong className="text-slate-400">Liability & Betting Disclaimer:</strong> The predictions, analysis, and hedging advice provided by Bettors Edge are for informational and entertainment purposes only. 
-            These are <span className="text-amber-500/80 font-semibold">only predictions and not guarantees</span> of future outcomes. Sports betting involves significant financial risk. 
-            We are not responsible for any financial losses incurred. Please bet responsibly and only wager what you can afford to lose. 
-            If you or someone you know has a gambling problem, please call 1-800-GAMBLER.
+            <strong className="text-slate-400">Analysis Disclaimer:</strong> The predictions, analysis, and scenario insights provided by Bettors Edge are for informational and entertainment purposes only. 
+            These are <span className="text-amber-500/80 font-semibold">only predictions and not guarantees</span> of future outcomes. 
+            We are not responsible for any decisions made based on our analysis. 
           </p>
           <p>© {new Date().getFullYear()} Bettors Edge. All rights reserved.</p>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
@@ -181,14 +180,14 @@ export function Layout({
               Privacy Policy
             </button>
             <a
-              href="mailto:lydia@bettorsedge.ai"
+              href="mailto:support@bettorsedge.ai"
               className="text-slate-500 hover:text-indigo-400 transition-colors flex items-center gap-1.5"
             >
               <Mail className="w-3 h-3" />
               Contact Us
             </a>
             <a
-              href="mailto:lydia@bettorsedge.ai?subject=Bug%20Report%20/%20Feedback"
+              href="mailto:support@bettorsedge.ai?subject=Bug%20Report%20/%20Feedback"
               className="text-slate-500 hover:text-indigo-400 transition-colors flex items-center gap-1.5"
             >
               <MessageSquare className="w-3 h-3" />

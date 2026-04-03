@@ -1,10 +1,10 @@
 import React from "react";
 import { Game, Prediction } from "../types";
-import { Lock, TrendingUp, ArrowRight, Calendar, CalendarDays, Globe, Ticket, ShieldCheck, Brain } from "lucide-react";
+import { TrendingUp, ArrowRight, Calendar, Globe, ShieldCheck, Brain, Sparkles, Target } from "lucide-react";
 import { cn } from "../lib/utils";
 import { format, subDays, isAfter, isBefore, parseISO, startOfDay } from "date-fns";
 
-interface LocksOfTheDayProps {
+interface TopPicksOfTheDayProps {
   games: Game[];
   predictions: Record<string, Prediction>;
   selectedDate: Date;
@@ -12,7 +12,7 @@ interface LocksOfTheDayProps {
   onSelectLeague?: (league: string) => void;
 }
 
-export const LocksOfTheDay: React.FC<LocksOfTheDayProps> = ({ games, predictions, selectedDate, league, onSelectLeague }) => {
+export const TopPicksOfTheDay: React.FC<TopPicksOfTheDayProps> = ({ games, predictions, selectedDate, league, onSelectLeague }) => {
   const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
   
   // 1. Get all predictions for the selected league for the SELECTED date
@@ -45,16 +45,16 @@ export const LocksOfTheDay: React.FC<LocksOfTheDayProps> = ({ games, predictions
 
   const uniqueLeaguePredictions = Array.from(uniquePredictionsMap.values());
 
-  // 3. Filter for valid locks (confidence >= 7, not PASS)
-  // We use 7 as the threshold for "Locks" as per user preference for high confidence
-  const validLocks = uniqueLeaguePredictions.filter(p => 
+  // 3. Filter for valid top picks (confidence >= 7, not PASS)
+  // We use 7 as the threshold for "Top Picks" as per user preference for high confidence
+  const validTopPicks = uniqueLeaguePredictions.filter(p => 
     p.winner && 
     p.winner.toUpperCase() !== "PASS" && 
     p.confidence >= 7
   );
 
   // 4. Sort by Confidence (highest first), then by date (soonest first)
-  const sortedLocks = [...validLocks].sort((a, b) => {
+  const sortedTopPicks = [...validTopPicks].sort((a, b) => {
     if ((b.confidence || 0) !== (a.confidence || 0)) {
       return (b.confidence || 0) - (a.confidence || 0);
     }
@@ -63,8 +63,8 @@ export const LocksOfTheDay: React.FC<LocksOfTheDayProps> = ({ games, predictions
     return dateA - dateB;
   });
 
-  // 5. Top 3 Locks for the current league (across all analyzed games)
-  const topLocks = sortedLocks.slice(0, 3);
+  // 5. Top 3 Picks for the current league (across all analyzed games)
+  const topPicks = sortedTopPicks.slice(0, 3);
 
   // 6. Check if analysis is complete for the SELECTED date
   const todaysGames = games.filter(g => {
@@ -92,15 +92,15 @@ export const LocksOfTheDay: React.FC<LocksOfTheDayProps> = ({ games, predictions
 
   const isAnalysisComplete = todaysGames.length > 0 && todaysPredictions.length >= todaysGames.length;
 
-  // 7. Create 3 Winning Slips (Parlays) from top 9 picks for the league
-  const slips = [
-    sortedLocks.slice(0, 3),
-    sortedLocks.slice(3, 6),
-    sortedLocks.slice(6, 9)
-  ].filter(slip => slip.length === 3);
+  // 7. Create 3 Top Matchup Slates (Combinations) from top 9 picks for the league
+  const slates = [
+    sortedTopPicks.slice(0, 3),
+    sortedTopPicks.slice(3, 6),
+    sortedTopPicks.slice(6, 9)
+  ].filter(slate => slate.length === 3);
 
-  // 8. Calculate Running Counts (Overall Lock Record)
-  // Group all predictions by date to find the top 3 locks for each day
+  // 8. Calculate Running Counts (Overall Top Pick Record)
+  // Group all predictions by date to find the top 3 picks for each day
   const predictionsByDate: Record<string, Prediction[]> = {};
   
   Object.values(predictions).forEach(p => {
@@ -118,24 +118,24 @@ export const LocksOfTheDay: React.FC<LocksOfTheDayProps> = ({ games, predictions
     predictionsByDate[dateKey].push(p);
   });
 
-  let overallLockCorrect = 0;
-  let overallLockIncorrect = 0;
-  let overallLockPushes = 0;
+  let overallTopPickCorrect = 0;
+  let overallTopPickIncorrect = 0;
+  let overallTopPickPushes = 0;
 
   Object.values(predictionsByDate).forEach(dayPreds => {
     // Sort by confidence
     const sorted = [...dayPreds].sort((a, b) => b.confidence - a.confidence);
     // Take top 3
-    const dayLocks = sorted.slice(0, 3);
+    const dayTopPicks = sorted.slice(0, 3);
     
-    dayLocks.forEach(lock => {
-      if (lock.outcome === 'correct') overallLockCorrect++;
-      else if (lock.outcome === 'incorrect') overallLockIncorrect++;
-      else if (lock.outcome === 'push') overallLockPushes++;
+    dayTopPicks.forEach(pick => {
+      if (pick.outcome === 'correct') overallTopPickCorrect++;
+      else if (pick.outcome === 'incorrect') overallTopPickIncorrect++;
+      else if (pick.outcome === 'push') overallTopPickPushes++;
     });
   });
 
-  const overallRecord = { correct: overallLockCorrect, incorrect: overallLockIncorrect, pushes: overallLockPushes };
+  const overallRecord = { correct: overallTopPickCorrect, incorrect: overallTopPickIncorrect, pushes: overallTopPickPushes };
 
   if (todaysGames.length === 0) {
     return (
@@ -158,11 +158,11 @@ export const LocksOfTheDay: React.FC<LocksOfTheDayProps> = ({ games, predictions
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-8">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center flex flex-col items-center justify-center">
           <div className="bg-slate-800/50 p-4 rounded-full mb-4 border border-slate-700">
-            <Lock className="w-8 h-8 text-slate-500" />
+            <ShieldCheck className="w-8 h-8 text-slate-500" />
           </div>
           <h3 className="text-xl font-bold text-white mb-2">Analysis Incomplete</h3>
           <p className="text-slate-400 max-w-md mx-auto mb-4">
-            Please analyze all games for {league || "all leagues"} on this date to unlock the Locks of the Day.
+            Please analyze all games for {league || "all leagues"} on this date to unlock the Top Picks of the Day.
           </p>
           <div className="bg-slate-800 px-4 py-2 rounded-lg inline-flex items-center border border-slate-700">
             <span className="text-slate-300 font-medium mr-2">Progress:</span>
@@ -176,14 +176,14 @@ export const LocksOfTheDay: React.FC<LocksOfTheDayProps> = ({ games, predictions
     );
   }
 
-  if (topLocks.length === 0) {
+  if (topPicks.length === 0) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-8">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center flex flex-col items-center justify-center">
           <div className="bg-slate-800/50 p-4 rounded-full mb-4 border border-slate-700">
-            <Lock className="w-8 h-8 text-slate-500" />
+            <ShieldCheck className="w-8 h-8 text-slate-500" />
           </div>
-          <h3 className="text-xl font-bold text-white mb-2">No Locks Available</h3>
+          <h3 className="text-xl font-bold text-white mb-2">No Top Picks Available</h3>
           <p className="text-slate-400 max-w-md mx-auto">
             The AI did not find any high-confidence picks (confidence &ge; 6) or recommended PASS for all games.
           </p>
@@ -253,8 +253,8 @@ export const LocksOfTheDay: React.FC<LocksOfTheDayProps> = ({ games, predictions
       <div className="flex justify-end">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center justify-between w-full md:w-1/3">
           <div className="flex items-center text-slate-400">
-            <Globe className="w-5 h-5 mr-2 text-indigo-400" />
-            <span className="font-medium">Overall Lock Record</span>
+            <Target className="w-5 h-5 mr-2 text-indigo-400" />
+            <span className="font-medium">Overall Top Pick Record</span>
           </div>
           <div className="text-lg font-bold">
             <span className="text-emerald-400">{overallRecord.correct}</span>
@@ -264,25 +264,25 @@ export const LocksOfTheDay: React.FC<LocksOfTheDayProps> = ({ games, predictions
         </div>
       </div>
 
-      {/* League Locks of the Day */}
-      {topLocks.length > 0 && (
+      {/* League Top Picks of the Day */}
+      {topPicks.length > 0 && (
         <div className="bg-gradient-to-r from-emerald-900/40 to-slate-900 border border-emerald-500/30 rounded-xl p-6 shadow-lg relative overflow-hidden">
           <div className="absolute top-0 right-0 -mt-4 -mr-4 opacity-10">
-            <Lock className="w-32 h-32 text-emerald-400" />
+            <Sparkles className="w-32 h-32 text-emerald-400" />
           </div>
 
           <div className="flex items-center mb-6 relative z-10">
             <div className="bg-emerald-500/20 p-2 rounded-lg mr-3 border border-emerald-500/30">
-              <Lock className="w-6 h-6 text-emerald-400" />
+              <Sparkles className="w-6 h-6 text-emerald-400" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white">{league} Top Locks</h2>
+              <h2 className="text-xl font-bold text-white">{league} Top Picks</h2>
               <p className="text-emerald-400/80 text-sm">Highest confidence picks across all analyzed {league} games</p>
             </div>
           </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative z-10">
-          {topLocks.map((prediction, index) => {
+          {topPicks.map((prediction, index) => {
             const { home, away, homeLogo, awayLogo, winnerLogo } = getTeams(prediction);
             return (
               <div 
@@ -353,37 +353,37 @@ export const LocksOfTheDay: React.FC<LocksOfTheDayProps> = ({ games, predictions
       </div>
       )}
 
-      {/* Winning Slips */}
-      {slips.length > 0 && (
+      {/* Top Matchup Slates */}
+      {slates.length > 0 && (
         <div className="bg-gradient-to-r from-indigo-900/40 to-slate-900 border border-indigo-500/30 rounded-xl p-6 shadow-lg relative overflow-hidden">
           <div className="absolute top-0 right-0 -mt-4 -mr-4 opacity-10">
-            <Ticket className="w-32 h-32 text-indigo-400" />
+            <Brain className="w-32 h-32 text-indigo-400" />
           </div>
 
           <div className="flex items-center mb-6 relative z-10">
             <div className="bg-indigo-500/20 p-2 rounded-lg mr-3 border border-indigo-500/30">
-              <Ticket className="w-6 h-6 text-indigo-400" />
+              <Brain className="w-6 h-6 text-indigo-400" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white">Winning Slips</h2>
-              <p className="text-indigo-400/80 text-sm">3-team parlays built from today's highest probability picks</p>
+              <h2 className="text-xl font-bold text-white">Top Matchup Slates</h2>
+              <p className="text-indigo-400/80 text-sm">3-team combinations built from today's highest probability picks</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative z-10">
-            {slips.map((slip, slipIndex) => {
-              const avgConfidence = (slip.reduce((acc, p) => acc + p.confidence, 0) / 3).toFixed(1);
+            {slates.map((slate, slateIndex) => {
+              const avgConfidence = (slate.reduce((acc, p) => acc + p.confidence, 0) / 3).toFixed(1);
               return (
-                <div key={slipIndex} className="bg-slate-900/60 border border-indigo-500/20 rounded-lg p-4 hover:border-indigo-500/40 transition-all">
+                <div key={slateIndex} className="bg-slate-900/60 border border-indigo-500/20 rounded-lg p-4 hover:border-indigo-500/40 transition-all">
                   <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-800">
-                    <h3 className="font-bold text-white">Slip #{slipIndex + 1}</h3>
+                    <h3 className="font-bold text-white">Slate #{slateIndex + 1}</h3>
                     <div className="text-xs font-mono text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20">
                       Avg Conf: {avgConfidence}
                     </div>
                   </div>
                   
                   <div className="space-y-3">
-                    {slip.map((p, i) => {
+                    {slate.map((p, i) => {
                       const { home, away, winnerLogo } = getTeams(p);
                       return (
                         <div 

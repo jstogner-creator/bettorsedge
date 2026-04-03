@@ -190,7 +190,7 @@ export function SettingsModal({
                         Add/Change Sports
                       </button>
                       <button
-                        onClick={handleCancelClick}
+                        onClick={() => handleCancelClick().catch(console.error)}
                         disabled={isCancelling}
                         className="flex-1 border border-slate-700 hover:bg-slate-800 text-slate-400 hover:text-white text-xs font-bold py-2 rounded transition-colors flex items-center justify-center"
                       >
@@ -204,7 +204,7 @@ export function SettingsModal({
                 <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 text-center">
                   <AlertTriangle className="w-8 h-8 text-amber-500 mx-auto mb-2 opacity-50" />
                   <p className="text-sm text-slate-300 font-medium">No Active Subscription</p>
-                  <p className="text-xs text-slate-500 mt-1 mb-4">Subscribe to unlock AI-powered sports analysis and betting edges.</p>
+                  <p className="text-xs text-slate-500 mt-1 mb-4">Subscribe to unlock AI-powered sports analysis and market projections.</p>
                   <button
                     onClick={onManageSports}
                     className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold py-2 rounded-lg transition-colors"
@@ -300,7 +300,7 @@ export function SettingsModal({
             <div>
               <h3 className="text-sm font-medium text-slate-300 mb-4 flex items-center">
                 <Brain className="w-4 h-4 mr-2 text-slate-400" />
-                OpenAI Integration (GPT-4o-mini)
+                OpenAI Integration (Sports Analysis)
               </h3>
               
               {isOpenAIConnected ? (
@@ -365,7 +365,7 @@ export function SettingsModal({
               ) : (
                 <div className="space-y-3">
                   <p className="text-xs text-slate-500">
-                    Enter your OpenAI API Key to use GPT-4o-mini instead of Gemini for sports predictions.
+                    Enter your OpenAI API Key to use GPT-4o-mini instead of Gemini for sports analysis.
                   </p>
                   <input
                     type="password"
@@ -424,7 +424,7 @@ export function SettingsModal({
               ) : (
                 <div className="space-y-3">
                   <p className="text-xs text-slate-500">
-                    Enter your Kalshi API Key to enable real-time market data and hedging suggestions based on live order books.
+                    Enter your Kalshi API Key to enable real-time market data and scenario analysis based on live order books.
                   </p>
                   <input
                     type="password"

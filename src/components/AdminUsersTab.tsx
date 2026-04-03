@@ -40,7 +40,7 @@ export function AdminUsersTab() {
   };
 
   useEffect(() => {
-    fetchUsers();
+    fetchUsers().catch(console.error);
   }, []);
 
   const handleAddUser = async () => {
@@ -59,7 +59,7 @@ export function AdminUsersTab() {
         subscriptionStatus: 'inactive',
         subscribedSports: []
       });
-      fetchUsers();
+      fetchUsers().catch(console.error);
     } catch (error) {
       console.error('Error adding user:', error);
     }
@@ -81,7 +81,7 @@ export function AdminUsersTab() {
         subscribedSports: editForm.subscribedSports,
       });
       setEditingUser(null);
-      fetchUsers();
+      fetchUsers().catch(console.error);
     } catch (error) {
       console.error('Error updating user:', error);
     }
@@ -99,7 +99,7 @@ export function AdminUsersTab() {
       const db = getDb();
       await deleteDoc(doc(db, 'users', userToDelete));
       setUserToDelete(null);
-      fetchUsers();
+      fetchUsers().catch(console.error);
     } catch (error) {
       console.error('Error deleting user:', error);
     }
@@ -253,7 +253,7 @@ export function AdminUsersTab() {
                             try {
                               const db = getDb();
                               await updateDoc(doc(db, 'users', user.id), { hasSeenWalkthrough: false });
-                              fetchUsers();
+                              fetchUsers().catch(console.error);
                             } catch (err) {
                               console.error("Error resetting walkthrough:", err);
                             }

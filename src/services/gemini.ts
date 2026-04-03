@@ -52,7 +52,7 @@ function getOpenAIClient(): OpenAI | null {
   return openaiClient;
 }
 
-export class SportsOracle {
+export class BettorsEdge {
   // Using the latest pro model for best reasoning and data synthesis
   private getModel() {
     return localStorage.getItem("gemini_model") || "gemini-3-flash-preview";
@@ -455,7 +455,7 @@ export class SportsOracle {
     ).join('\n');
 
     const prompt = `
-      You are a head sports betting analyst reviewing a series of failed predictions from the past weekend.
+      You are a head sports data analyst reviewing a series of failed predictions from the past weekend.
       
       Recent Failed Predictions:
       ${lossContext}
@@ -463,10 +463,10 @@ export class SportsOracle {
       Analyze these failures for systemic patterns. Consider:
       1. Are we overvaluing home court advantage?
       2. Are we missing a specific type of injury impact?
-      3. Is there a league-wide trend (e.g., high-scoring weekend, underdogs covering) that we missed?
+      3. Is there a league-wide trend (e.g., high-scoring weekend, underdogs performing better) that we missed?
       4. Is our confidence calibration off?
       
-      Provide a blunt, professional assessment of what is going on and how we will adjust our strategy.
+      Provide a blunt, professional assessment of what is going on and how we will adjust our analytical strategy.
       Keep it to 3-4 concise paragraphs.
     `;
 
@@ -478,7 +478,7 @@ export class SportsOracle {
         const response = await openai.chat.completions.create({
           model: this.getOpenAIModel(),
           messages: [
-            { role: "system", content: "You are a head sports betting analyst." },
+            { role: "system", content: "You are a head sports data analyst." },
             { role: "user", content: prompt }
           ]
         });
@@ -702,14 +702,24 @@ export class SportsOracle {
     }
   }
 
+  private lessonsCache = new Map<string, { lessons: string[], timestamp: number }>();
+  private readonly LESSONS_CACHE_TTL = 1000 * 60 * 60; // 1 hour
+
   async getPastLessons(teamName: string): Promise<string[]> {
+    const now = Date.now();
+    const cached = this.lessonsCache.get(teamName);
+    if (cached && (now - cached.timestamp < this.LESSONS_CACHE_TTL)) {
+      console.log(`[Gemini] Using cached lessons for ${teamName}`);
+      return cached.lessons;
+    }
+
     try {
       // Query past predictions involving this team
       const q = query(
         collection(getDb(), "predictions"),
         where("teams", "array-contains", teamName),
         orderBy("lastUpdated", "desc"),
-        limit(50) // Increased limit to ensure we capture enough games from the last 2 weeks
+        limit(15) // Reduced from 50 to save quota
       );
 
       let snapshot;
@@ -741,7 +751,9 @@ export class SportsOracle {
       });
 
       // Return the 5 most recent lessons for this team from the last 2 weeks
-      return lessons.slice(0, 5);
+      const result = lessons.slice(0, 5);
+      this.lessonsCache.set(teamName, { lessons: result, timestamp: now });
+      return result;
     } catch (e) {
       console.warn("Failed to fetch past lessons:", e);
       return [];
@@ -750,7 +762,7 @@ export class SportsOracle {
 
   async analyzeLoss(game: Game, prediction: Prediction, actualScore: { home: number, away: number }): Promise<void> {
     const prompt = `
-      You are a sports betting analyst reviewing a failed prediction.
+      You are a sports data analyst reviewing a failed prediction.
       
       Game: ${game.awayTeam} @ ${game.homeTeam} (${game.league})
       Your Prediction: ${prediction.winner} to win
@@ -785,7 +797,7 @@ export class SportsOracle {
         const response = await openai.chat.completions.create({
           model: this.getOpenAIModel(),
           messages: [
-            { role: "system", content: "You are a sports betting analyst reviewing a failed prediction." },
+            { role: "system", content: "You are a sports data analyst reviewing a failed prediction." },
             { role: "user", content: prompt }
           ],
           response_format: { type: "json_object" }
@@ -949,7 +961,7 @@ export class SportsOracle {
         .then(snapshot => snapshot.docs.map(doc => doc.data().report))
         .catch(e => { console.warn("Failed to fetch reports", e); return []; });
 
-      const matchupsPromise = getDocs(query(collection(db, "predictions"), where("teams", "array-contains", game.homeTeam), orderBy("lastUpdated", "desc"), limit(20)))
+      const matchupsPromise = getDocs(query(collection(db, "predictions"), where("teams", "array-contains", game.homeTeam), orderBy("lastUpdated", "desc"), limit(5)))
         .then(snapshot => {
           return snapshot.docs
             .map(doc => doc.data() as Prediction)
@@ -1057,7 +1069,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
         ? "NFL: CRITICAL - Analyze Quarterback (QB) performance and health. The QB is the most impactful player on the field. Consider offensive and defensive line matchups (Sacks, Pressure Rate), key skill position injuries (WR1, RB1), and defensive secondary strength. Weather conditions (wind speed, precipitation, temperature) are vital for Total points and passing efficiency. Factor in home-field advantage, travel, and situational factors like rest/bye weeks."
         : "";
 
-      const systemInstruction = `You are a world-class sports betting consultant and data scientist. Your goal is to identify +EV (Positive Expected Value) opportunities by finding discrepancies between your rigorous data-driven projections and market implied probabilities.
+      const systemInstruction = `You are a world-class sports data analyst and data scientist. Your goal is to identify high-probability outcomes by finding discrepancies between your rigorous data-driven projections and consensus market data.
 
 ${leagueSpecificContext}
 
@@ -1074,15 +1086,15 @@ HANDLING DATA GAPS:
 - If a specific mandated link (like the Google Drive folder) is not directly accessible or does not appear in search results, do NOT halt the analysis or issue a 'PASS' based on information deficiency.
 - Instead, use your search tool to gather the most recent data from other high-quality sources (ESPN, Rotowire, official team Twitter/X accounts).
 - Your goal is to provide the most accurate, data-driven projection possible using the totality of available real-time information.
-- A 'PASS' is only for betting value, not for lack of access to a specific URL.
+- A 'PASS' is only for analytical uncertainty, not for lack of access to a specific URL.
 
 CORE ANALYTICAL FRAMEWORK:
 1. SITUATIONAL ANALYSIS: Factor in days of rest, travel distance, altitude, and "look-ahead" or "trap" game scenarios.
-2. ROSTER & INJURY IMPACT: Do not just list injuries; quantify the "Point Spread Impact" (PSI) of missing players. How does their absence affect the team's Net Rating?
-3. MARKET SENTIMENT: Analyze line movement. If the line is moving against the public (Reverse Line Movement), identify why the "sharps" might be on the other side.
+2. ROSTER & INJURY IMPACT: Do not just list injuries; quantify the "Performance Impact Score" (PIS) of missing players. How does their absence affect the team's Net Rating?
+3. MARKET SENTIMENT: Analyze market trends. If the projections are shifting against the consensus, identify the underlying data driving the change.
 4. DEVIL'S ADVOCATE: You MUST explicitly argue AGAINST your primary conclusion. If you think Team A wins, what is the most likely path to victory for Team B?
 5. MONTE CARLO SIMULATION: Mentally run 10,000 simulations. Your winProbability MUST reflect the percentage of times the team wins in these simulations.
-6. MLB ADVANCED ANALYTICS: For MLB, you MUST explicitly mention starting pitcher xERA, Barrel%, and bullpen rest status in your reasoning. If the umpire has a significant trend (e.g., high RPG), factor that into your score prediction and Total recommendation.
+6. MLB ADVANCED ANALYTICS: For MLB, you MUST explicitly mention starting pitcher xERA, Barrel%, and bullpen rest status in your reasoning. If the umpire has a significant trend (e.g., high RPG), factor that into your score prediction and Total projection.
 7. INJURY TERMINOLOGY: You MUST use consistent terminology for player statuses in the 'injuries' array. Use ONLY these four statuses: "In", "Out", "Doubtful", or "Probable". Do NOT use "Questionable", "GTD", or other variations.
    - "In": Confirmed to play.
    - "Out": Confirmed to miss the game.
@@ -1092,21 +1104,21 @@ CORE ANALYTICAL FRAMEWORK:
 
 OPERATIONAL GUIDELINES: 
 1. Prioritize accuracy and data-driven reasoning. 
-2. VALUE-BASED PASSING: A 'PASS' is reserved for matchups where the betting edge is minimal (win probability 48-52%) or the market is perfectly efficient. Do NOT use 'PASS' as a way to avoid analysis due to perceived information gaps; your role is to provide the best possible data-driven estimate using all available search results.
+2. UNCERTAINTY-BASED PASSING: A 'PASS' is reserved for matchups where the analytical edge is minimal (win probability 48-52%) or the market is perfectly efficient. Do NOT use 'PASS' as a way to avoid analysis due to perceived information gaps; your role is to provide the best possible data-driven estimate using all available search results.
 3. If winProbability >= 0.60, you MUST pick a winner.
 4. Always return valid JSON. IMPORTANT: Do NOT include a '+' sign before positive numbers in the JSON (e.g., use 105, NOT +105). This is a strict requirement for JSON validity.
 5. KEY ADVANTAGES: In the 'keyFactors' field, you MUST provide actual, specific advantages (e.g., 'Celtics have a +8 rebounding edge with Porzingis back' or 'Nuggets 3PT% vs. Zone Defense') rather than generic references or source mentions.
 6. PRIVACY: NEVER mention the Google Drive link or 'official injury report' in your 'reasoning', 'qaNotes', or 'marketSentiment'. Use the information silently to provide accurate status updates.`;
 
       const leagueSearchQueries = game.league === 'NCAA'
-        ? `"current roster ${game.homeTeam} basketball", "current roster ${game.awayTeam} basketball", "NCAA basketball injury report rotowire", "college basketball line movement ${game.homeTeam} vs ${game.awayTeam}", "sharp money college basketball today"`
+        ? `"current roster ${game.homeTeam} basketball", "current roster ${game.awayTeam} basketball", "NCAA basketball injury report rotowire", "college basketball market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "expert consensus college basketball today"`
         : game.league === 'NHL'
-        ? `"starting goalie ${game.homeTeam} today", "starting goalie ${game.awayTeam} today", "NHL injury report ${game.homeTeam}", "NHL line movement ${game.homeTeam} vs ${game.awayTeam}", "NHL sharp money today"`
+        ? `"starting goalie ${game.homeTeam} today", "starting goalie ${game.awayTeam} today", "NHL injury report ${game.homeTeam}", "NHL market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "NHL expert consensus today"`
         : game.league === 'MLB'
-        ? `"starting pitcher ${game.homeTeam} vs ${game.awayTeam} today", "MLB starting pitchers today ${game.homeTeam}", "MLB xERA and Barrel% ${game.homeTeam} vs ${game.awayTeam}", "MLB injury report ${game.homeTeam}", "MLB lineup ${game.homeTeam} today", "weather report for ${game.location} today", "MLB bullpen rest status high-leverage arms ${game.homeTeam}", "MLB umpire assignment today ${game.homeTeam}", "MLB line movement ${game.homeTeam} vs ${game.awayTeam}", "MLB advanced stats starting pitchers ${game.homeTeam} vs ${game.awayTeam}", "Statcast park factors ${game.location} MLB", "MLB pitcher vs batter matchups ${game.homeTeam} vs ${game.awayTeam}"`
+        ? `"starting pitcher ${game.homeTeam} vs ${game.awayTeam} today", "MLB starting pitchers today ${game.homeTeam}", "MLB xERA and Barrel% ${game.homeTeam} vs ${game.awayTeam}", "MLB injury report ${game.homeTeam}", "MLB lineup ${game.homeTeam} today", "weather report for ${game.location} today", "MLB bullpen rest status high-leverage arms ${game.homeTeam}", "MLB umpire assignment today ${game.homeTeam}", "MLB market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "MLB advanced stats starting pitchers ${game.homeTeam} vs ${game.awayTeam}", "Statcast park factors ${game.location} MLB", "MLB pitcher vs batter matchups ${game.homeTeam} vs ${game.awayTeam}"`
         : game.league === 'NFL'
-        ? `"NFL injury report ${game.homeTeam} vs ${game.awayTeam} today", "NFL starting lineups ${game.homeTeam} vs ${game.awayTeam}", "NFL weather report ${game.location} today", "NFL line movement ${game.homeTeam} vs ${game.awayTeam}", "NFL sharp money today", "NFL QB stats ${game.homeTeam} vs ${game.awayTeam}"`
-        : `"current roster ${game.homeTeam} 2025-26 https://www.espn.com/nba/players", "current roster ${game.awayTeam} 2025-26 https://www.espn.com/nba/players", "latest NBA injury report ${game.homeTeam} vs ${game.awayTeam} https://www.rotowire.com/basketball/injury-report.php", "NBA starting lineups today ${game.homeTeam}", "NBA betting lines movement ${game.homeTeam} vs ${game.awayTeam} VegasInsider ActionNetwork", "NBA sharp money betting today", "site:official.nba.com injury report", "NBA_Injury_Report_Latest Google Drive 1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9", "last 3 injury reports for ${game.homeTeam} and ${game.awayTeam} key players"`;
+        ? `"NFL injury report ${game.homeTeam} vs ${game.awayTeam} today", "NFL starting lineups ${game.homeTeam} vs ${game.awayTeam}", "NFL weather report ${game.location} today", "NFL market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "NFL expert consensus today", "NFL QB stats ${game.homeTeam} vs ${game.awayTeam}"`
+        : `"current roster ${game.homeTeam} 2025-26 https://www.espn.com/nba/players", "current roster ${game.awayTeam} 2025-26 https://www.espn.com/nba/players", "latest NBA injury report ${game.homeTeam} vs ${game.awayTeam} https://www.rotowire.com/basketball/injury-report.php", "NBA starting lineups today ${game.homeTeam}", "NBA market expectations movement ${game.homeTeam} vs ${game.awayTeam} ESPN CBS Sports", "NBA expert consensus trends today", "site:official.nba.com injury report", "NBA_Injury_Report_Latest Google Drive 1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9", "last 3 injury reports for ${game.homeTeam} and ${game.awayTeam} key players"`;
 
       const prompt = `
         [Analysis Request Time: ${new Date().toISOString()}]
@@ -1125,15 +1137,15 @@ OPERATIONAL GUIDELINES:
         TASK:
         1. LATEST INJURIES: Use your search tool to find the latest status of key players. Check the Official NBA Injury Report, Rotowire (https://www.rotowire.com/basketball/injury-report.php), and reputable news sites. If you can access the Google Drive folder (1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9), look specifically for the file 'NBA_Injury_Report_Latest' and use it as your primary reference. If not, ensure you have cross-referenced at least two other sources to confirm player availability. Quantify the impact on team efficiency.
         2. ROSTER AUDIT: For every player you mention, you MUST confirm they are on the correct team for the 2025-26 season using the ESPN NBA Players directory (https://www.espn.com/nba/players). Ensure you are attributing them to their current real-world team.
-        3. MARKET ANALYSIS: Search for current betting lines, movement, and team trends (ATS and Over/Under records for the last 10 games). Is there Reverse Line Movement?
+        3. MARKET ANALYSIS: Search for current market expectations, movement, and team trends (performance against expectations and Over/Under records for the last 10 games). Is there Reverse Market Movement?
         4. SITUATIONAL FACTORS: Is this a back-to-back? 3rd game in 4 nights? Long road trip?
-        5. DEVIL'S ADVOCATE: Provide one strong reason why the UNDERDOG or the OTHER team might win/cover.
-        6. EXPECTED VALUE: Compare your winProbability to the market implied probability (if odds are available).
-        7. HEDGING ANALYSIS: Provide a detailed hedging strategy. This MUST include:
-           - Scenario analysis: What happens if the underdog takes an early lead?
-           - Potential outcomes: How to lock in profit or minimize loss based on live odds movement.
-           - Betting strategies: Specific advice for different risk profiles (e.g., "If you bet Team A at -110, consider a live hedge on Team B at +250 if they lead at halftime").
-           - Probability-based triggers: When to pull the trigger on a hedge.
+        5. DEVIL'S ADVOCATE: Provide one strong reason why the OTHER team might win/perform better.
+        6. ANALYTICAL EDGE: Compare your winProbability to the market projected probability (if data is available).
+        7. SCENARIO ANALYSIS: Provide a detailed scenario breakdown. This MUST include:
+           - Situation analysis: What happens if one team takes an early lead?
+           - Potential outcomes: How to interpret performance shifts based on live game movement.
+           - Analysis strategies: Specific advice for different analytical profiles (e.g., "If you favor Team A, consider how a lead at halftime might change the dynamic").
+           - Probability-based triggers: When to adjust the analytical outlook.
         8. LESSONS LEARNED: Explicitly state how you adjusted your prediction weighting based on the "LEARN FROM YOUR PAST MISTAKES" context.
         
         Return JSON:
@@ -1145,9 +1157,9 @@ OPERATIONAL GUIDELINES:
           "scorePrediction": {"home": 105, "away": 98},
           "reasoning": "Direct summary of edge. MUST be 300 characters or less.",
           "devilsAdvocate": "The strongest case for the opposing team.",
-          "marketSentiment": "Summary of line movement and sharp vs public alignment.",
+          "marketSentiment": "Summary of market movement and expert consensus.",
           "situationalFactors": "Rest, travel, and schedule impact.",
-          "hedgingAdvice": "Detailed hedging strategy based on probabilities and scenarios. Use markdown formatting (bullet points, bold text) for readability.",
+          "scenarioAnalysis": "Detailed scenario breakdown based on probabilities and outcomes. Use markdown formatting (bullet points, bold text) for readability.",
           "keyFactors": ["Factor 1", "Factor 2"],
           "appliedLessons": ["How I adjusted my algorithm based on past mistake 1", "How I adjusted based on past mistake 2"],
           "injuries": [{"team": "Team", "player": "Name", "status": "Status", "impact": "PSI value"}],
@@ -1174,17 +1186,17 @@ OPERATIONAL GUIDELINES:
             {"category": "PPG", "homeValue": 115.4, "awayValue": 110.2, "advantage": "home"}
           ],
           "trends": {
-            "homeATS": "5-2 ATS last 10",
-            "awayATS": "3-4 ATS last 10",
-            "homeOU": "4-3 O/U last 10",
-            "awayOU": "2-5 O/U last 10"
+            "homeVsExp": "5-2 vs Exp last 10",
+            "awayVsExp": "3-4 vs Exp last 10",
+            "homeTotal": "4-3 Total last 10",
+            "awayTotal": "2-5 Total last 10"
           },
-          "marketOdds": {
-            "homeML": -110,
-            "awayML": +110,
-            "spread": -2.5,
-            "homeSpreadOdds": -110,
-            "awaySpreadOdds": -110,
+          "marketExpectations": {
+            "homeWinProb": -110,
+            "awayWinProb": +110,
+            "margin": -2.5,
+            "homeMarginOdds": -110,
+            "awayMarginOdds": -110,
             "total": 220.5,
             "overOdds": -110,
             "underOdds": -110
@@ -1328,16 +1340,16 @@ OPERATIONAL GUIDELINES:
         prediction.injuries = [];
       }
 
-      // Merge existing marketOdds if the AI dropped them or returned null/empty
-      const hasMarketOdds = (odds: any) => odds && Object.keys(odds).length > 1;
+      // Merge existing marketExpectations if the AI dropped them or returned null/empty
+      const hasMarketExpectations = (odds: any) => odds && Object.keys(odds).length > 1;
       
-      if (!hasMarketOdds(prediction.marketOdds)) {
-        if (hasMarketOdds(existingPrediction?.marketOdds)) {
-          console.log("[Gemini] AI dropped or returned empty marketOdds, restoring from existingPrediction");
-          prediction.marketOdds = existingPrediction.marketOdds;
-        } else if (hasMarketOdds(game.marketOdds)) {
-          console.log("[Gemini] AI didn't return marketOdds, using game.marketOdds");
-          prediction.marketOdds = game.marketOdds;
+      if (!hasMarketExpectations(prediction.marketExpectations)) {
+        if (hasMarketExpectations(existingPrediction?.marketExpectations)) {
+          console.log("[Gemini] AI dropped or returned empty marketExpectations, restoring from existingPrediction");
+          prediction.marketExpectations = existingPrediction.marketExpectations;
+        } else if (hasMarketExpectations(game.marketExpectations)) {
+          console.log("[Gemini] AI didn't return marketExpectations, using game.marketExpectations");
+          prediction.marketExpectations = game.marketExpectations;
         }
       }
       
@@ -1546,7 +1558,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
         const response = await openai.chat.completions.create({
           model: this.getOpenAIModel(),
           messages: [
-            { role: "system", content: "You are a strict Quality Assurance auditor for sports betting." },
+            { role: "system", content: "You are a strict Quality Assurance auditor for sports analysis." },
             { role: "user", content: prompt }
           ],
           response_format: { type: "json_object" }
@@ -1729,8 +1741,8 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
       const teams = batchGames.map(g => `${g.awayTeam} and ${g.homeTeam}`).join(", ");
 
       const leagueSearchQuery = league === 'NCAA' 
-        ? `"NCAA basketball injury report rotowire", "college basketball line movement ${batchGames.map(g => g.homeTeam).join(' or ')}", "sharp money college basketball today"` 
-        : `"NBA line movement today", "NBA sharp money consensus", "latest injuries for ${batchGames.map(g => g.homeTeam).join(' or ')}"`;
+        ? `"NCAA basketball injury report rotowire", "college basketball market expectations movement ${batchGames.map(g => g.homeTeam).join(' or ')}", "expert consensus college basketball today"` 
+        : `"NBA market expectations movement today", "NBA expert consensus", "latest injuries for ${batchGames.map(g => g.homeTeam).join(' or ')}"`;
 
       const prompt = `
         TASK: Use your search tool to find the LATEST injury reports and MARKET MOVEMENT for these ${league} teams playing on ${date}: ${teams}.
@@ -1740,7 +1752,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
         1. ZERO TOLERANCE FOR INCORRECT INJURY ADVICE: You MUST be 100% certain of a player's status before marking them as 'In'. If there is ANY conflicting information (e.g., one source says 'Out' and another says 'Clear'), you MUST prioritize the more conservative status ('Out' or 'Doubtful'). A player who is 'Out' in several recent reports but 'Clear' in one should be treated as 'Out' unless there is an official team announcement confirming their return.
         2. INJURIES: Find the latest status of key players. Verify roster integrity (e.g., ensure players are attributed to their correct current teams).
            - TERMINOLOGY: You MUST use ONLY these four statuses: "In", "Out", "Doubtful", or "Probable". Map all other statuses (Questionable, GTD, etc.) to one of these four.
-        3. MARKET: Identify any significant line movement or "sharp vs public" reports.
+        3. MARKET: Identify any significant market expectations movement or "expert consensus" reports.
         4. SITUATIONAL: Note if any team is on a back-to-back or long road trip.
         5. DETROIT PISTONS SPECIAL ALERT: If any game involves the Detroit Pistons, you MUST be extremely thorough. There have been reports of incorrect 'Clear' statuses for Pistons players who are actually 'Out'. Cross-reference multiple sources.
         6. SOURCE AUDIT: For every injury update, you MUST state which source confirmed the status (e.g., "Rotowire", "ESPN", "Underdog NBA").
@@ -1860,21 +1872,21 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
       : "";
 
     const prompt = `
-      You are a professional sports analyst and betting consultant with expertise in data synthesis and game forecasting. You have been tasked with providing a comprehensive daily briefing for today's ${league} slate on ${date}.
+      You are a professional sports analyst and consultant with expertise in data synthesis and game forecasting. You have been tasked with providing a comprehensive daily briefing for today's ${league} slate on ${date}.
 
       ${gamesContext}
 
       ${injurySourceContext}
 
       Task:
-      Analyze the real-time data from the provided ESPN links (Schedule, Odds, Injuries, Players, and Standings). You must cross-reference these sources to identify how player availability and current team standings are influencing the betting markets for tonight's games.
+      Analyze the real-time data from the provided ESPN links (Schedule, Odds, Injuries, Players, and Standings). You must cross-reference these sources to identify how player availability and current team standings are influencing the markets for tonight's games.
 
       Objective:
       Generate a structured '${league} Game Day Preview Report.' For each game scheduled today, provide a summary that includes:
       1) Matchup & Standings Context
-      2) Current Betting Odds (Spread/Total)
+      2) Current Market Odds (Spread/Total)
       3) Critical Injury Updates (Confirmed against official reports)
-      4) A 'Key Narrative' explaining how specific injuries or streaks might impact the outcome or betting value.
+      4) A 'Key Narrative' explaining how specific injuries or streaks might impact the outcome or market value.
 
       Knowledge:
       Maintain a professional, data-driven, and objective tone. Focus specifically on 'Impact Players'—explain how the absence of a top-tier player shifts the point spread. Ensure the information is presented in a clear, scannable format using tables or bulleted lists for high readability.
@@ -1892,7 +1904,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
         const response = await openai.chat.completions.create({
           model: this.getOpenAIModel(),
           messages: [
-            { role: "system", content: "You are a professional sports analyst and betting consultant." },
+            { role: "system", content: "You are a professional sports analyst and consultant." },
             { role: "user", content: prompt }
           ]
         });
@@ -2033,5 +2045,5 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
   }
 }
 
-export const sportsOracle = new SportsOracle();
+export const bettorsEdge = new BettorsEdge();
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { X, Loader2, FileText, ShieldCheck, AlertCircle, CheckCircle2 } from "lucide-react";
 import { format } from "date-fns";
-import { sportsOracle } from "../services/gemini";
+import { bettorsEdge } from "../services/gemini";
 import Markdown from "react-markdown";
 
 interface DailyBriefingModalProps {
@@ -21,9 +21,9 @@ export function DailyBriefingModal({ isOpen, onClose, league, date, games }: Dai
 
   useEffect(() => {
     if (isOpen) {
-      generateReport();
+      generateReport().catch(console.error);
       if (league === 'NBA') {
-        runHealthCheck();
+        runHealthCheck().catch(console.error);
       }
     } else {
       // Reset state when closed
@@ -36,7 +36,7 @@ export function DailyBriefingModal({ isOpen, onClose, league, date, games }: Dai
   const runHealthCheck = async () => {
     setCheckingHealth(true);
     try {
-      const result = await sportsOracle.checkSourceHealth();
+      const result = await bettorsEdge.checkSourceHealth();
       setHealthCheck(result);
     } catch (err) {
       console.error(err);
@@ -51,7 +51,7 @@ export function DailyBriefingModal({ isOpen, onClose, league, date, games }: Dai
     setReport(null);
     try {
       const dateStr = format(date, "yyyy-MM-dd");
-      const generatedReport = await sportsOracle.generateDailyBriefing(league, dateStr, games);
+      const generatedReport = await bettorsEdge.generateDailyBriefing(league, dateStr, games);
       setReport(generatedReport);
     } catch (err: any) {
       setError(err.message || "Failed to generate daily briefing.");
@@ -117,7 +117,7 @@ export function DailyBriefingModal({ isOpen, onClose, league, date, games }: Dai
                 </div>
               </div>
               <button 
-                onClick={runHealthCheck}
+                onClick={() => runHealthCheck().catch(console.error)}
                 disabled={checkingHealth}
                 className="text-[10px] uppercase tracking-wider font-bold text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
               >
@@ -131,14 +131,14 @@ export function DailyBriefingModal({ isOpen, onClose, league, date, games }: Dai
               <Loader2 className="w-10 h-10 animate-spin mb-4 text-indigo-500" />
               <p className="text-lg font-medium text-white">Generating Briefing...</p>
               <p className="text-sm mt-2 text-center max-w-md">
-                Analyzing real-time data from ESPN, cross-referencing injuries, and evaluating betting markets. This may take up to 30 seconds.
+                Analyzing real-time data from ESPN, cross-referencing injuries, and evaluating market trends. This may take up to 30 seconds.
               </p>
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center h-64 text-red-400">
               <p className="text-lg font-medium mb-4">{error}</p>
               <button 
-                onClick={generateReport}
+                onClick={() => generateReport().catch(console.error)}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors border border-slate-700"
               >
                 Try Again

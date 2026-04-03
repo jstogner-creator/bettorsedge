@@ -3,10 +3,10 @@ import { GoogleGenAI } from "@google/genai";
 async function run() {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const prompt = `
-    You are an NBA betting decision engine focused on finding positive expected value.
+    You are an NBA sports analysis engine focused on finding value.
     Analyze the last 3 NBA games that happened or are happening today (March 11, 2026).
     Provide a detailed analysis for each of the 3 games following the instructions:
-    Output: market snapshot, team edge, injury impact, situational factors, scenario analysis, projected winner, win probability, projected spread, projected total, best betting angle, confidence score, and final recommendation.
+    Output: market snapshot, team edge, injury impact, situational factors, scenario analysis, projected winner, win probability, projected spread, projected total, best analytical angle, confidence score, and final recommendation.
   `;
 
   const response = await ai.models.generateContent({

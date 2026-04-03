@@ -3,7 +3,7 @@ import { Prediction } from '../types';
 import { format, parseISO } from 'date-fns';
 import { CheckCircle, XCircle, MinusCircle, Activity, TrendingUp, Filter, RefreshCw, AlertTriangle, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { sportsOracle } from '../services/gemini';
+import { bettorsEdge } from '../services/gemini';
 import Markdown from 'react-markdown';
 
 interface AccuracyTabProps {
@@ -14,7 +14,7 @@ interface AccuracyTabProps {
 
 export const AccuracyTab: React.FC<AccuracyTabProps> = ({ predictions, onSyncPending, isSyncing }) => {
   const [filterLeague, setFilterLeague] = useState<string>('ALL');
-  const [filterType, setFilterType] = useState<'ALL' | 'LOCKS'>('ALL');
+  const [filterType, setFilterType] = useState<'ALL' | 'TOP_PICKS'>('ALL');
   const [filterTime, setFilterTime] = useState<'ALL' | '2WEEKS'>('2WEEKS');
   const [performanceAnalysis, setPerformanceAnalysis] = useState<string | null>(null);
   const [isAnalyzingPerformance, setIsAnalyzingPerformance] = useState(false);
@@ -22,7 +22,7 @@ export const AccuracyTab: React.FC<AccuracyTabProps> = ({ predictions, onSyncPen
   const handleAnalyzePerformance = async () => {
     setIsAnalyzingPerformance(true);
     try {
-      const analysis = await sportsOracle.analyzeRecentPerformance(Object.values(predictions));
+      const analysis = await bettorsEdge.analyzeRecentPerformance(Object.values(predictions));
       setPerformanceAnalysis(analysis);
     } catch (error) {
       console.error("Failed to analyze performance:", error);
@@ -76,13 +76,13 @@ export const AccuracyTab: React.FC<AccuracyTabProps> = ({ predictions, onSyncPen
       console.log("[AccuracyTab] After league filter:", filtered.length);
     }
     
-    if (filterType === 'LOCKS') {
+    if (filterType === 'TOP_PICKS') {
       filtered = filtered.filter(p => {
         const confidence = typeof p.confidence === 'string' ? parseFloat(p.confidence) : p.confidence;
-        const isLock = (confidence !== undefined && !isNaN(confidence) && confidence >= 7);
-        return isLock;
+        const isTopPick = (confidence !== undefined && !isNaN(confidence) && confidence >= 7);
+        return isTopPick;
       });
-      console.log("[AccuracyTab] After type filter (LOCKS):", filtered.length);
+      console.log("[AccuracyTab] After type filter (TOP_PICKS):", filtered.length);
     }
     
     return filtered;
@@ -121,8 +121,8 @@ export const AccuracyTab: React.FC<AccuracyTabProps> = ({ predictions, onSyncPen
     });
 
     const resolvedPicks = correct + incorrect;
-    // For Locks Only, we don't want to include "passed" in the total resolved count if they were filtered out
-    const totalResolved = correct + incorrect + push + (filterType === 'LOCKS' ? 0 : passed);
+    // For Top Picks Only, we don't want to include "passed" in the total resolved count if they were filtered out
+    const totalResolved = correct + incorrect + push + (filterType === 'TOP_PICKS' ? 0 : passed);
     const winPercentage = resolvedPicks > 0 ? ((correct / resolvedPicks) * 100).toFixed(1) : '0.0';
 
     return { correct, incorrect, push, pending, passed, totalResolved, winPercentage };
@@ -182,15 +182,15 @@ export const AccuracyTab: React.FC<AccuracyTabProps> = ({ predictions, onSyncPen
               All Matchups
             </button>
             <button
-              onClick={() => setFilterType('LOCKS')}
+              onClick={() => setFilterType('TOP_PICKS')}
               className={cn(
                 "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-                filterType === 'LOCKS'
+                filterType === 'TOP_PICKS'
                   ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
                   : "text-slate-400 hover:text-white hover:bg-slate-800"
               )}
             >
-              Locks Only
+              Top Picks Only
             </button>
           </div>
 
@@ -214,7 +214,7 @@ export const AccuracyTab: React.FC<AccuracyTabProps> = ({ predictions, onSyncPen
           {onSyncPending && (
             <div className="flex items-center gap-2 ml-auto">
               <button
-                onClick={handleAnalyzePerformance}
+                onClick={() => handleAnalyzePerformance().catch(console.error)}
                 disabled={isAnalyzingPerformance || stats.incorrect === 0}
                 className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Analyze recent losses for patterns"
@@ -285,13 +285,13 @@ export const AccuracyTab: React.FC<AccuracyTabProps> = ({ predictions, onSyncPen
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col items-center justify-center relative overflow-hidden group">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-cyan-500 opacity-50" />
           <span className="text-slate-400 text-sm font-medium mb-2">
-            {filterType === 'LOCKS' ? 'Lock Win Rate' : 'Overall Win Rate'}
+            {filterType === 'TOP_PICKS' ? 'Top Pick Win Rate' : 'Overall Win Rate'}
           </span>
           <div className="text-4xl font-bold text-white flex items-center">
             {stats.winPercentage}%
             <TrendingUp className="w-6 h-6 ml-2 text-indigo-400 group-hover:translate-y-[-2px] transition-transform" />
           </div>
-          {filterType === 'LOCKS' && (
+          {filterType === 'TOP_PICKS' && (
             <div className="mt-2 text-[10px] text-amber-500 font-bold uppercase tracking-widest">
               High Confidence Only
             </div>

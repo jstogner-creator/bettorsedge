@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { format, addDays } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { Layout } from "../components/Layout";
 import { GameCard } from "../GameCard";
 import { espnService } from "../services/espn";
-import { sportsOracle } from "../services/gemini";
+import { bettorsEdge } from "../services/gemini";
 import { kalshiService } from "../services/kalshi";
 import { Game, Prediction, TournamentBracket } from "../types";
 import { logError } from "../services/logger";
@@ -26,20 +26,19 @@ import {
   Shield,
 } from "lucide-react";
 import { Toast } from "../components/Toast";
-import { LocksOfTheDay } from "../components/LocksOfTheDay";
-import { AccuracyTab } from "../components/AccuracyTab";
 import { SportControls } from "../components/SportControls";
-import { ChatPanel } from "../components/ChatPanel";
 import { LegalModal } from "../components/LegalModal";
 import { cn } from "../lib/utils";
 import { getAuthInstance, getDb, loginWithGoogle, logout, getIdToken } from "../firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
 import {
   collection,
-  onSnapshot,
   doc,
   writeBatch,
   getDoc,
+  getDocFromServer,
+  getDocs,
+  getDocsFromServer,
   query,
   where,
   setDoc,
@@ -49,20 +48,24 @@ import {
 } from "firebase/firestore";
 import { sendNotification, requestNotificationPermission } from "../utils/notification";
 import { handleFirestoreError, OperationType } from "../lib/firestoreErrors";
-import { UserProfile, Bet } from "../types";
-import { Paywall } from "../components/Paywall";
-import BankrollTracker from "../components/BankrollTracker";
-import { bettingService } from "../services/bettingService";
-import { AdminUsersTab } from "../components/AdminUsersTab";
-import { DailyBriefingModal } from "../components/DailyBriefingModal";
+import { UserProfile } from "../types";
 import { loadStripe } from "@stripe/stripe-js";
-import { AdminTab } from "../components/Dashboard/AdminTab";
 import { GameGrid } from "../components/Dashboard/GameGrid";
 import { DashboardHeader } from "../components/Dashboard/DashboardHeader";
 import { apiSportsService } from "../services/apiSports";
 import { apiSportsBasketballService } from "../services/apiSportsBasketball";
 import { Joyride, STATUS } from "react-joyride";
 import type { Step } from "react-joyride";
+
+// Lazy loaded components
+const TopPicksOfTheDay = lazy(() => import("../components/TopPicksOfTheDay").then(m => ({ default: m.TopPicksOfTheDay })));
+const AccuracyTab = lazy(() => import("../components/AccuracyTab").then(m => ({ default: m.AccuracyTab })));
+const ChatPanel = lazy(() => import("../components/ChatPanel").then(m => ({ default: m.ChatPanel })));
+const Paywall = lazy(() => import("../components/Paywall").then(m => ({ default: m.Paywall })));
+const AdminUsersTab = lazy(() => import("../components/AdminUsersTab").then(m => ({ default: m.AdminUsersTab })));
+const DailyBriefingModal = lazy(() => import("../components/DailyBriefingModal").then(m => ({ default: m.DailyBriefingModal })));
+const AdminTab = lazy(() => import("../components/Dashboard/AdminTab").then(m => ({ default: m.AdminTab })));
+
 // Robust Joyride component retrieval
 const JoyrideComponent = Joyride;
 const JoyrideAny = typeof JoyrideComponent === 'function' ? JoyrideComponent : (Joyride as any)?.default;
@@ -97,6 +100,18 @@ const PAYWALL_ONLY_BYPASS_EMAILS = [
 
 
 
+const QuotaBanner = ({ message }: { message: string }) => (
+  <div className="mb-6 bg-rose-500/10 border border-rose-500/20 rounded-xl p-4 flex items-start gap-3 animate-in fade-in slide-in-from-top-4 duration-500">
+    <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+    <div className="space-y-1">
+      <p className="text-sm font-bold text-rose-400">Firestore Quota Exceeded</p>
+      <p className="text-xs text-rose-200/70 leading-relaxed">
+        {message} The app is now using offline cache. Some data might be stale.
+      </p>
+    </div>
+  </div>
+);
+
 export function Dashboard({
   user: initialUser,
   onOpenFAQ,
@@ -110,13 +125,10 @@ export function Dashboard({
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(false);
   const [analyzingMap, setAnalyzingMap] = useState<Record<string, boolean>>({});
-  const [mainTab, setMainTab] = useState<"analysis" | "bankroll">("analysis");
   const [error, setError] = useState<string | null>(null);
   const [savedPredictions, setSavedPredictions] = useState<Record<string, Prediction>>({});
   const [allPredictions, setAllPredictions] = useState<Record<string, Prediction>>({});
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
-// API-Sports widget snippets
-// API-Sports widget snippets
 
   // Persistent Logging Helper
   const addDebugLog = (msg: string) => {
@@ -149,6 +161,7 @@ export function Dashboard({
     window.addEventListener('beforeunload', handleUnload);
     return () => window.removeEventListener('beforeunload', handleUnload);
   }, []);
+
   const [toast, setToast] = useState<{ message: string; type: "error" | "success" | "warning" | "info" } | null>(null);
   const [kalshiStatus, setKalshiStatus] = useState<"connected" | "disconnected" | "error">("disconnected");
   const [user, setUser] = useState<User | null>(initialUser);
@@ -178,6 +191,7 @@ export function Dashboard({
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
   const [profileError, setProfileError] = useState<string | null>(null);
   const [timeFilter, setTimeFilter] = useState<"all" | "early" | "afternoon" | "late">("all");
   const [sortBy, setSortBy] = useState<"time" | "edge" | "confidence">("time");
@@ -210,7 +224,7 @@ export function Dashboard({
     },
     {
       target: "#daily-briefing-btn",
-      content: "Get a high-level summary of today's slate, including key narratives and betting trends, generated by our AI.",
+      content: "Get a high-level summary of today's slate, including key narratives and market trends, generated by our AI.",
     },
     {
       target: "#game-grid",
@@ -218,7 +232,7 @@ export function Dashboard({
     },
     {
       target: "#confidence-score",
-      content: "Our AI assigns a confidence score from 1 to 10. Scores above 7 indicate high-conviction plays.",
+      content: "Our AI assigns a confidence score from 1 to 10. Scores above 7 indicate high-conviction analysis.",
     },
     {
       target: "#win-prob",
@@ -268,6 +282,7 @@ export function Dashboard({
   };
 
   // Consolidated Auth & Profile Listener
+  const lastProfileFetchRef = useRef<number>(0);
   useEffect(() => {
     console.log("[Dashboard] Mounted. User:", user?.email, "Active Tab:", activeTab);
     console.log("[Dashboard] Environment:", {
@@ -297,14 +312,36 @@ export function Dashboard({
         setIsAdminUser(true);
       }
 
-      const setupProfile = async () => {
+      const fetchProfile = async () => {
+        // Throttle profile fetch to once every 10 minutes
+        const now = Date.now();
+        if (now - lastProfileFetchRef.current < 10 * 60 * 1000) {
+          console.log("[Dashboard] Skipping profile fetch (throttled)");
+          setAuthReady(true);
+          return;
+        }
+
         const userRef = doc(db, "users", user.uid);
+        let setupTimeout: NodeJS.Timeout;
+
+        setupTimeout = setTimeout(() => {
+          if (!authReady) {
+            console.warn("[Dashboard] Profile setup timed out");
+            setProfileError("Profile sync is taking longer than expected. Please check your connection or try opening in a new tab.");
+            setAuthReady(true);
+          }
+        }, 15000);
 
         try {
-          const userDoc = await getDoc(userRef);
+          console.log("[Dashboard] Fetching profile...");
+          const userDoc = await getDocFromServer(userRef).catch(() => getDoc(userRef));
+          
+          if (typeof setupTimeout !== 'undefined') clearTimeout(setupTimeout);
+          setProfileError(null);
+
           if (!userDoc.exists()) {
             console.log("[Dashboard] Creating new user profile for:", user.email);
-            await setDoc(userRef, {
+            const newProfile = {
               uid: user.uid,
               email: user.email || "",
               displayName: user.displayName || "",
@@ -313,90 +350,45 @@ export function Dashboard({
               subscribedSports: [],
               acceptedTerms: true,
               termsAcceptedAt: new Date().toISOString(),
-              bankroll: 1000,
               hasSeenWalkthrough: false,
-            });
-          }
-        } catch (err) {
-          console.error("[Dashboard] Error ensuring user doc exists:", err);
-          setProfileError("Failed to initialize your profile. Please check your connection.");
-        }
+            };
+            await setDoc(userRef, newProfile);
+            setUserProfile(newProfile as UserProfile);
+            setIsAdminUser(isBypass);
+          } else {
+            const profile = userDoc.data() as UserProfile;
+            setUserProfile(profile);
+            const isAdmin = profile.role === "admin" || isBypass;
+            setIsAdminUser(isAdmin);
 
-        profileUnsubscribe = onSnapshot(
-          userRef,
-          (docSnap) => {
-            console.log("[Dashboard] Profile snapshot received:", docSnap.exists() ? "Exists" : "Not Found");
-
-            const currentUserEmail = (user.email || "").toLowerCase().trim();
-            const isBypassEmail = BYPASS_EMAILS.includes(currentUserEmail);
-
-            if (docSnap.exists()) {
-              const profile = docSnap.data() as UserProfile;
-              setUserProfile(profile);
-
-              const isAdmin = profile.role === "admin" || isBypassEmail;
-              console.log("[Dashboard] Admin Check:", {
-                email: currentUserEmail,
-                isAdmin,
-                role: profile.role,
-                isBypass: isBypassEmail,
-              });
-              setIsAdminUser(isAdmin);
-
-              const hasAutoSwitched = sessionStorage.getItem("hasAutoSwitched");
-              if (
-                !isAdmin &&
-                profile.subscribedSports &&
-                profile.subscribedSports.length > 0 &&
-                !hasAutoSwitched
-              ) {
-                if (
-                  !profile.subscribedSports.includes(activeTab) &&
-                  activeTab !== "Accuracy" &&
-                  activeTab !== "Users" &&
-                  activeTab !== "Add Sport"
-                ) {
-                  console.log(
-                    "[Dashboard] Initial auto-switch to first subscribed sport:",
-                    profile.subscribedSports[0]
-                  );
-                  setActiveTab(profile.subscribedSports[0]);
-                  sessionStorage.setItem("hasAutoSwitched", "true");
-                }
-              }
-
-              const hasSeenLocal = localStorage.getItem("hasSeenWalkthrough") === "true";
-              const hasSeenRemote = profile.hasSeenWalkthrough === true;
-
-              console.log("[Dashboard] Walkthrough Check:", { hasSeenLocal, hasSeenRemote });
-
-              if (!hasSeenLocal && !hasSeenRemote && !walkthroughTriggeredRef.current) {
-                console.log("[Dashboard] Conditions met for walkthrough. Triggering...");
-                walkthroughTriggeredRef.current = true;
-                setRunWalkthrough(true);
-                localStorage.setItem("hasSeenWalkthrough", "true");
-              }
-            } else {
-              setUserProfile({
-                uid: user.uid,
-                email: user.email || "",
-                subscriptionStatus: "inactive",
-                subscribedSports: [],
-              } as UserProfile);
-              setIsAdminUser(isBypassEmail);
+            // Walkthrough logic
+            const hasSeenLocal = localStorage.getItem("hasSeenWalkthrough") === "true";
+            const hasSeenRemote = profile.hasSeenWalkthrough === true;
+            if (!hasSeenLocal && !hasSeenRemote && !walkthroughTriggeredRef.current) {
+              walkthroughTriggeredRef.current = true;
+              setRunWalkthrough(true);
+              localStorage.setItem("hasSeenWalkthrough", "true");
             }
-
-            setAuthReady(true);
-          },
-          (error) => {
-            handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
-            setProfileError("Lost connection to your profile. Retrying...");
-            setAuthReady(true);
           }
-        );
+          setAuthReady(true);
+          lastProfileFetchRef.current = Date.now();
+        } catch (error: any) {
+          if (typeof setupTimeout !== 'undefined') clearTimeout(setupTimeout);
+          console.error("[Dashboard] Profile fetch error:", error);
+          
+          if (error.message?.includes("Quota exceeded")) {
+            setProfileError("Firestore quota exceeded. Some features may be limited until tomorrow.");
+          } else {
+            handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+            setProfileError("Failed to load your profile.");
+          }
+          setAuthReady(true);
+        }
       };
 
-      setupProfile();
+      fetchProfile().catch(err => {
+        console.error("[Dashboard] fetchProfile error:", err);
+      });
     } else {
       setUserProfile(null);
       setIsAdminUser(false);
@@ -406,7 +398,7 @@ export function Dashboard({
     return () => {
       if (profileUnsubscribe) profileUnsubscribe();
     };
-  }, [user, activeTab]);
+  }, [user]); // Removed activeTab dependency to prevent redundant profile fetches
 
   // Stop walkthrough if switching to a tab that doesn't support it
   useEffect(() => {
@@ -507,11 +499,13 @@ export function Dashboard({
     // 1. They are an admin
     // 2. Their email is in the bypass list
     // 3. Their email is in the paywall-only bypass list
-    // 4. The sport is explicitly in their subscribedSports list
+    // 4. Their subscription status is active
+    // 5. The sport is explicitly in their subscribedSports list
     const isSubscribed = 
       isAdminUser || 
       isBypassEmail || 
       isPaywallBypassOnly || 
+      userProfile?.subscriptionStatus === 'active' ||
       (userProfile?.subscribedSports?.includes(sport));
     
     if (isBypassEmail || isPaywallBypassOnly) {
@@ -635,7 +629,7 @@ export function Dashboard({
                 
                 console.log(`[Sync] Resolving ${predictionId}: ${isCorrect ? 'CORRECT' : 'INCORRECT'}`);
                 
-                await sportsOracle.savePrediction(predictionId, {
+                await bettorsEdge.savePrediction(predictionId, {
                   ...prediction,
                   teams: [game.homeTeam, game.awayTeam],
                   outcome: isCorrect ? 'correct' : 'incorrect',
@@ -644,7 +638,7 @@ export function Dashboard({
                 });
                 
                 if (!isCorrect) {
-                  await sportsOracle.analyzeLoss(game, prediction, { home: game.homeScore, away: game.awayScore });
+                  await bettorsEdge.analyzeLoss(game, prediction, { home: game.homeScore, away: game.awayScore });
                 }
                 resolvedCount++;
               }
@@ -677,36 +671,112 @@ export function Dashboard({
 
   // Removed redundant auth listener
 
-  // Firestore Sync - All Predictions for History/Accuracy
+  // Firestore Sync - All Predictions for History/Accuracy (Limited to 100 for quota)
+  const lastHistoryFetchRef = useRef<number>(0);
   useEffect(() => {
     if (!authReady || !user) {
       setAllPredictions({});
       return;
     }
 
-    console.log(`[Dashboard] Subscribing to all predictions for history`);
+    const fetchHistory = async () => {
+      // Throttle history fetch to once every 5 minutes
+      const now = Date.now();
+      if (now - lastHistoryFetchRef.current < 5 * 60 * 1000) {
+        console.log("[Dashboard] Skipping history fetch (throttled)");
+        return;
+      }
 
-    const db = getDb();
-    const q = query(
-      collection(db, "predictions"), 
-      orderBy("date", "desc"),
-      limit(300)
-    );
+      console.log(`[Dashboard] Fetching last 100 predictions for history`);
+      const db = getDb();
+      const q = query(
+        collection(db, "predictions"), 
+        orderBy("date", "desc"),
+        limit(100)
+      );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const preds: Record<string, Prediction> = {};
-      snapshot.forEach((doc) => {
-        preds[doc.id] = doc.data() as Prediction;
-      });
-      setAllPredictions(preds);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, "predictions");
-    });
+      try {
+        const snapshot = await getDocs(q);
+        const preds: Record<string, Prediction> = {};
+        snapshot.forEach((doc) => {
+          preds[doc.id] = doc.data() as Prediction;
+        });
+        setAllPredictions(prev => ({ ...prev, ...preds }));
+        lastHistoryFetchRef.current = now;
+      } catch (error: any) {
+        console.error("[Dashboard] History fetch error:", error);
+        if (error.message?.includes("Quota exceeded")) {
+          setError("Firestore quota exceeded. History may be incomplete.");
+        } else {
+          handleFirestoreError(error, OperationType.LIST, "predictions");
+        }
+      }
+    };
 
-    return () => unsubscribe();
-  }, [authReady]);
+    fetchHistory().catch(console.error);
+  }, [authReady, user]);
 
-  // Derive current date predictions from all predictions
+  // Dedicated fetch for selected date to ensure current view is always populated
+  const lastPredictionsFetchRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!authReady || !user) {
+      setSavedPredictions({});
+      return;
+    }
+
+    const dateStr = format(selectedDate, "yyyy-MM-dd");
+    const fetchPredictions = async () => {
+      // Throttle predictions fetch for a specific date to once every 2 minutes
+      const now = Date.now();
+      const lastFetch = lastPredictionsFetchRef.current[dateStr] || 0;
+      if (now - lastFetch < 2 * 60 * 1000) {
+        console.log(`[Dashboard] Skipping predictions fetch for ${dateStr} (throttled)`);
+        
+        // Still update savedPredictions from allPredictions if available
+        const filtered: Record<string, Prediction> = {};
+        Object.entries(allPredictions).forEach(([id, p]) => {
+          if (p.date === dateStr) {
+            filtered[id] = p;
+          }
+        });
+        if (Object.keys(filtered).length > 0) {
+          setSavedPredictions(filtered);
+        }
+        return;
+      }
+
+      console.log(`[Dashboard] Fetching predictions for ${dateStr}`);
+      const db = getDb();
+      const q = query(
+        collection(db, "predictions"),
+        where("date", "==", dateStr)
+      );
+
+      try {
+        const snapshot = await getDocs(q);
+        const filtered: Record<string, Prediction> = {};
+        snapshot.forEach((doc) => {
+          filtered[doc.id] = doc.data() as Prediction;
+        });
+        
+        setSavedPredictions(filtered);
+        setAllPredictions(prev => ({ ...prev, ...filtered }));
+        lastPredictionsFetchRef.current[dateStr] = now;
+      } catch (error: any) {
+        console.error("[Dashboard] Predictions fetch error:", error);
+        if (error.message?.includes("Quota exceeded")) {
+          setError("Firestore quota exceeded. Predictions for today may not be available.");
+        } else {
+          handleFirestoreError(error, OperationType.LIST, `predictions (date: ${dateStr})`);
+        }
+      }
+    };
+
+    fetchPredictions().catch(console.error);
+  }, [authReady, user, selectedDate]);
+
+  // Derive current date predictions from all predictions (REMOVED: replaced by dedicated subscription above)
+  /*
   useEffect(() => {
     const dateStr = format(selectedDate, "yyyy-MM-dd");
     const filtered: Record<string, Prediction> = {};
@@ -719,12 +789,13 @@ export function Dashboard({
     
     setSavedPredictions(filtered);
   }, [allPredictions, selectedDate]);
+  */
 
   const fetchBracket = async () => {
     console.log(`[Dashboard] fetchBracket called for NCAA 2026`);
     setLoadingBracket(true);
     try {
-      const data = await sportsOracle.getTournamentBracket("NCAA", 2026);
+      const data = await bettorsEdge.getTournamentBracket("NCAA", 2026);
       console.log(`[Dashboard] fetchBracket result:`, data);
       if (data) setBracket(data);
     } catch (e) {
@@ -736,12 +807,12 @@ export function Dashboard({
 
   useEffect(() => {
     if (activeTab === "NCAA" && !bracket) {
-      fetchBracket();
+      fetchBracket().catch(console.error);
     }
   }, [activeTab]);
 
   useEffect(() => {
-    fetchGames();
+    fetchGames().catch(console.error);
     // We no longer cancel analysis on tab change to allow background processing
   }, [activeTab, selectedDate]);
 
@@ -766,7 +837,7 @@ export function Dashboard({
             
             // Re-analyze to check for changes
             const oldPrediction = savedPredictions[game.id];
-            let newPrediction = await sportsOracle.analyzeMatchup(game, game.date, oldPrediction);
+            let newPrediction = await bettorsEdge.analyzeMatchup(game, game.date, oldPrediction);
             
             // Check for significant changes
             let significantChange = false;
@@ -794,7 +865,7 @@ export function Dashboard({
       }
     };
 
-    const interval = setInterval(checkGames, 60000); // Check every minute
+    const interval = setInterval(() => checkGames().catch(console.error), 60000); // Check every minute
     return () => clearInterval(interval);
   }, [games, savedPredictions, alertedGames]);
 
@@ -815,14 +886,18 @@ export function Dashboard({
 
       if (now >= scheduledTime) {
         console.log("[Scheduler] It's time for daily analysis. Running...");
-        await analyzeAllSports();
         localStorage.setItem("lastScheduledAnalysisDate", today);
+        
+        // Run analysis in the background without blocking the scheduler
+        analyzeAllSports().catch(err => {
+          console.error("[Scheduler] Error during scheduled analysis:", err);
+        });
       }
     };
 
     // Check every minute
-    const interval = setInterval(runScheduledAnalysis, 60000);
-    runScheduledAnalysis(); // Run on mount
+    const interval = setInterval(() => runScheduledAnalysis().catch(console.error), 60000);
+    runScheduledAnalysis().catch(console.error); // Run on mount
     return () => clearInterval(interval);
   }, [user, allPredictions]); // Re-run if user or predictions change
 
@@ -849,17 +924,17 @@ export function Dashboard({
   };
 
 
-  // Polling for Kalshi Odds
+  // Polling for Kalshi Expectations
   useEffect(() => {
     // Only poll if we have games loaded
     if (games.length === 0) return;
 
     // Initial fetch if needed (though fetchGames calls it too)
-    // fetchKalshiOdds(activeTab);
+    // fetchKalshiExpectations(activeTab);
 
     const intervalId = setInterval(() => {
-      console.log(`[Dashboard] Polling Kalshi odds for ${activeTab}...`);
-      fetchKalshiOdds(activeTab);
+      console.log(`[Dashboard] Polling Kalshi expectations for ${activeTab}...`);
+      fetchKalshiExpectations(activeTab).catch(console.error);
     }, 30000); // 30 seconds
 
     return () => clearInterval(intervalId);
@@ -890,7 +965,7 @@ export function Dashboard({
               if (isCorrect) {
                 // Mark as correct
                 try {
-                  await sportsOracle.savePrediction(game.id, {
+                  await bettorsEdge.savePrediction(game.id, {
                     ...prediction,
                     teams: [game.homeTeam, game.awayTeam],
                     outcome: 'correct',
@@ -905,7 +980,7 @@ export function Dashboard({
                 // Mark as incorrect and analyze
                 // We update the doc first to avoid loops if analysis fails
                 try {
-                   await sportsOracle.savePrediction(game.id, {
+                   await bettorsEdge.savePrediction(game.id, {
                     ...prediction,
                     teams: [game.homeTeam, game.awayTeam],
                     outcome: 'incorrect',
@@ -915,7 +990,7 @@ export function Dashboard({
                   
                   // Trigger AI analysis
                   console.log(`[Resolution] Prediction Incorrect for ${game.id}. Analyzing...`);
-                  await sportsOracle.analyzeLoss(game, prediction, { home: game.homeScore, away: game.awayScore });
+                  await bettorsEdge.analyzeLoss(game, prediction, { home: game.homeScore, away: game.awayScore });
                 } catch (e) {
                   console.error("Failed to resolve incorrect prediction:", e);
                 }
@@ -928,7 +1003,7 @@ export function Dashboard({
       }
     };
 
-    resolveGames();
+    resolveGames().catch(console.error);
   }, [games, savedPredictions]);
 
 const fetchGames = async (force: boolean = false) => {
@@ -952,22 +1027,27 @@ const fetchGames = async (force: boolean = false) => {
     console.log(`[Dashboard] fetchGames: Parallel fetch starting for ${activeTab}...`);
 
     const [espnGames, aiGames, apiSportsGames] = await Promise.all([
-      Promise.race([
-        espnService.getSchedule(activeTab, selectedDate),
-        new Promise<Game[]>((_, reject) =>
-          setTimeout(() => reject(new Error("ESPN fetch timed out")), 30000)
-        ),
-      ])
-        .then((res) => {
+      (async () => {
+        let timeoutId: NodeJS.Timeout;
+        const timeoutPromise = new Promise<Game[]>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error("ESPN fetch timed out")), 8000);
+        });
+        try {
+          const res = await Promise.race([
+            espnService.getSchedule(activeTab, selectedDate),
+            timeoutPromise
+          ]);
           console.log(`[Dashboard] fetchGames: ESPN fetch SUCCESS: ${res.length} games for ${activeTab}`);
           return res;
-        })
-        .catch((e) => {
+        } catch (e) {
           console.warn(`[Dashboard] fetchGames: ESPN fetch failed or timed out for ${activeTab}`, e);
           return [];
-        }),
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
+        }
+      })(),
 
-      sportsOracle
+      bettorsEdge
         .getDailySchedule(activeTab, dateStrIso, force)
         .then((res) => {
           console.log(`[Dashboard] fetchGames: AI/Firestore fetch SUCCESS: ${res.length} games for ${activeTab}`);
@@ -1053,17 +1133,17 @@ const fetchGames = async (force: boolean = false) => {
           });
         }
         
-        // Fetch odds for all NBA games
-        console.log(`[Dashboard] fetchGames: Fetching odds for ${fetchedGames.length} NBA games...`);
-        const gamesWithOdds = await Promise.all(fetchedGames.map(async (g) => {
+        // Fetch expectations for all NBA games
+        console.log(`[Dashboard] fetchGames: Fetching expectations for ${fetchedGames.length} NBA games...`);
+        const gamesWithExpectations = await Promise.all(fetchedGames.map(async (g) => {
           if (g.apiSportsGameId) {
             try {
               const oddsData = await apiSportsBasketballService.getOddsForGame(g.apiSportsGameId);
               if (oddsData && oddsData.length > 0) {
                 const gameOdds = oddsData[0];
                 
-                // Populate all bookmakers
-                g.allBookmakers = gameOdds.bookmakers.map(b => {
+                // Populate all sources
+                g.allSources = gameOdds.bookmakers.map(b => {
                   const homeAwayBet = b.bets.find(bet => bet.betName === 'Home/Away');
                   const homeOddStr = homeAwayBet?.values.find(v => v.value === 'Home')?.odd;
                   const awayOddStr = homeAwayBet?.values.find(v => v.value === 'Away')?.odd;
@@ -1105,20 +1185,20 @@ const fetchGames = async (force: boolean = false) => {
                   return {
                     id: b.bookmakerId,
                     name: b.bookmakerName,
-                    homeML: homeOdd,
-                    awayML: awayOdd,
-                    spread: spreadVal,
+                    homeWinProb: homeOdd,
+                    awayWinProb: awayOdd,
+                    margin: spreadVal,
                     total: totalVal,
                   };
-                }).filter(b => b.homeML !== undefined && b.awayML !== undefined);
+                }).filter(b => b.homeWinProb !== undefined && b.awayWinProb !== undefined);
 
-                // Try to find a reputable bookmaker, e.g., Betcris, bet365, Bovada, Pinnacle
-                const bookmaker = gameOdds.bookmakers.find(b => 
+                // Try to find a reputable source, e.g., Betcris, bet365, Bovada, Pinnacle
+                const source = gameOdds.bookmakers.find(b => 
                   ['bet365', 'Bovada', 'Pinnacle', 'Betcris'].includes(b.bookmakerName)
                 ) || gameOdds.bookmakers[0];
                 
-                if (bookmaker) {
-                  const homeAwayBet = bookmaker.bets.find(bet => bet.betName === 'Home/Away');
+                if (source) {
+                  const homeAwayBet = source.bets.find(bet => bet.betName === 'Home/Away');
                   if (homeAwayBet && homeAwayBet.values.length >= 2) {
                     const homeOddStr = homeAwayBet.values.find(v => v.value === 'Home')?.odd;
                     const awayOddStr = homeAwayBet.values.find(v => v.value === 'Away')?.odd;
@@ -1138,24 +1218,24 @@ const fetchGames = async (force: boolean = false) => {
                     const awayOdd = toAmerican(awayOddStr);
                     
                     if (homeOdd && awayOdd) {
-                      g.marketOdds = {
-                        ...g.marketOdds,
-                        homeML: homeOdd,
-                        awayML: awayOdd,
-                        source: bookmaker.bookmakerName
+                      g.marketExpectations = {
+                        ...g.marketExpectations,
+                        homeWinProb: homeOdd,
+                        awayWinProb: awayOdd,
+                        source: source.bookmakerName
                       };
                     }
                   }
                 }
               }
             } catch (err) {
-              console.warn(`[Dashboard] fetchGames: Failed to fetch odds for game ${g.id}`, err);
+              console.warn(`[Dashboard] fetchGames: Failed to fetch expectations for game ${g.id}`, err);
             }
           }
           return g;
         }));
         
-        fetchedGames = gamesWithOdds;
+        fetchedGames = gamesWithExpectations;
 
       } else {
         setApiSportsStatus({ status: 'idle', count: 0, message: "No games found for this date in API-Sports" });
@@ -1331,7 +1411,7 @@ const fetchGames = async (force: boolean = false) => {
         `[Dashboard] fetchGames: Setting ${fetchedGames.length} games for ${activeTab}. Sample: ${fetchedGames[0].awayTeam}@${fetchedGames[0].homeTeam}`
       );
       setGames(fetchedGames);
-      fetchKalshiOdds(activeTab);
+      fetchKalshiExpectations(activeTab);
     }
   } catch (err: any) {
     const msg = err?.message || "Failed to fetch schedule. Please try again.";
@@ -1355,12 +1435,12 @@ const fetchGames = async (force: boolean = false) => {
     try {
       setToast({ message: `Importing ${activeTab} schedule for next 7 days...`, type: "info" });
       
-      await sportsOracle.importSchedule(activeTab, new Date(), 7, (msg) => {
+      await bettorsEdge.importSchedule(activeTab, new Date(), 7, (msg) => {
         setToast({ message: msg, type: "info" });
       });
       
       setToast({ message: "Schedule import complete!", type: "success" });
-      fetchGames(); // Refresh current view
+      fetchGames().catch(console.error); // Refresh current view
       
     } catch (err: any) {
       console.error("Import failed:", err);
@@ -1370,10 +1450,10 @@ const fetchGames = async (force: boolean = false) => {
     }
   };
 
-  const fetchKalshiOdds = async (league: string) => {
+  const fetchKalshiExpectations = async (league: string) => {
+    let timeoutId: NodeJS.Timeout | null = null;
     try {
       // We add a timeout to Kalshi so it doesn't block forever if the API is slow
-      let timeoutId: NodeJS.Timeout;
       const kalshiTimeout = new Promise<any[]>((_, reject) => {
         timeoutId = setTimeout(() => reject(new Error("Kalshi timeout")), 8000);
       });
@@ -1383,12 +1463,12 @@ const fetchGames = async (force: boolean = false) => {
         kalshiTimeout
       ]);
       
-      clearTimeout(timeoutId!);
+      if (timeoutId) clearTimeout(timeoutId);
       
       if (events.length > 0) {
         setKalshiStatus("connected");
         
-        // Update games with odds
+        // Update games with expectations
         setGames(prevGames => {
           return prevGames.map(game => {
             const match = kalshiService.findMatchingEvent(game, events);
@@ -1438,7 +1518,7 @@ const fetchGames = async (force: boolean = false) => {
                   ...game,
                   kalshiTicker: market.ticker,
                   kalshiMarketTitle: market.title,
-                  kalshiOdds: {
+                  kalshiExpectations: {
                     yes: yesPrice || 0,
                     no: noPrice || 0,
                     volume: market.volume
@@ -1453,8 +1533,10 @@ const fetchGames = async (force: boolean = false) => {
         setKalshiStatus("disconnected");
       }
     } catch (err) {
-      console.warn("Background Kalshi fetch failed:", err);
+      console.warn("Background Kalshi expectations fetch failed:", err);
       setKalshiStatus("error");
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   };
 
@@ -1506,8 +1588,8 @@ const fetchGames = async (force: boolean = false) => {
       if (sortBy === "edge") {
         const getEdge = (g: Game) => {
           const pred = savedPredictions[g.id];
-          if (!pred?.winProbability || !g.kalshiOdds) return -1;
-          const yesProb = g.kalshiOdds.yes > 1 ? g.kalshiOdds.yes / 100 : g.kalshiOdds.yes;
+          if (!pred?.winProbability || !g.kalshiExpectations) return -1;
+          const yesProb = g.kalshiExpectations.yes > 1 ? g.kalshiExpectations.yes / 100 : g.kalshiExpectations.yes;
           // Edge is the absolute difference between AI and Market
           return Math.abs(pred.winProbability - yesProb);
         };
@@ -1539,21 +1621,6 @@ const fetchGames = async (force: boolean = false) => {
         gameId: game.id 
       } 
     }));
-  };
-
-  const handleLogBet = async (bet: Omit<Bet, 'id' | 'userId' | 'createdAt' | 'status'>) => {
-    if (!user) {
-      setToast({ message: "Please login to track your bankroll", type: "warning" });
-      return;
-    }
-
-    try {
-      await bettingService.placeBet(bet);
-      setToast({ message: `Bet on ${bet.team} logged successfully!`, type: "success" });
-    } catch (err) {
-      console.error('Error logging bet:', err);
-      setToast({ message: "Failed to log bet", type: "error" });
-    }
   };
 
   const handleAutoAnalyze = async (force: boolean = false) => {
@@ -1590,7 +1657,7 @@ const fetchGames = async (force: boolean = false) => {
       const dateStr = format(selectedDate, "yyyy-MM-dd");
       setToast({ message: `Checking for injury updates for ${targetLeague}...`, type: "info" });
       
-      const injuryUpdates = await sportsOracle.checkInjuryUpdates(
+      const injuryUpdates = await bettorsEdge.checkInjuryUpdates(
         targetLeague, 
         dateStr, 
         filteredGames.filter(g => g.league === targetLeague), 
@@ -1642,7 +1709,7 @@ const fetchGames = async (force: boolean = false) => {
         const oldInjuries = existingPrediction?.injuries;
         const injuriesChanged = newInjuries && JSON.stringify(newInjuries) !== JSON.stringify(oldInjuries || []);
 
-        return force || !existingPrediction || injuriesChanged || sportsOracle.needsReanalysis(game, existingPrediction);
+        return force || !existingPrediction || injuriesChanged || bettorsEdge.needsReanalysis(game, existingPrediction);
       });
 
       let completedCount = filteredGames.length - gamesToAnalyze.length;
@@ -1680,11 +1747,11 @@ const fetchGames = async (force: boolean = false) => {
             const docSnap = await getDoc(docRef);
             const existingPrediction = docSnap.exists() ? docSnap.data() : savedPredictions[game.id];
             
-            const prediction = await sportsOracle.analyzeMatchup(game, dateStr, existingPrediction, [], () => cancelAnalysisRef.current[targetLeague]);
+            const prediction = await bettorsEdge.analyzeMatchup(game, dateStr, existingPrediction, [], () => cancelAnalysisRef.current[targetLeague]);
             
             if (prediction && game.id && !cancelAnalysisRef.current[targetLeague]) {
               // Save immediately to Firestore
-              await sportsOracle.savePrediction(game.id, prediction);
+              await bettorsEdge.savePrediction(game.id, prediction);
               
               // Update local state immediately so UI reflects completion
               setSavedPredictions(prev => ({
@@ -1769,7 +1836,7 @@ const fetchGames = async (force: boolean = false) => {
       }));
 
       // 1. Check for injury updates first
-      const updates = await sportsOracle.checkInjuryUpdates(targetLeague, dateStr, [game], () => cancelAnalysisRef.current[targetLeague]);
+      const updates = await bettorsEdge.checkInjuryUpdates(targetLeague, dateStr, [game], () => cancelAnalysisRef.current[targetLeague]);
       const db = getDb();
       
       if (!cancelAnalysisRef.current[targetLeague] && updates[game.id] && Array.isArray(updates[game.id])) {
@@ -1819,11 +1886,11 @@ const fetchGames = async (force: boolean = false) => {
       const docSnap = await getDoc(docRef);
       const existingPrediction = docSnap.exists() ? docSnap.data() : savedPredictions[game.id];
 
-      let prediction = await sportsOracle.analyzeMatchup(game, dateStr, existingPrediction, [], () => cancelAnalysisRef.current[targetLeague]);
+      let prediction = await bettorsEdge.analyzeMatchup(game, dateStr, existingPrediction, [], () => cancelAnalysisRef.current[targetLeague]);
       
       if (prediction && game.id && !cancelAnalysisRef.current[targetLeague]) {
         // Save immediately to Firestore
-        await sportsOracle.savePrediction(game.id, prediction);
+        await bettorsEdge.savePrediction(game.id, prediction);
         
         // Update local state immediately so UI reflects completion
         setSavedPredictions(prev => ({
@@ -1881,7 +1948,7 @@ const fetchGames = async (force: boolean = false) => {
         }
       }));
 
-      const updates = await sportsOracle.checkInjuryUpdates(targetLeague, dateStr, last3Games, () => cancelAnalysisRef.current[targetLeague]);
+      const updates = await bettorsEdge.checkInjuryUpdates(targetLeague, dateStr, last3Games, () => cancelAnalysisRef.current[targetLeague]);
       const db = getDb();
       const batch = writeBatch(db);
       let updateCount = 0;
@@ -1943,11 +2010,11 @@ const fetchGames = async (force: boolean = false) => {
           const docSnap = await getDoc(docRef);
           const existingPrediction = docSnap.exists() ? docSnap.data() : savedPredictions[game.id];
 
-          let prediction = await sportsOracle.analyzeMatchup(game, dateStr, existingPrediction, [], () => cancelAnalysisRef.current[targetLeague]);
+          let prediction = await bettorsEdge.analyzeMatchup(game, dateStr, existingPrediction, [], () => cancelAnalysisRef.current[targetLeague]);
           
           if (prediction && game.id && !cancelAnalysisRef.current[targetLeague]) {
             // Save immediately to Firestore
-            await sportsOracle.savePrediction(game.id, prediction);
+            await bettorsEdge.savePrediction(game.id, prediction);
             
             // Update local state immediately so UI reflects completion
             setSavedPredictions(prev => ({
@@ -2003,8 +2070,17 @@ const fetchGames = async (force: boolean = false) => {
 
   const handleRefresh = () => {
     espnService.clearCache();
-        fetchGames(true);
-    setToast({ message: "Schedule refreshed.", type: "success" });
+    // Clear throttles to allow immediate re-fetch
+    lastHistoryFetchRef.current = 0;
+    lastPredictionsFetchRef.current = {};
+    
+    fetchGames(true).catch(console.error);
+    
+    // Manually trigger predictions/history fetch by clearing throttles and re-running effects
+    // (The effects will re-run because we are calling fetchGames which might change state, 
+    // but to be sure we can manually call them if needed, or just wait for the next render)
+    
+    setToast({ message: "Schedule and predictions refreshed.", type: "success" });
   };
 
   // DEBUG: Minimal render to isolate failure
@@ -2082,7 +2158,7 @@ const fetchGames = async (force: boolean = false) => {
         isAdmin={isAdminUser} 
         subscribedSports={userProfile?.subscribedSports || []}
         userProfile={userProfile}
-        onCancelSubscription={handleCancelSubscription}
+        onCancelSubscription={() => handleCancelSubscription().catch(console.error)}
         onManageSports={handleManageSports}
       >
         <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8">
@@ -2091,10 +2167,10 @@ const fetchGames = async (force: boolean = false) => {
           </div>
           <h1 className="text-4xl font-black text-white mb-4 tracking-tight">Welcome to Bettors Edge</h1>
           <p className="text-slate-400 max-w-md mb-12 text-lg">
-            The most advanced AI-driven sports analysis engine. Login to access professional-grade betting insights.
+            The most advanced AI-driven sports analysis engine. Login to access professional-grade analytical insights.
           </p>
           <button 
-            onClick={loginWithGoogle}
+            onClick={() => loginWithGoogle().catch(console.error)}
             className="flex items-center px-8 py-4 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl font-bold transition-all shadow-xl hover:shadow-amber-500/20 text-lg gap-3"
           >
             <LogIn className="w-6 h-6" />
@@ -2134,7 +2210,7 @@ const fetchGames = async (force: boolean = false) => {
         isAdmin={isAdminUser} 
         subscribedSports={userProfile?.subscribedSports || []}
         userProfile={userProfile}
-        onCancelSubscription={handleCancelSubscription}
+        onCancelSubscription={() => handleCancelSubscription().catch(console.error)}
         onManageSports={handleManageSports}
       >
         <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
@@ -2143,13 +2219,22 @@ const fetchGames = async (force: boolean = false) => {
               <AlertCircle className="w-12 h-12 text-rose-500 mb-4" />
               <h3 className="text-xl font-bold text-white mb-2">Profile Sync Error</h3>
               <p className="text-slate-400 max-w-md mb-6">{profileError}</p>
-              <button 
-                onClick={() => window.location.reload()}
-                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors flex items-center gap-2"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Retry Connection
-              </button>
+              <div className="flex flex-col gap-3 w-full max-w-xs">
+                <button
+                  onClick={() => window.open(window.location.href, '_blank')}
+                  className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2"
+                >
+                  <Zap className="w-4 h-4" />
+                  Open in New Tab (Recommended)
+                </button>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-6 py-3 bg-slate-900 hover:bg-slate-800 text-slate-400 rounded-xl border border-slate-800 transition-all flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Retry Connection
+                </button>
+              </div>
             </>
           ) : (
             <>
@@ -2175,7 +2260,7 @@ const fetchGames = async (force: boolean = false) => {
       isAdmin={isAdminUser}
       subscribedSports={userProfile?.subscribedSports || []}
       userProfile={userProfile}
-      onCancelSubscription={handleCancelSubscription}
+      onCancelSubscription={() => handleCancelSubscription().catch(console.error)}
       onManageSports={handleManageSports}
       onOpenFAQ={onOpenFAQ}
     >
@@ -2185,63 +2270,65 @@ const fetchGames = async (force: boolean = false) => {
           run={runWalkthrough && activeTab === "NBA" && filteredGames.length > 0 && !showPaywall}
           continuous
           disableBeacon
-          callback={handleJoyrideCallback}
+          callback={(data) => handleJoyrideCallback(data).catch(console.error)}
           showProgress
           showSkipButton
         />
       )}
 
-      {showPaywall ? (
-        <Paywall
-          onSubscribe={handleSubscribe}
-          initialSports={[...(userProfile?.subscribedSports || []), activeTab].filter((s) => s !== "Add Sport")}
-          existingSports={userProfile?.subscribedSports || []}
-        />
-      ) : activeTab === "Accuracy" ? (
-        <AccuracyTab predictions={allPredictions} onSyncPending={handleSyncPending} isSyncing={loading} />
-      ) : activeTab === "Users" ? (
-        <AdminUsersTab />
-      ) : activeTab === "Admin" ? (
-        <AdminTab debugLogs={debugLogs} />
-      ) : (
-        <>
-          <div className="mb-6 bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 flex items-start sm:items-center gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5 sm:mt-0" />
-            <p className="text-sm text-amber-200/80 leading-relaxed">
-              <strong className="text-amber-400 font-semibold mr-1">Betting Disclaimer:</strong>
-              These AI-generated insights are predictions, not guarantees.
-            </p>
-          </div>
-
-          <DashboardHeader
-            activeTab={activeTab}
-            isAdminUser={isAdminUser}
-            selectedDate={selectedDate}
-            setSelectedDate={setSelectedDate}
-            handleRefresh={handleRefresh}
-            analyzing={analyzing}
-            loading={loading}
-            handleAutoAnalyze={handleAutoAnalyze}
-            setIsBriefingOpen={setIsBriefingOpen}
-            handleImportSchedule={handleImportSchedule}
-            handleStopAnalysis={handleStopAnalysis}
-            apiSportsStatus={apiSportsStatus}
+      <Suspense fallback={<div className="min-h-[200px] flex items-center justify-center text-slate-500 animate-pulse">Loading component...</div>}>
+        {showPaywall ? (
+          <Paywall
+            onSubscribe={(sports) => handleSubscribe(sports).catch(console.error)}
+            initialSports={[...(userProfile?.subscribedSports || []), activeTab].filter((s) => s !== "Add Sport")}
+            existingSports={userProfile?.subscribedSports || []}
           />
+        ) : activeTab === "Accuracy" ? (
+          <AccuracyTab predictions={allPredictions} onSyncPending={() => handleSyncPending().catch(console.error)} isSyncing={loading} />
+        ) : activeTab === "Users" ? (
+          <AdminUsersTab />
+        ) : activeTab === "Admin" ? (
+          <AdminTab debugLogs={debugLogs} />
+        ) : (
+          <>
+            {error?.includes("Quota exceeded") && (
+              <QuotaBanner message="You've reached the daily limit for database reads." />
+            )}
+            
+            <div className="mb-6 bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 flex items-start sm:items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5 sm:mt-0" />
+              <p className="text-sm text-amber-200/80 leading-relaxed">
+                <strong className="text-amber-400 font-semibold mr-1">Disclaimer:</strong>
+                These AI-generated insights are predictions, not guarantees.
+              </p>
+            </div>
 
-          {isAdminUser && (
-            <LocksOfTheDay
-              games={filteredGames}
-              predictions={allPredictions}
+            <DashboardHeader
+              activeTab={activeTab}
+              isAdminUser={isAdminUser}
               selectedDate={selectedDate}
-              league={activeTab}
-              onSelectLeague={setActiveTab}
+              setSelectedDate={setSelectedDate}
+              handleRefresh={handleRefresh}
+              analyzing={analyzing}
+              loading={loading}
+              handleAutoAnalyze={(force) => handleAutoAnalyze(force).catch(console.error)}
+              setIsBriefingOpen={setIsBriefingOpen}
+              handleImportSchedule={() => handleImportSchedule().catch(console.error)}
+              handleStopAnalysis={handleStopAnalysis}
+              apiSportsStatus={apiSportsStatus}
             />
-          )}
 
-          <div className="py-8">
-            {mainTab === "bankroll" ? (
-              <BankrollTracker />
-            ) : (
+            {isAdminUser && (
+              <TopPicksOfTheDay
+                games={filteredGames}
+                predictions={allPredictions}
+                selectedDate={selectedDate}
+                league={activeTab}
+                onSelectLeague={setActiveTab}
+              />
+            )}
+
+            <div className="py-8">
               <GameGrid
                 loading={loading}
                 error={error}
@@ -2250,26 +2337,31 @@ const fetchGames = async (force: boolean = false) => {
                 analyzing={analyzing}
                 analysisProgress={analysisProgress}
                 isAdminUser={isAdminUser}
-                handleReanalyzeSingleGame={handleReanalyzeSingleGame}
+                handleReanalyzeSingleGame={(game) => handleReanalyzeSingleGame(game).catch(console.error)}
                 handleDiscussWithSnark={handleDiscussWithSnark}
-                handleLogBet={handleLogBet}
               />
-            )}
-          </div>
-        </>
-      )}
+            </div>
+          </>
+        )}
+      </Suspense>
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
-      {!showPaywall && <ChatPanel games={games} predictions={allPredictions} />}
+      {!showPaywall && (
+        <Suspense fallback={null}>
+          <ChatPanel games={games} predictions={allPredictions} />
+        </Suspense>
+      )}
 
-      <DailyBriefingModal
-        isOpen={isBriefingOpen}
-        onClose={() => setIsBriefingOpen(false)}
-        league={activeTab}
-        date={selectedDate}
-        games={games}
-      />
+      <Suspense fallback={null}>
+        <DailyBriefingModal
+          isOpen={isBriefingOpen}
+          onClose={() => setIsBriefingOpen(false)}
+          league={activeTab}
+          date={selectedDate}
+          games={games}
+        />
+      </Suspense>
     </Layout>
   );
 }

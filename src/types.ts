@@ -2,8 +2,8 @@ export interface TeamStats {
   last5: string;
   winPercentage: string;
   record: string;
-  ats?: string; // Against The Spread trend (e.g., "4-1 ATS")
-  ou?: string;  // Over/Under trend (e.g., "3-2 O/U")
+  vsExp?: string; // Performance against expectations (e.g., "4-1 vs Exp")
+  total?: string;  // Total performance trend (e.g., "3-2 Total")
 }
 
 export interface Game {
@@ -31,23 +31,23 @@ export interface Game {
     no: number;
     volume?: number;
   };
-  marketOdds?: {
-    homeML?: number;
-    awayML?: number;
-    spread?: number;
-    homeSpreadOdds?: number;
-    awaySpreadOdds?: number;
+  marketExpectations?: {
+    homeWinProb?: number;
+    awayWinProb?: number;
+    margin?: number;
+    homeMarginOdds?: number;
+    awayMarginOdds?: number;
     total?: number;
     overOdds?: number;
     underOdds?: number;
     source?: string;
   };
-  allBookmakers?: Array<{
+  allSources?: Array<{
     id: number;
     name: string;
-    homeML?: number;
-    awayML?: number;
-    spread?: number;
+    homeWinProb?: number;
+    awayWinProb?: number;
+    margin?: number;
     total?: number;
   }>;
 }
@@ -64,7 +64,7 @@ export interface Prediction {
   devilsAdvocate?: string;
   marketSentiment?: string;
   situationalFactors?: string;
-  hedgingAdvice: string;
+  scenarioAnalysis: string;
   keyFactors: string[];
   appliedLessons?: string[];
   injuries: {
@@ -156,10 +156,10 @@ export interface Prediction {
 
   // Trends
   trends?: {
-    homeATS?: string;
-    awayATS?: string;
-    homeOU?: string;
-    awayOU?: string;
+    homeVsExp?: string;
+    awayVsExp?: string;
+    homeTotal?: string;
+    awayTotal?: string;
   };
 
   // Detailed Matchup Data
@@ -176,13 +176,13 @@ export interface Prediction {
     advantage: 'home' | 'away' | 'neutral';
   }[];
 
-  // Market Odds
-  marketOdds?: {
-    homeML?: number;
-    awayML?: number;
-    spread?: number;
-    homeSpreadOdds?: number;
-    awaySpreadOdds?: number;
+  // Market Expectations
+  marketExpectations?: {
+    homeWinProb?: number;
+    awayWinProb?: number;
+    margin?: number;
+    homeMarginOdds?: number;
+    awayMarginOdds?: number;
     total?: number;
     overOdds?: number;
     underOdds?: number;
@@ -249,26 +249,6 @@ export interface UserProfile {
   hasSeenWalkthrough?: boolean;
   acceptedTerms?: boolean;
   termsAcceptedAt?: string;
-  bankroll?: number; // Starting bankroll for paper trading
 }
 
-export interface Bet {
-  id: string;
-  userId: string;
-  gameId: string;
-  league: string;
-  date: string;
-  team: string; // The team bet on
-  type: 'ML' | 'Spread' | 'Total';
-  amount: number;
-  odds: number; // Decimal odds or Kalshi price (0-100)
-  status: 'pending' | 'won' | 'lost' | 'push';
-  payout?: number;
-  createdAt: string;
-  resolvedAt?: string;
-  gameInfo: {
-    homeTeam: string;
-    awayTeam: string;
-    score?: { home: number; away: number };
-  };
-}
+
