@@ -3,8 +3,13 @@ export const requestNotificationPermission = async () => {
     console.warn("This browser does not support desktop notification");
     return false;
   }
-  const permission = await Notification.requestPermission();
-  return permission === "granted";
+  try {
+    const permission = await Notification.requestPermission();
+    return permission === "granted";
+  } catch (error) {
+    console.warn("Failed to request notification permission:", error);
+    return false;
+  }
 };
 
 export const sendNotification = (title: string, body: string) => {

@@ -24,6 +24,13 @@ export function LandingPage({ onEnter }: LandingPageProps) {
     if (params.get('debug') === 'true') {
       setShowDebug(true);
     }
+    
+    // Check for redirect errors
+    const err = sessionStorage.getItem('auth_error');
+    if (err === 'unauthorized-domain') {
+      setLoginError("This domain is not authorized for OAuth. Please add this URL to your Firebase Authorized Domains in the Firebase Console.");
+      sessionStorage.removeItem('auth_error');
+    }
   }, []);
 
   let debugLogs: any[] = [];
@@ -45,23 +52,17 @@ export function LandingPage({ onEnter }: LandingPageProps) {
     setIsLoggingIn(true);
     setLoginError(null);
 
-    try {
-      console.log("[LandingPage] Initiating login...");
-      await loginWithGoogle();
-      console.log("[LandingPage] Login function returned successfully");
-    } catch (error: any) {
-      console.error("Login failed:", {
-        code: error?.code,
-        message: error?.message,
-        stack: error?.stack,
-      });
-      setIsLoggingIn(false);
-      
-      if (error?.code === 'auth/popup-blocked' || error?.code === 'auth/cancelled-popup-request') {
-        setLoginError("The sign-in popup was blocked or closed. Please try opening the app in a new tab using the button below.");
-      } else {
-        setLoginError("Login failed. Please try again or open in a new tab.");
+    const result = await loginWithGoogle();
+    if (!result.success) {
+      console.error("Login failed:", result.error);
+      if (result.code === 'auth/popup-blocked-redirecting') {
+        // Redirecting, no need to show error
+        return;
       }
+      setLoginError(result.error || "Failed to sign in. Please try again.");
+      setIsLoggingIn(false);
+    } else {
+      console.log("[LandingPage] Login successful");
     }
   };
 

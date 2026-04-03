@@ -819,7 +819,7 @@ export function Dashboard({
   const [alertedGames, setAlertedGames] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    requestNotificationPermission();
+    requestNotificationPermission().catch(console.error);
   }, []);
 
   // Polling for 30-min alerts

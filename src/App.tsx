@@ -62,8 +62,11 @@ export default function App() {
       // Check for redirect result first
       try {
         await handleGoogleRedirectResult();
-      } catch (e) {
+      } catch (e: any) {
         console.error("[App] Error handling redirect result:", e);
+        if (e.code === 'auth/unauthorized-domain') {
+          sessionStorage.setItem('auth_error', 'unauthorized-domain');
+        }
       }
 
       unsubscribe = onAuthStateChanged(auth, (currentUser) => {
