@@ -1,4 +1,5 @@
 import express from "express";
+import type { Request, Response } from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -56,6 +57,47 @@ if (fs.existsSync(firebaseConfigPath)) {
 }
 
 const db = firestoreDatabaseId ? getFirestore(firestoreDatabaseId) : getFirestore();
+
+const firebaseProjectId = fs.existsSync(firebaseConfigPath)
+  ? JSON.parse(fs.readFileSync(firebaseConfigPath, "utf8")).projectId
+  : undefined;
+
+const firebaseAuthProxyBase = firebaseProjectId
+  ? `https://${firebaseProjectId}.firebaseapp.com`
+  : null;
+
+async function proxyFirebaseHelper(req: Request, res: Response, targetUrl: string) {
+  try {
+    const response = await axios.request({
+      url: targetUrl,
+      method: req.method as any,
+      headers: {
+        ...req.headers,
+        host: undefined,
+      },
+      data: ["GET", "HEAD"].includes(req.method) ? undefined : req.body,
+      responseType: "stream",
+      validateStatus: () => true,
+      maxRedirects: 0,
+    });
+
+    res.status(response.status);
+
+    for (const [key, value] of Object.entries(response.headers)) {
+      if (typeof value !== "undefined") {
+        res.setHeader(key, value as any);
+      }
+    }
+
+    response.data.pipe(res);
+  } catch (error: any) {
+    console.error("[Firebase Auth Proxy] Error:", error.message);
+    if (!res.headersSent) {
+      res.status(502).json({ error: "Failed to proxy Firebase auth helper" });
+    }
+  }
+}
+
 let stripe: Stripe | null = null;
 if (process.env.STRIPE_SECRET_KEY) {
   stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -95,6 +137,18 @@ async function startServer() {
 
   // Apply rate limiting to all API routes
   app.use("/api/", limiter);
+
+  if (firebaseAuthProxyBase) {
+    app.use("/__/auth", async (req, res) => {
+      const targetUrl = `${firebaseAuthProxyBase}${req.originalUrl}`;
+      await proxyFirebaseHelper(req, res, targetUrl);
+    });
+
+    app.get("/__/firebase/init.json", async (req, res) => {
+      const targetUrl = `${firebaseAuthProxyBase}${req.originalUrl}`;
+      await proxyFirebaseHelper(req, res, targetUrl);
+    });
+  }
 
   // Standard Middlewares
   app.use(express.json());
