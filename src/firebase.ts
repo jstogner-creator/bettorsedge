@@ -8,6 +8,8 @@ import {
   signOut,
   User,
   Auth,
+  setPersistence,
+  browserLocalPersistence,
 } from 'firebase/auth';
 import {
   collection,
@@ -19,24 +21,56 @@ import {
   Firestore,
 } from 'firebase/firestore';
 
-import firebaseConfig from '../firebase-applet-config.json';
+import rawFirebaseConfig from '../firebase-applet-config.json';
 
 let app: FirebaseApp | null = null;
 let dbInstance: Firestore | null = null;
 let authInstance: Auth | null = null;
 
+function buildFirebaseConfig() {
+  const config = { ...rawFirebaseConfig } as any;
+
+  const host = typeof window !== 'undefined' ? window.location.hostname : '';
+  const isLocalhost =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host.endsWith('.local');
+
+  const isGoogleRunDomain = host.endsWith('.run.app');
+  const isFirebaseDomain = host.endsWith('.firebaseapp.com') || host.endsWith('.web.app');
+
+  // Use same-site auth domain on custom production domains to avoid redirect session loss.
+  if (host && !isLocalhost && !isGoogleRunDomain && !isFirebaseDomain) {
+    config.authDomain = host;
+  }
+
+  return config;
+}
+
 function getFirebase() {
   if (!app) {
-    console.log("[Firebase] Initializing SDK...");
+    console.log('[Firebase] Initializing SDK...');
+    const firebaseConfig = buildFirebaseConfig();
+
     app = initializeApp(firebaseConfig);
     authInstance = getAuth(app);
 
+    setPersistence(authInstance, browserLocalPersistence)
+      .then(() => console.log('[Firebase] Auth persistence set to local'))
+      .catch((err) => {
+        console.error('[Firebase] Failed to set auth persistence:', err);
+      });
+
     dbInstance = firebaseConfig.firestoreDatabaseId
-      ? initializeFirestore(app, {
-          localCache: persistentLocalCache({
-            tabManager: persistentSingleTabManager({}),
-          }),
-        }, firebaseConfig.firestoreDatabaseId)
+      ? initializeFirestore(
+          app,
+          {
+            localCache: persistentLocalCache({
+              tabManager: persistentSingleTabManager({}),
+            }),
+          },
+          firebaseConfig.firestoreDatabaseId
+        )
       : initializeFirestore(app, {
           localCache: persistentLocalCache({
             tabManager: persistentSingleTabManager({}),
@@ -80,30 +114,43 @@ export interface LoginResult {
 export async function loginWithGoogle(): Promise<LoginResult> {
   const auth = getAuthInstance();
   console.log('[Auth] Starting Google sign-in flow (Popup)');
-  
+
   try {
+    await setPersistence(auth, browserLocalPersistence);
+
     const result = await signInWithPopup(auth, googleProvider);
     console.log('[Auth] Popup sign-in successful for:', result.user.email);
     return { success: true };
   } catch (error: any) {
     console.warn('[Auth] signInWithPopup failed:', error.code, error.message);
     await logLoginError(error, 'signInWithPopup');
-    
-    const popupErrorCodes = ['auth/popup-blocked', 'auth/cancelled-popup-request', 'auth/popup-closed-by-user', 'auth/web-storage-unsupported'];
-    
+
+    const popupErrorCodes = [
+      'auth/popup-blocked',
+      'auth/cancelled-popup-request',
+      'auth/popup-closed-by-user',
+      'auth/web-storage-unsupported',
+    ];
+
     if (popupErrorCodes.includes(error.code) || error.message.includes('third-party cookies')) {
       const inIframe = window.self !== window.top;
+
       if (!inIframe) {
         console.log('[Auth] Not in iframe, falling back to signInWithRedirect for code:', error.code);
-        document.cookie = "redirect_login_pending=true; path=/; max-age=300; SameSite=Lax";
+        document.cookie = 'redirect_login_pending=true; path=/; max-age=300; SameSite=Lax';
+        await setPersistence(auth, browserLocalPersistence);
         await signInWithRedirect(auth, googleProvider);
         return { success: false, code: 'auth/popup-blocked-redirecting' };
       } else {
         console.error('[Auth] In iframe, cannot fallback to redirect.');
-        return { success: false, error: 'Browser security settings prevent login here. Please open in a new tab.', code: error.code };
+        return {
+          success: false,
+          error: 'Browser security settings prevent login here. Please open in a new tab.',
+          code: error.code,
+        };
       }
     }
-    
+
     return { success: false, error: error.message, code: error.code };
   }
 }
