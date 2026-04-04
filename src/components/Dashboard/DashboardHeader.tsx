@@ -41,6 +41,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
         <div className="space-y-1">
           <div className="flex items-center gap-3">
             <h2 className="text-3xl font-black text-white tracking-tight">{activeTab}</h2>
+            <div className="text-xs text-white">Admin: {isAdminUser ? 'Yes' : 'No'}</div>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleRefresh}
@@ -120,17 +121,16 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             <div className="h-8 w-px bg-slate-800 hidden md:block mx-2" />
           )}
 
-          {isAdminUser && (
-            <SportControls
-              league={activeTab}
-              analyzing={analyzing}
-              loading={loading}
-              onAnalyze={(force) => handleAutoAnalyze(force)}
-              onDailyBriefing={() => setIsBriefingOpen(true)}
-              onImportSchedule={handleImportSchedule}
-              onStopAnalysis={handleStopAnalysis}
-            />
-          )}
+          <SportControls
+            league={activeTab}
+            analyzing={analyzing}
+            loading={loading}
+            isAdminUser={isAdminUser}
+            onAnalyze={(force) => handleAutoAnalyze(force)}
+            onDailyBriefing={() => setIsBriefingOpen(true)}
+            onImportSchedule={handleImportSchedule}
+            onStopAnalysis={handleStopAnalysis}
+          />
         </div>
       </div>
     </div>

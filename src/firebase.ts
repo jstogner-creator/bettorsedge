@@ -42,12 +42,6 @@ function buildFirebaseConfig() {
   const isGoogleRunDomain = host.endsWith('.run.app');
   const isFirebaseDomain = host.endsWith('.firebaseapp.com') || host.endsWith('.web.app');
 
-  // Use same-site auth domain on custom production domains.
-  // For non-Firebase hosting, the server must proxy /__/auth/* and /__/firebase/init.json.
-  if (host && !isLocalhost && !isGoogleRunDomain && !isFirebaseDomain) {
-    config.authDomain = host;
-  }
-
   return config;
 }
 

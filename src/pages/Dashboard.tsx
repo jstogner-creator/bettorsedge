@@ -307,6 +307,7 @@ export function Dashboard({
     if (user) {
       const userEmail = (user.email || "").toLowerCase().trim();
       const isBypass = BYPASS_EMAILS.includes(userEmail);
+      console.log("[Dashboard] User Email:", userEmail, "Is Bypass:", isBypass);
       if (isBypass) {
         console.log("[Dashboard] Immediate Bypass Detected for:", userEmail);
         setIsAdminUser(true);
@@ -357,6 +358,7 @@ export function Dashboard({
             setIsAdminUser(isBypass);
           } else {
             const profile = userDoc.data() as UserProfile;
+            console.log("[Dashboard] User Profile:", profile);
             setUserProfile(profile);
             const isAdmin = profile.role === "admin" || isBypass;
             setIsAdminUser(isAdmin);
@@ -727,7 +729,7 @@ export function Dashboard({
   // Dedicated fetch for selected date to ensure current view is always populated
   const lastPredictionsFetchRef = useRef<Record<string, number>>({});
   useEffect(() => {
-    /* TEMPORARILY DISABLED FOR DEBUGGING
+    // Dedicated fetch for selected date to ensure current view is always populated
     if (!authReady || !user) {
       setSavedPredictions({});
       return;
@@ -782,7 +784,6 @@ export function Dashboard({
     };
 
     fetchPredictions().catch(console.error);
-    */
   }, [authReady, user, selectedDate]);
 
   // Derive current date predictions from all predictions (REMOVED: replaced by dedicated subscription above)
@@ -834,6 +835,8 @@ export function Dashboard({
 
   // Polling for 30-min alerts
   useEffect(() => {
+    if (!isAdminUser) return; // Only admins should trigger re-analysis
+
     const checkGames = async () => {
       try {
         const now = new Date();
@@ -877,10 +880,12 @@ export function Dashboard({
 
     const interval = setInterval(() => checkGames().catch(console.error), 60000); // Check every minute
     return () => clearInterval(interval);
-  }, [games, savedPredictions, alertedGames]);
+  }, [games, savedPredictions, alertedGames, isAdminUser]);
 
   // Scheduler for daily analysis
   useEffect(() => {
+    if (!isAdminUser) return; // Only admins should trigger scheduled analysis
+
     const runScheduledAnalysis = async () => {
       const lastRunDate = localStorage.getItem("lastScheduledAnalysisDate");
       const today = format(new Date(), "yyyy-MM-dd");
@@ -909,7 +914,7 @@ export function Dashboard({
     const interval = setInterval(() => runScheduledAnalysis().catch(console.error), 60000);
     runScheduledAnalysis().catch(console.error); // Run on mount
     return () => clearInterval(interval);
-  }, [user, allPredictions]); // Re-run if user or predictions change
+  }, [user, allPredictions, isAdminUser]); // Re-run if user or predictions change
 
   const analyzeAllSports = async () => {
     const leagues = ["NBA", "NFL", "MLB", "NHL", "NCAA"];
@@ -1634,6 +1639,10 @@ const fetchGames = async (force: boolean = false) => {
   };
 
   const handleAutoAnalyze = async (force: boolean = false) => {
+    if (!isAdminUser) {
+      setToast({ message: "Only administrators can trigger analysis.", type: "error" });
+      return;
+    }
     console.log("Analyze button clicked", { user, analyzing, loading, force, activeTab });
     
     if (!user) {
@@ -1697,14 +1706,16 @@ const fetchGames = async (force: boolean = false) => {
         return next;
       });
 
-      // Save injury updates to Firestore
-      const db = getDb();
-      const batch = writeBatch(db);
-      for (const [gameId, injuries] of Object.entries(injuryUpdates)) {
-        const docRef = doc(db, "predictions", gameId);
-        batch.set(docRef, { injuries }, { merge: true });
+      // Save injury updates to Firestore if user is admin
+      if (isAdminUser) {
+        const db = getDb();
+        const batch = writeBatch(db);
+        for (const [gameId, injuries] of Object.entries(injuryUpdates)) {
+          const docRef = doc(db, "predictions", gameId);
+          batch.set(docRef, { injuries }, { merge: true });
+        }
+        await batch.commit();
       }
-      await batch.commit();
 
       setToast({ message: `Starting analysis for ${targetLeague} on ${dateStr}...`, type: "info" });
 
@@ -1760,8 +1771,10 @@ const fetchGames = async (force: boolean = false) => {
             const prediction = await bettorsEdge.analyzeMatchup(game, dateStr, existingPrediction, [], () => cancelAnalysisRef.current[targetLeague]);
             
             if (prediction && game.id && !cancelAnalysisRef.current[targetLeague]) {
-              // Save immediately to Firestore
-              await bettorsEdge.savePrediction(game.id, prediction);
+              // Save immediately to Firestore if user is admin
+              if (isAdminUser) {
+                await bettorsEdge.savePrediction(game.id, prediction);
+              }
               
               // Update local state immediately so UI reflects completion
               setSavedPredictions(prev => ({

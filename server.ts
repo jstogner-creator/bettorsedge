@@ -66,14 +66,18 @@ const firebaseAuthProxyBase = firebaseProjectId
   ? `https://${firebaseProjectId}.firebaseapp.com`
   : null;
 
-async function proxyFirebaseHelper(req: Request, res: Response, targetUrl: string) {
+async function proxyFirebaseHelper(req: Request, res: Response, targetUrl: string, targetHost: string) {
   try {
+    const headers = { ...req.headers };
+    delete headers.host;
+    delete headers["content-length"];
+
     const response = await axios.request({
       url: targetUrl,
       method: req.method as any,
       headers: {
-        ...req.headers,
-        host: undefined,
+        ...headers,
+        host: targetHost,
       },
       data: ["GET", "HEAD"].includes(req.method) ? undefined : req.body,
       responseType: "stream",
@@ -84,7 +88,7 @@ async function proxyFirebaseHelper(req: Request, res: Response, targetUrl: strin
     res.status(response.status);
 
     for (const [key, value] of Object.entries(response.headers)) {
-      if (typeof value !== "undefined") {
+      if (typeof value !== "undefined" && key !== "content-encoding") {
         res.setHeader(key, value as any);
       }
     }
@@ -113,6 +117,29 @@ async function startServer() {
   // Trust proxy for rate limiting (Cloud Run/Nginx)
   app.set('trust proxy', 1);
 
+  // 1. Standard Middlewares (MUST be before proxy to handle POST bodies)
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+  // 2. Firebase Auth Proxy (MUST be before other routes)
+  if (firebaseAuthProxyBase) {
+    const targetHost = new URL(firebaseAuthProxyBase).host;
+    
+    // Proxy for auth helper endpoints
+    app.use("/__/auth", async (req, res) => {
+      const targetUrl = `${firebaseAuthProxyBase}${req.originalUrl}`;
+      console.log(`[Firebase Proxy] Proxying ${req.method} ${req.originalUrl} to ${targetUrl}`);
+      await proxyFirebaseHelper(req, res, targetUrl, targetHost);
+    });
+
+    // Proxy for firebase init config
+    app.get("/__/firebase/init.json", async (req, res) => {
+      const targetUrl = `${firebaseAuthProxyBase}${req.originalUrl}`;
+      console.log(`[Firebase Proxy] Proxying GET ${req.originalUrl} to ${targetUrl}`);
+      await proxyFirebaseHelper(req, res, targetUrl, targetHost);
+    });
+  }
+
   // Log Stripe status
   console.log(`[Stripe] Initializing... Secret Key: ${process.env.STRIPE_SECRET_KEY ? 'Present' : 'MISSING'}`);
   if (!process.env.STRIPE_SECRET_KEY) {
@@ -137,22 +164,6 @@ async function startServer() {
 
   // Apply rate limiting to all API routes
   app.use("/api/", limiter);
-
-  if (firebaseAuthProxyBase) {
-    app.use("/__/auth", async (req, res) => {
-      const targetUrl = `${firebaseAuthProxyBase}${req.originalUrl}`;
-      await proxyFirebaseHelper(req, res, targetUrl);
-    });
-
-    app.get("/__/firebase/init.json", async (req, res) => {
-      const targetUrl = `${firebaseAuthProxyBase}${req.originalUrl}`;
-      await proxyFirebaseHelper(req, res, targetUrl);
-    });
-  }
-
-  // Standard Middlewares
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
 
   // Debugging for unhandled rejections
   process.on('unhandledRejection', (reason, promise) => {
@@ -381,9 +392,6 @@ async function startServer() {
 
     res.json({ received: true });
   });
-
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // API Routes
   app.get("/api/health", (req, res) => {

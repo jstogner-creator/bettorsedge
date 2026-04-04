@@ -111,6 +111,8 @@ export default function App() {
         if (isMounted && e.code !== 'auth/redirect-cancelled-by-user') {
           setRedirectError(e.message || "Failed to complete sign in. Please try again.");
         }
+        // Ensure auth is marked ready even on error to prevent infinite loading
+        if (isMounted) setIsAuthReady(true);
       });
     };
 
