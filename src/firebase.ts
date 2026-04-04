@@ -10,6 +10,8 @@ import {
   Auth,
   setPersistence,
   browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence,
 } from 'firebase/auth';
 import {
   collection,
@@ -17,7 +19,8 @@ import {
   serverTimestamp,
   initializeFirestore,
   persistentLocalCache,
-  persistentSingleTabManager,
+  persistentMultipleTabManager,
+  memoryLocalCache,
   Firestore,
 } from 'firebase/firestore';
 
@@ -58,25 +61,48 @@ function getFirebase() {
 
     setPersistence(authInstance, browserLocalPersistence)
       .then(() => console.log('[Firebase] Auth persistence set to local'))
-      .catch((err) => {
-        console.error('[Firebase] Failed to set auth persistence:', err);
+      .catch(async (err) => {
+        console.error('[Firebase] Failed to set auth persistence to local, trying session:', err);
+        try {
+          await setPersistence(authInstance!, browserSessionPersistence);
+          console.log('[Firebase] Auth persistence set to session');
+        } catch (sessionErr) {
+          console.error('[Firebase] Failed to set auth persistence to session, trying memory:', sessionErr);
+          try {
+            await setPersistence(authInstance!, inMemoryPersistence);
+            console.log('[Firebase] Auth persistence set to memory');
+          } catch (memoryErr) {
+            console.error('[Firebase] Failed to set auth persistence to memory:', memoryErr);
+          }
+        }
       });
 
-    dbInstance = firebaseConfig.firestoreDatabaseId
-      ? initializeFirestore(
-          app,
-          {
+    try {
+      dbInstance = firebaseConfig.firestoreDatabaseId
+        ? initializeFirestore(
+            app,
+            {
+              localCache: persistentLocalCache({
+                tabManager: persistentMultipleTabManager(),
+              }),
+            },
+            firebaseConfig.firestoreDatabaseId
+          )
+        : initializeFirestore(app, {
             localCache: persistentLocalCache({
-              tabManager: persistentSingleTabManager({}),
+              tabManager: persistentMultipleTabManager(),
             }),
-          },
-          firebaseConfig.firestoreDatabaseId
-        )
-      : initializeFirestore(app, {
-          localCache: persistentLocalCache({
-            tabManager: persistentSingleTabManager({}),
-          }),
-        });
+          });
+    } catch (e) {
+      console.warn('[Firebase] Failed to initialize persistent cache, falling back to memory cache', e);
+      dbInstance = firebaseConfig.firestoreDatabaseId
+        ? initializeFirestore(
+            app,
+            { localCache: memoryLocalCache() },
+            firebaseConfig.firestoreDatabaseId
+          )
+        : initializeFirestore(app, { localCache: memoryLocalCache() });
+    }
   }
 
   return { db: dbInstance!, auth: authInstance! };
@@ -117,7 +143,15 @@ export async function loginWithGoogle(): Promise<LoginResult> {
   console.log('[Auth] Starting Google sign-in flow (Popup)');
 
   try {
-    await setPersistence(auth, browserLocalPersistence);
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+    } catch {
+      try {
+        await setPersistence(auth, browserSessionPersistence);
+      } catch {
+        await setPersistence(auth, inMemoryPersistence);
+      }
+    }
 
     const result = await signInWithPopup(auth, googleProvider);
     console.log('[Auth] Popup sign-in successful for:', result.user.email);
@@ -139,7 +173,15 @@ export async function loginWithGoogle(): Promise<LoginResult> {
       if (!inIframe) {
         console.log('[Auth] Not in iframe, falling back to signInWithRedirect for code:', error.code);
         document.cookie = 'redirect_login_pending=true; path=/; max-age=300; SameSite=Lax';
-        await setPersistence(auth, browserLocalPersistence);
+        try {
+          await setPersistence(auth, browserLocalPersistence);
+        } catch {
+          try {
+            await setPersistence(auth, browserSessionPersistence);
+          } catch {
+            await setPersistence(auth, inMemoryPersistence);
+          }
+        }
         await signInWithRedirect(auth, googleProvider);
         return { success: false, code: 'auth/popup-blocked-redirecting' };
       } else {

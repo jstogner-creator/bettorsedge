@@ -680,6 +680,7 @@ export function Dashboard({
   // Firestore Sync - All Predictions for History/Accuracy (Limited to 100 for quota)
   const lastHistoryFetchRef = useRef<number>(0);
   useEffect(() => {
+    /* TEMPORARILY DISABLED FOR DEBUGGING
     if (!authReady || !user) {
       setAllPredictions({});
       return;
@@ -720,11 +721,13 @@ export function Dashboard({
     };
 
     fetchHistory().catch(console.error);
+    */
   }, [authReady, user]);
 
   // Dedicated fetch for selected date to ensure current view is always populated
   const lastPredictionsFetchRef = useRef<Record<string, number>>({});
   useEffect(() => {
+    /* TEMPORARILY DISABLED FOR DEBUGGING
     if (!authReady || !user) {
       setSavedPredictions({});
       return;
@@ -779,6 +782,7 @@ export function Dashboard({
     };
 
     fetchPredictions().catch(console.error);
+    */
   }, [authReady, user, selectedDate]);
 
   // Derive current date predictions from all predictions (REMOVED: replaced by dedicated subscription above)

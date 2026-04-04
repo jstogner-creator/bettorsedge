@@ -29,10 +29,8 @@ if (!rootElement) {
   console.error('Failed to find the root element');
 } else {
   createRoot(rootElement).render(
-    <StrictMode>
-      <ErrorBoundary>
-        <App />
-      </ErrorBoundary>
-    </StrictMode>,
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   );
 }

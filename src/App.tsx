@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m.Dashboard })));
 const LandingPage = lazy(() => import("./pages/LandingPage").then(m => ({ default: m.LandingPage })));
 import { FAQ } from "./pages/FAQ";
@@ -37,6 +37,11 @@ export default function App() {
   const [redirectError, setRedirectError] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<"main" | "faq">("main");
   const isOnline = useOnlineStatus();
+  const authReadyRef = useRef(false);
+
+  useEffect(() => {
+    authReadyRef.current = isAuthReady;
+  }, [isAuthReady]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -50,7 +55,7 @@ export default function App() {
       // Safety timeout: if auth doesn't ready in 10 seconds, force it
       // This ensures the app renders even if Firebase is slow or hangs
       authTimeout = setTimeout(() => {
-        if (isMounted && !isAuthReady) {
+        if (isMounted && !authReadyRef.current) {
           console.warn("[App] Auth initialization timed out. Forcing ready state.");
           setIsAuthReady(true);
         }
