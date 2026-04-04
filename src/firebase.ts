@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, FirebaseApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
@@ -6,27 +6,24 @@ import {
   signInWithRedirect,
   getRedirectResult,
   signOut,
-  browserLocalPersistence,
-  setPersistence,
   User,
+  Auth,
 } from 'firebase/auth';
 import {
-  getFirestore,
-  doc,
-  getDocFromServer,
   collection,
   addDoc,
   serverTimestamp,
   initializeFirestore,
   persistentLocalCache,
   persistentSingleTabManager,
+  Firestore,
 } from 'firebase/firestore';
 
 import firebaseConfig from '../firebase-applet-config.json';
 
-let app: any = null;
-let dbInstance: any = null;
-let authInstance: any = null;
+let app: FirebaseApp | null = null;
+let dbInstance: Firestore | null = null;
+let authInstance: Auth | null = null;
 
 function getFirebase() {
   if (!app) {
@@ -39,23 +36,15 @@ function getFirebase() {
           localCache: persistentLocalCache({
             tabManager: persistentSingleTabManager({}),
           }),
-          databaseId: firebaseConfig.firestoreDatabaseId,
-        } as any)
+        }, firebaseConfig.firestoreDatabaseId)
       : initializeFirestore(app, {
           localCache: persistentLocalCache({
             tabManager: persistentSingleTabManager({}),
           }),
         });
-
-    // Set persistence once during initialization
-    setPersistence(authInstance, browserLocalPersistence)
-      .then(() => console.log('[Firebase] Persistence set to local'))
-      .catch((err) => {
-        console.error('[Firebase] Failed to set auth persistence:', err);
-      });
   }
 
-  return { db: dbInstance, auth: authInstance };
+  return { db: dbInstance!, auth: authInstance! };
 }
 
 export const getDb = () => getFirebase().db;
@@ -100,15 +89,18 @@ export async function loginWithGoogle(): Promise<LoginResult> {
     console.warn('[Auth] signInWithPopup failed:', error.code, error.message);
     await logLoginError(error, 'signInWithPopup');
     
-    if (error.code === 'auth/popup-blocked') {
+    const popupErrorCodes = ['auth/popup-blocked', 'auth/cancelled-popup-request', 'auth/popup-closed-by-user', 'auth/web-storage-unsupported'];
+    
+    if (popupErrorCodes.includes(error.code) || error.message.includes('third-party cookies')) {
       const inIframe = window.self !== window.top;
       if (!inIframe) {
-        console.log('[Auth] Not in iframe, falling back to signInWithRedirect');
+        console.log('[Auth] Not in iframe, falling back to signInWithRedirect for code:', error.code);
+        document.cookie = "redirect_login_pending=true; path=/; max-age=300; SameSite=Lax";
         await signInWithRedirect(auth, googleProvider);
         return { success: false, code: 'auth/popup-blocked-redirecting' };
       } else {
         console.error('[Auth] In iframe, cannot fallback to redirect.');
-        return { success: false, error: 'Popup blocked. Please open in a new tab.', code: error.code };
+        return { success: false, error: 'Browser security settings prevent login here. Please open in a new tab.', code: error.code };
       }
     }
     
@@ -120,17 +112,31 @@ export async function handleGoogleRedirectResult(): Promise<User | null> {
   const auth = getAuthInstance();
   console.log('[Auth] Checking for redirect result...');
   
+  const wasRedirectPending = document.cookie.includes('redirect_login_pending=true');
+  if (wasRedirectPending) {
+    console.log('[Auth] Found redirect_login_pending flag in cookie');
+  }
+  
   try {
     const result = await getRedirectResult(auth);
     if (result) {
       console.log('[Auth] Redirect result processed for:', result.user.email);
+      document.cookie = "redirect_login_pending=; path=/; max-age=0; SameSite=Lax";
       return result.user;
     }
+    
+    if (wasRedirectPending && !auth.currentUser) {
+      console.warn('[Auth] Redirect was pending but getRedirectResult returned null!');
+      document.cookie = "redirect_login_pending=; path=/; max-age=0; SameSite=Lax";
+      throw new Error("Login session lost during redirect. Your browser's tracking prevention (like Safari ITP) blocked the login. Please ALLOW POPUPS for this site and try signing in again, or use Chrome/Firefox.");
+    }
+    
     return auth.currentUser;
   } catch (error: any) {
     console.error('[Auth] getRedirectResult error:', error.code, error.message);
+    document.cookie = "redirect_login_pending=; path=/; max-age=0; SameSite=Lax";
     await logLoginError(error, 'getRedirectResult');
-    return auth.currentUser;
+    throw error; // Throw to let the caller handle the UI
   }
 }
 

@@ -376,13 +376,19 @@ export function Dashboard({
           if (typeof setupTimeout !== 'undefined') clearTimeout(setupTimeout);
           console.error("[Dashboard] Profile fetch error:", error);
           
-          if (error.message?.includes("Quota exceeded")) {
-            setProfileError("Firestore quota exceeded. Some features may be limited until tomorrow.");
-          } else {
-            handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
-            setProfileError("Failed to load your profile.");
+          try {
+            if (error.message?.includes("Quota exceeded")) {
+              setProfileError("Firestore quota exceeded. Some features may be limited until tomorrow.");
+            } else {
+              handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+              setProfileError("Failed to load your profile.");
+            }
+          } catch (innerError) {
+            console.error("[Dashboard] Error in error handler:", innerError);
+            setProfileError("Failed to load your profile due to a permissions issue.");
+          } finally {
+            setAuthReady(true);
           }
-          setAuthReady(true);
         }
       };
 
@@ -942,7 +948,7 @@ export function Dashboard({
 
   // Resolve finished games
   useEffect(() => {
-    if (!games.length || !Object.keys(savedPredictions).length) return;
+    if (!isAdminUser || !games.length || !Object.keys(savedPredictions).length) return;
 
     const resolveGames = async () => {
       try {
@@ -1004,7 +1010,7 @@ export function Dashboard({
     };
 
     resolveGames().catch(console.error);
-  }, [games, savedPredictions]);
+  }, [games, savedPredictions, isAdminUser]);
 
 const fetchGames = async (force: boolean = false) => {
   if (activeTab === "Accuracy") {
@@ -1850,6 +1856,7 @@ const fetchGames = async (force: boolean = false) => {
           winner: savedPredictions[game.id]?.winner || "TBD",
           confidence: savedPredictions[game.id]?.confidence || 5,
           reasoning: savedPredictions[game.id]?.reasoning || "Injury report updated. Full analysis pending.",
+          scenarioAnalysis: savedPredictions[game.id]?.scenarioAnalysis || "Pending analysis.",
           hedgingAdvice: savedPredictions[game.id]?.hedgingAdvice || "Pending analysis.",
           keyFactors: savedPredictions[game.id]?.keyFactors || [],
           kalshiPrice: savedPredictions[game.id]?.kalshiPrice || 0.5,
@@ -1966,6 +1973,7 @@ const fetchGames = async (force: boolean = false) => {
             winner: savedPredictions[gameId]?.winner || "TBD",
             confidence: savedPredictions[gameId]?.confidence || 5,
             reasoning: savedPredictions[gameId]?.reasoning || "Injury report updated. Full analysis pending.",
+            scenarioAnalysis: savedPredictions[gameId]?.scenarioAnalysis || "Pending analysis.",
             hedgingAdvice: savedPredictions[gameId]?.hedgingAdvice || "Pending analysis.",
             keyFactors: savedPredictions[gameId]?.keyFactors || [],
             kalshiPrice: savedPredictions[gameId]?.kalshiPrice || 0.5,

@@ -81,6 +81,7 @@ async function startServer() {
   app.use(helmet({
     contentSecurityPolicy: false, // Disable CSP for development/Vite compatibility
     crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false, // MUST be false for Firebase Auth popup to work
     frameguard: false, // Allow rendering in iframes (AI Studio)
   }));
 

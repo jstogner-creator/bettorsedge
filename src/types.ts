@@ -23,6 +23,7 @@ export interface Game {
   awayScore?: number;
   kalshiTicker?: string;
   kalshiMarketTitle?: string;
+  kalshiExpectations?: any; // Added
   apiSportsGameId?: number;
   apiSportsHomeTeamId?: number;
   apiSportsAwayTeamId?: number;
@@ -65,6 +66,7 @@ export interface Prediction {
   marketSentiment?: string;
   situationalFactors?: string;
   scenarioAnalysis: string;
+  hedgingAdvice?: any; // Added
   keyFactors: string[];
   appliedLessons?: string[];
   injuries: {

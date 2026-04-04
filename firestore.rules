@@ -32,12 +32,12 @@ service cloud.firestore {
     // For now, allow only the specific admin emails to act as admin
     function isAdmin() {
       return isAuthenticated() && 
-             (('email' in request.auth.token && 
-               (request.auth.token.email.toLower() == "jstogner@risenetworkcabling.com" || 
-                request.auth.token.email.toLower() == "jesslandry35@gmail.com" ||
-                request.auth.token.email.toLower() == "nousiharatl82@gmail.com")) ||
+             (('email' in request.auth.token && request.auth.token.email != null && 
+               (request.auth.token.email.lower() == "jstogner@risenetworkcabling.com" || 
+                request.auth.token.email.lower() == "jesslandry35@gmail.com" ||
+                request.auth.token.email.lower() == "nousiharatl82@gmail.com")) ||
               (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin'));
     }
 
     function isValidPrediction(data) {

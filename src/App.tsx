@@ -34,6 +34,7 @@ const LoadingScreen = ({ message = "Initializing Bettors Edge" }) => (
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [redirectError, setRedirectError] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<"main" | "faq">("main");
   const isOnline = useOnlineStatus();
 
@@ -41,8 +42,9 @@ export default function App() {
     let unsubscribe: (() => void) | undefined;
     let isMounted = true;
     let authTimeout: NodeJS.Timeout;
+    let redirectUserSet = false;
 
-    const init = async () => {
+    const init = () => {
       console.log("[App] Initialization started");
       
       // Safety timeout: if auth doesn't ready in 10 seconds, force it
@@ -54,21 +56,10 @@ export default function App() {
         }
       }, 10000);
 
-      if (!isMounted) return;
-
       console.log("[App] Attaching onAuthStateChanged listener");
       const auth = getAuthInstance();
       
-      // Check for redirect result first
-      try {
-        await handleGoogleRedirectResult();
-      } catch (e: any) {
-        console.error("[App] Error handling redirect result:", e);
-        if (e.code === 'auth/unauthorized-domain') {
-          sessionStorage.setItem('auth_error', 'unauthorized-domain');
-        }
-      }
-
+      // 1. Attach listener synchronously
       unsubscribe = onAuthStateChanged(auth, (currentUser) => {
         console.log(
           "[App] Auth State Changed:",
@@ -77,14 +68,48 @@ export default function App() {
 
         if (!isMounted) return;
         clearTimeout(authTimeout);
-        setUser(currentUser);
+        
+        // Only update if it's a real change to avoid overwriting redirect result
+        setUser((prevUser) => {
+          console.log(`[App] setUser callback: prevUser=${prevUser?.email}, currentUser=${currentUser?.email}, redirectUserSet=${redirectUserSet}`);
+          if (prevUser && !currentUser) {
+            console.warn("[App] User transitioned from logged in to logged out!");
+            if (redirectUserSet) {
+              console.warn("[App] Ignoring null user because redirect user was just set");
+              return prevUser;
+            }
+            const wasRedirectPending = document.cookie.includes('redirect_login_pending=true');
+            if (wasRedirectPending) {
+              console.warn("[App] Ignoring null user because redirect was pending");
+              return prevUser;
+            }
+          }
+          return currentUser;
+        });
         setIsAuthReady(true);
+      });
+
+      // 2. Process redirect asynchronously without blocking the listener
+      handleGoogleRedirectResult().then((redirectUser) => {
+        if (isMounted && redirectUser) {
+          console.log("[App] Redirect result returned user, setting state explicitly");
+          redirectUserSet = true;
+          setUser(redirectUser);
+          setIsAuthReady(true);
+          
+          setTimeout(() => {
+            redirectUserSet = false;
+          }, 5000);
+        }
+      }).catch((e: any) => {
+        console.error("[App] Error handling redirect result:", e);
+        if (isMounted && e.code !== 'auth/redirect-cancelled-by-user') {
+          setRedirectError(e.message || "Failed to complete sign in. Please try again.");
+        }
       });
     };
 
-    init().catch((err) => {
-      console.error("[App] Initialization error:", err);
-    });
+    init();
 
     return () => {
       isMounted = false;
@@ -112,7 +137,7 @@ export default function App() {
             <Dashboard user={user} onOpenFAQ={() => setCurrentView("faq")} />
           )
         ) : (
-          <LandingPage />
+          <LandingPage initialError={redirectError} />
         )}
       </Suspense>
     </ErrorBoundary>

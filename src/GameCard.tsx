@@ -419,10 +419,10 @@ export const GameCard: React.FC<GameCardProps> = ({
                     {game.allSources && game.allSources.length > 0 ? (
                       <select 
                         className="bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5 text-[9px] outline-none focus:border-indigo-500"
-                        value={selectedBookmakerId || ''}
+                        value={selectedSourceId || ''}
                         onChange={(e) => {
                           e.stopPropagation();
-                          setSelectedBookmakerId(Number(e.target.value));
+                          setSelectedSourceId(Number(e.target.value));
                         }}
                         onClick={(e) => e.stopPropagation()}
                       >
@@ -431,7 +431,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                         ))}
                       </select>
                     ) : (
-                      <span className="text-slate-400">({oddsSource})</span>
+                      <span className="text-slate-400">({expectationsSource})</span>
                     )}
                   </div>
                   <TrendingUp className="w-3 h-3" />
