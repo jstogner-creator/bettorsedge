@@ -2,7 +2,6 @@ import { initializeApp, FirebaseApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
   signOut,
@@ -134,7 +133,7 @@ export interface LoginResult {
 
 export async function loginWithGoogle(): Promise<LoginResult> {
   const auth = getAuthInstance();
-  console.log('[Auth] Starting Google sign-in flow (Popup)');
+  console.log('[Auth] Starting Google sign-in flow (Redirect)');
 
   try {
     try {
@@ -147,47 +146,12 @@ export async function loginWithGoogle(): Promise<LoginResult> {
       }
     }
 
-    const result = await signInWithPopup(auth, googleProvider);
-    console.log('[Auth] Popup sign-in successful for:', result.user.email);
+    document.cookie = 'redirect_login_pending=true; path=/; max-age=300; SameSite=Lax';
+    await signInWithRedirect(auth, googleProvider);
     return { success: true };
   } catch (error: any) {
-    console.warn('[Auth] signInWithPopup failed:', error.code, error.message);
-    await logLoginError(error, 'signInWithPopup');
-
-    const popupErrorCodes = [
-      'auth/popup-blocked',
-      'auth/cancelled-popup-request',
-      'auth/popup-closed-by-user',
-      'auth/web-storage-unsupported',
-    ];
-
-    if (popupErrorCodes.includes(error.code) || error.message.includes('third-party cookies')) {
-      const inIframe = window.self !== window.top;
-
-      if (!inIframe) {
-        console.log('[Auth] Not in iframe, falling back to signInWithRedirect for code:', error.code);
-        document.cookie = 'redirect_login_pending=true; path=/; max-age=300; SameSite=Lax';
-        try {
-          await setPersistence(auth, browserLocalPersistence);
-        } catch {
-          try {
-            await setPersistence(auth, browserSessionPersistence);
-          } catch {
-            await setPersistence(auth, inMemoryPersistence);
-          }
-        }
-        await signInWithRedirect(auth, googleProvider);
-        return { success: false, code: 'auth/popup-blocked-redirecting' };
-      } else {
-        console.error('[Auth] In iframe, cannot fallback to redirect.');
-        return {
-          success: false,
-          error: 'Browser security settings prevent login here. Please open in a new tab.',
-          code: error.code,
-        };
-      }
-    }
-
+    console.error('[Auth] signInWithRedirect failed:', error.code, error.message);
+    await logLoginError(error, 'signInWithRedirect');
     return { success: false, error: error.message, code: error.code };
   }
 }
