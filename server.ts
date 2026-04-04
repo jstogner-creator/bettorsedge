@@ -112,7 +112,7 @@ if (process.env.STRIPE_SECRET_KEY) {
 async function startServer() {
   console.log(`[SERVER] Starting server in ${process.env.NODE_ENV || "development"} mode...`);
   const app = express();
-  const PORT = 3000; // Hardcoded to 3000 per AI Studio guidelines
+  const PORT = Number(process.env.PORT) || 3000; // Use environment PORT or fallback to 3000 for AI Studio
 
   // Trust proxy for rate limiting (Cloud Run/Nginx)
   app.set('trust proxy', 1);
