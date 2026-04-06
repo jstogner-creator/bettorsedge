@@ -10,6 +10,9 @@ interface GameGridProps {
   analyzing: boolean;
   analysisProgress: any;
   isAdminUser: boolean;
+  selectedGameIds: Set<string>;
+  onToggleGameSelection: (gameId: string) => void;
+  onToggleAllGames: () => void;
   handleReanalyzeSingleGame: (game: Game) => void;
   handleDiscussWithSnark: (game: Game) => void;
 }
@@ -54,6 +57,9 @@ export const GameGrid: React.FC<GameGridProps> = ({
   analyzing,
   analysisProgress,
   isAdminUser,
+  selectedGameIds,
+  onToggleGameSelection,
+  onToggleAllGames,
   handleReanalyzeSingleGame,
   handleDiscussWithSnark,
 }) => {
@@ -71,6 +77,19 @@ export const GameGrid: React.FC<GameGridProps> = ({
 
   return (
     <GameGridErrorBoundary>
+      <div className="mb-4 flex items-center justify-between">
+        <div className="text-xs text-slate-500 font-medium">
+          {selectedGameIds.size > 0 ? `${selectedGameIds.size} games selected for analysis` : `Showing ${filteredGames.length} games`}
+        </div>
+        {isAdminUser && (
+          <button 
+            onClick={onToggleAllGames}
+            className="text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+          >
+            {selectedGameIds.size === filteredGames.length ? "Deselect All" : "Select All"}
+          </button>
+        )}
+      </div>
       <div id="game-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
         {filteredGames.map((game, index) => (
           <GameCard
@@ -81,6 +100,8 @@ export const GameGrid: React.FC<GameGridProps> = ({
             onReanalyze={handleReanalyzeSingleGame}
             onDiscuss={() => handleDiscussWithSnark(game)}
             isAdminUser={isAdminUser}
+            isSelected={selectedGameIds.has(game.id)}
+            onToggleSelection={() => onToggleGameSelection(game.id)}
           />
         ))}
       </div>

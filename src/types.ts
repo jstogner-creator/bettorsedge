@@ -165,6 +165,13 @@ export interface Prediction {
   };
 
   // Detailed Matchup Data
+  matchupAnalysis?: {
+    h2h: string;
+    playerStats: string;
+    trends: string;
+    confidenceBreakdown: string;
+  };
+
   playerMatchups?: {
     matchup: string;
     analysis: string;

@@ -194,6 +194,7 @@ export function Dashboard({
 
   const [profileError, setProfileError] = useState<string | null>(null);
   const [timeFilter, setTimeFilter] = useState<"all" | "early" | "afternoon" | "late">("all");
+  const [selectedGameIds, setSelectedGameIds] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<"time" | "edge" | "confidence">("time");
   const [isBriefingOpen, setIsBriefingOpen] = useState(false);
   const [forcePaywall, setForcePaywall] = useState(false);
@@ -823,6 +824,7 @@ export function Dashboard({
   }, [activeTab]);
 
   useEffect(() => {
+    setSelectedGameIds(new Set());
     fetchGames().catch(console.error);
     // We no longer cancel analysis on tab change to allow background processing
   }, [activeTab, selectedDate]);
@@ -914,7 +916,7 @@ export function Dashboard({
     const interval = setInterval(() => runScheduledAnalysis().catch(console.error), 60000);
     runScheduledAnalysis().catch(console.error); // Run on mount
     return () => clearInterval(interval);
-  }, [user, allPredictions, isAdminUser]); // Re-run if user or predictions change
+  }, [user, isAdminUser]); // Re-run only if user or admin status changes
 
   const analyzeAllSports = async () => {
     const leagues = ["NBA", "NFL", "MLB", "NHL", "NCAA"];
@@ -922,18 +924,12 @@ export function Dashboard({
     
     for (const league of leagues) {
       console.log(`[Scheduler] Analyzing ${league}...`);
-      // We need to trigger the analysis for each league.
-      // Since handleAutoAnalyze is tied to activeTab, we can temporarily set activeTab.
-      setActiveTab(league);
-      
-      // Wait for activeTab to update and games to be fetched
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Trigger analysis
-      await handleAutoAnalyze(true); // Force analyze
+      // Trigger analysis for each league without changing activeTab
+      // Changed force to false to allow resuming and avoid re-analyzing fresh data
+      await handleAutoAnalyze(false, league, true); 
       
       // Wait for analysis to finish (basic check)
-      await new Promise(resolve => setTimeout(resolve, 10000));
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
     console.log("[Scheduler] All sports analyzed.");
   };
@@ -1638,26 +1634,40 @@ const fetchGames = async (force: boolean = false) => {
     }));
   };
 
-  const handleAutoAnalyze = async (force: boolean = false) => {
+  const handleAutoAnalyze = async (force: boolean = false, leagueOverride?: string, silent: boolean = false) => {
     if (!isAdminUser) {
-      setToast({ message: "Only administrators can trigger analysis.", type: "error" });
+      if (!silent) setToast({ message: "Only administrators can trigger analysis.", type: "error" });
       return;
     }
-    console.log("Analyze button clicked", { user, analyzing, loading, force, activeTab });
+    
+    const targetLeague = leagueOverride || activeTab;
+    const isTargetAnalyzing = analyzingMap[targetLeague] || false;
+
+    console.log("Analyze triggered", { user, analyzing: isTargetAnalyzing, loading, force, targetLeague, silent });
     
     if (!user) {
-      setToast({ message: "Please login to analyze games.", type: "warning" });
+      if (!silent) setToast({ message: "Please login to analyze games.", type: "warning" });
       return;
     }
     
     // Safety check to prevent double submission
-    if (analyzing) return;
+    if (isTargetAnalyzing) return;
 
-    const targetLeague = activeTab;
     cancelAnalysisRef.current[targetLeague] = false;
     
-    if (filteredGames.length === 0) {
-      setToast({ message: "No games available to analyze.", type: "info" });
+    // Filter games to analyze based on selection if any are selected
+    // If leagueOverride is provided, we ignore selectedGameIds as they are tab-specific
+    const gamesToConsider = (selectedGameIds.size > 0 && !leagueOverride)
+      ? filteredGames.filter(g => selectedGameIds.has(g.id))
+      : games.filter(g => {
+          if (!g.league) return false;
+          const gLeague = g.league.toUpperCase();
+          const tLeague = targetLeague.toUpperCase();
+          return gLeague === tLeague || gLeague.includes(tLeague) || tLeague.includes(gLeague);
+        });
+
+    if (gamesToConsider.length === 0) {
+      if (!silent) setToast({ message: `No ${targetLeague} games available to analyze.`, type: "info" });
       return;
     }
 
@@ -1666,7 +1676,7 @@ const fetchGames = async (force: boolean = false) => {
       ...prev,
       [targetLeague]: {
         current: 0,
-        total: filteredGames.length,
+        total: gamesToConsider.length,
         analyzingGameIds: [],
         message: `Initializing analysis for ${targetLeague}...`
       }
@@ -1674,12 +1684,12 @@ const fetchGames = async (force: boolean = false) => {
 
     try {
       const dateStr = format(selectedDate, "yyyy-MM-dd");
-      setToast({ message: `Checking for injury updates for ${targetLeague}...`, type: "info" });
+      if (!silent) setToast({ message: `Checking for injury updates for ${targetLeague}...`, type: "info" });
       
       const injuryUpdates = await bettorsEdge.checkInjuryUpdates(
         targetLeague, 
         dateStr, 
-        filteredGames.filter(g => g.league === targetLeague), 
+        gamesToConsider.filter(g => g.league === targetLeague), 
         () => cancelAnalysisRef.current[targetLeague],
         (current, total) => {
           setAnalysisProgressMap(prev => {
@@ -1717,9 +1727,9 @@ const fetchGames = async (force: boolean = false) => {
         await batch.commit();
       }
 
-      setToast({ message: `Starting analysis for ${targetLeague} on ${dateStr}...`, type: "info" });
+      if (!silent) setToast({ message: `Starting analysis for ${targetLeague} on ${dateStr}...`, type: "info" });
 
-      const gamesToAnalyze = filteredGames.filter(game => {
+      const gamesToAnalyze = gamesToConsider.filter(game => {
         // Strict league check
         if (game.league !== targetLeague) return false;
 
@@ -1730,10 +1740,47 @@ const fetchGames = async (force: boolean = false) => {
         const oldInjuries = existingPrediction?.injuries;
         const injuriesChanged = newInjuries && JSON.stringify(newInjuries) !== JSON.stringify(oldInjuries || []);
 
-        return force || !existingPrediction || injuriesChanged || bettorsEdge.needsReanalysis(game, existingPrediction);
+        // If user explicitly selected games, we force analysis on them
+        const isSelected = !leagueOverride && selectedGameIds.has(game.id);
+
+        // Persistent Resume Logic: 
+        // 1. If we have a prediction from the last 12 hours, skip it unless force is true
+        // 2. If force is true, we still skip if it was updated in the last 15 minutes (to prevent loops)
+        const lastUpdated = existingPrediction?.lastUpdated ? new Date(existingPrediction.lastUpdated).getTime() : 0;
+        const ageMs = Date.now() - lastUpdated;
+        const isVeryFresh = ageMs < 900000; // 15 minutes
+        const isRecentEnough = ageMs < 43200000; // 12 hours
+
+        let shouldAnalyze = false;
+        if (isSelected) {
+          shouldAnalyze = !isVeryFresh; // Force selected games unless literally just analyzed
+        } else if (force) {
+          shouldAnalyze = !isVeryFresh; // Force all unless literally just analyzed
+        } else {
+          // Smart analysis
+          shouldAnalyze = !existingPrediction || !isRecentEnough || injuriesChanged || bettorsEdge.needsReanalysis(game, existingPrediction);
+        }
+        
+        if (isSelected || force) {
+          console.log(`[Dashboard] Game ${game.id} (${game.awayTeam}@${game.homeTeam}) analysis check. force=${force}, isSelected=${isSelected}, isVeryFresh=${isVeryFresh}, shouldAnalyze=${shouldAnalyze}`);
+        }
+        
+        return shouldAnalyze;
       });
 
-      let completedCount = filteredGames.length - gamesToAnalyze.length;
+      console.log(`[Dashboard] Games to analyze for ${targetLeague}: ${gamesToAnalyze.length}`, gamesToAnalyze.map(g => `${g.awayTeam}@${g.homeTeam}`));
+
+      let completedCount = gamesToConsider.length - gamesToAnalyze.length;
+
+      if (gamesToAnalyze.length === 0) {
+        if (!silent) setToast({ message: `All ${targetLeague} games are already up-to-date.`, type: "success" });
+        return;
+      }
+
+      const isResuming = gamesToAnalyze.length < gamesToConsider.length;
+      if (isResuming && !silent) {
+        setToast({ message: `Resuming analysis for ${targetLeague}: ${gamesToAnalyze.length} games remaining...`, type: "info" });
+      }
 
       // Process in batches of 1 to improve performance while respecting rate limits
       const CONCURRENCY = 1;
@@ -1795,9 +1842,9 @@ const fetchGames = async (force: boolean = false) => {
                 [targetLeague]: leagueProgress ? {
                   ...leagueProgress,
                   current: completedCount,
-                  total: filteredGames.length,
+                  total: gamesToConsider.length,
                   analyzingGameIds: leagueProgress.analyzingGameIds.filter(id => id !== game.id),
-                  message: `Completed ${completedCount} of ${filteredGames.length}...`
+                  message: `Completed ${completedCount} of ${gamesToConsider.length}...`
                 } : null
               };
             });
@@ -1816,18 +1863,19 @@ const fetchGames = async (force: boolean = false) => {
           type: "info" 
         });
       } else {
-        setToast({ 
-          message: `Analysis complete. Processed ${gamesToAnalyze.length} games.`, 
+        if (!silent) setToast({ 
+          message: `Analysis complete. Processed ${gamesToAnalyze.length} games for ${targetLeague}.`, 
           type: "success" 
         });
       }
 
     } catch (err: any) {
-      console.error("Auto-analyze failed:", err);
-      setToast({ message: `Auto-analysis failed: ${err.message}`, type: "error" });
+      console.error(`Auto-analyze failed for ${targetLeague}:`, err);
+      if (!silent) setToast({ message: `Auto-analysis failed for ${targetLeague}: ${err.message}`, type: "error" });
     } finally {
       setAnalyzingMap(prev => ({ ...prev, [targetLeague]: false }));
       setAnalysisProgressMap(prev => ({ ...prev, [targetLeague]: null }));
+      if (!leagueOverride) setSelectedGameIds(new Set());
     }
   };
 
@@ -1837,12 +1885,12 @@ const fetchGames = async (force: boolean = false) => {
       return;
     }
 
-    if (analyzing) {
-      setToast({ message: "Analysis already in progress.", type: "warning" });
+    const targetLeague = game.league || activeTab;
+    if (analyzingMap[targetLeague]) {
+      setToast({ message: `Analysis for ${targetLeague} already in progress.`, type: "warning" });
       return;
     }
 
-    const targetLeague = activeTab;
     cancelAnalysisRef.current[targetLeague] = false;
     setAnalyzingMap(prev => ({ ...prev, [targetLeague]: true }));
     const dateStr = format(selectedDate, "yyyy-MM-dd");
@@ -2275,6 +2323,26 @@ const fetchGames = async (force: boolean = false) => {
   const isSportTab = activeTab !== "Accuracy" && activeTab !== "Users" && activeTab !== "Admin" && activeTab !== "Add Sport";
   const showPaywall = !!(authReady && user && userProfile && isSportTab && (forcePaywall || !isSubscribedToSport(activeTab)));
 
+  const handleToggleGameSelection = (gameId: string) => {
+    setSelectedGameIds(prev => {
+      const next = new Set(prev);
+      if (next.has(gameId)) {
+        next.delete(gameId);
+      } else {
+        next.add(gameId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleAllGames = () => {
+    if (selectedGameIds.size === filteredGames.length) {
+      setSelectedGameIds(new Set());
+    } else {
+      setSelectedGameIds(new Set(filteredGames.map(g => g.id)));
+    }
+  };
+
   return (
     <Layout
       activeTab={activeTab}
@@ -2340,7 +2408,10 @@ const fetchGames = async (force: boolean = false) => {
               setIsBriefingOpen={setIsBriefingOpen}
               handleImportSchedule={() => handleImportSchedule().catch(console.error)}
               handleStopAnalysis={handleStopAnalysis}
+              timeFilter={timeFilter}
+              setTimeFilter={setTimeFilter}
               apiSportsStatus={apiSportsStatus}
+              selectedCount={selectedGameIds.size}
             />
 
             {isAdminUser && (
@@ -2362,6 +2433,9 @@ const fetchGames = async (force: boolean = false) => {
                 analyzing={analyzing}
                 analysisProgress={analysisProgress}
                 isAdminUser={isAdminUser}
+                selectedGameIds={selectedGameIds}
+                onToggleGameSelection={handleToggleGameSelection}
+                onToggleAllGames={handleToggleAllGames}
                 handleReanalyzeSingleGame={(game) => handleReanalyzeSingleGame(game).catch(console.error)}
                 handleDiscussWithSnark={handleDiscussWithSnark}
               />

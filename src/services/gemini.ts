@@ -858,19 +858,21 @@ export class BettorsEdge {
     // If it's a partial prediction (injuries only), it definitely needs a full analysis
     if (prediction.winner === "TBD") return true;
 
-    const lastUpdated = new Date(prediction.lastUpdated).getTime();
+    // Skip games that have already started or are finished
+    const gameTime = new Date(game.date).getTime();
     const now = Date.now();
+    if (now > gameTime) return false;
+
+    const lastUpdated = new Date(prediction.lastUpdated).getTime();
     const ageMs = now - lastUpdated;
 
-    // If prediction is very old (e.g., more than 2 hours), re-analyze
-    if (ageMs > 7200000) return true;
+    // If prediction is more than 6 hours old, re-analyze (more stable for daily runs)
+    if (ageMs > 21600000) return true;
     
-    // If confidence is low (< 7) and it's been more than 30 minutes, try again
+    // If confidence is low (< 7) and it's been more than 2 hours, try again
     // This allows the AI to try and find better data as the game gets closer
-    if (prediction.confidence < 7 && ageMs > 1800000) return true;
+    if (prediction.confidence < 7 && ageMs > 7200000) return true;
     
-    // If odds have changed significantly, re-analyze
-    // This is a simplified check
     return false;
   }
 
@@ -1111,14 +1113,14 @@ OPERATIONAL GUIDELINES:
 6. PRIVACY: NEVER mention the Google Drive link or 'official injury report' in your 'reasoning', 'qaNotes', or 'marketSentiment'. Use the information silently to provide accurate status updates.`;
 
       const leagueSearchQueries = game.league === 'NCAA'
-        ? `"current roster ${game.homeTeam} basketball", "current roster ${game.awayTeam} basketball", "NCAA basketball injury report rotowire", "college basketball market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "expert consensus college basketball today"`
+        ? `"current roster ${game.homeTeam} basketball", "current roster ${game.awayTeam} basketball", "NCAA basketball injury report rotowire", "college basketball market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "expert consensus college basketball today", "${game.homeTeam} vs ${game.awayTeam} head-to-head record basketball", "${game.homeTeam} vs ${game.awayTeam} last 5 games results", "individual player stats ${game.homeTeam} vs ${game.awayTeam} basketball"`
         : game.league === 'NHL'
-        ? `"starting goalie ${game.homeTeam} today", "starting goalie ${game.awayTeam} today", "NHL injury report ${game.homeTeam}", "NHL market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "NHL expert consensus today"`
+        ? `"starting goalie ${game.homeTeam} today", "starting goalie ${game.awayTeam} today", "NHL injury report ${game.homeTeam}", "NHL market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "NHL expert consensus today", "${game.homeTeam} vs ${game.awayTeam} head-to-head record NHL", "NHL team defensive ratings today", "NHL player stats leaders ${game.homeTeam} vs ${game.awayTeam}"`
         : game.league === 'MLB'
-        ? `"starting pitcher ${game.homeTeam} vs ${game.awayTeam} today", "MLB starting pitchers today ${game.homeTeam}", "MLB xERA and Barrel% ${game.homeTeam} vs ${game.awayTeam}", "MLB injury report ${game.homeTeam}", "MLB lineup ${game.homeTeam} today", "weather report for ${game.location} today", "MLB bullpen rest status high-leverage arms ${game.homeTeam}", "MLB umpire assignment today ${game.homeTeam}", "MLB market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "MLB advanced stats starting pitchers ${game.homeTeam} vs ${game.awayTeam}", "Statcast park factors ${game.location} MLB", "MLB pitcher vs batter matchups ${game.homeTeam} vs ${game.awayTeam}"`
+        ? `"starting pitcher ${game.homeTeam} vs ${game.awayTeam} today", "MLB starting pitchers today ${game.homeTeam}", "MLB xERA and Barrel% ${game.homeTeam} vs ${game.awayTeam}", "MLB injury report ${game.homeTeam}", "MLB lineup ${game.homeTeam} today", "weather report for ${game.location} today", "MLB bullpen rest status high-leverage arms ${game.homeTeam}", "MLB umpire assignment today ${game.homeTeam}", "MLB market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "MLB advanced stats starting pitchers ${game.homeTeam} vs ${game.awayTeam}", "Statcast park factors ${game.location} MLB", "MLB pitcher vs batter matchups ${game.homeTeam} vs ${game.awayTeam}", "${game.homeTeam} vs ${game.awayTeam} head-to-head record MLB", "MLB team wRC+ trends last 10 games"`
         : game.league === 'NFL'
-        ? `"NFL injury report ${game.homeTeam} vs ${game.awayTeam} today", "NFL starting lineups ${game.homeTeam} vs ${game.awayTeam}", "NFL weather report ${game.location} today", "NFL market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "NFL expert consensus today", "NFL QB stats ${game.homeTeam} vs ${game.awayTeam}"`
-        : `"current roster ${game.homeTeam} 2025-26 https://www.espn.com/nba/players", "current roster ${game.awayTeam} 2025-26 https://www.espn.com/nba/players", "latest NBA injury report ${game.homeTeam} vs ${game.awayTeam} https://www.rotowire.com/basketball/injury-report.php", "NBA starting lineups today ${game.homeTeam}", "NBA market expectations movement ${game.homeTeam} vs ${game.awayTeam} ESPN CBS Sports", "NBA expert consensus trends today", "site:official.nba.com injury report", "NBA_Injury_Report_Latest Google Drive 1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9", "last 3 injury reports for ${game.homeTeam} and ${game.awayTeam} key players"`;
+        ? `"NFL injury report ${game.homeTeam} vs ${game.awayTeam} today", "NFL starting lineups ${game.homeTeam} vs ${game.awayTeam}", "NFL weather report ${game.location} today", "NFL market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "NFL expert consensus today", "NFL QB stats ${game.homeTeam} vs ${game.awayTeam}", "${game.homeTeam} vs ${game.awayTeam} head-to-head record NFL", "NFL team defensive DVOA ratings 2025"`
+        : `"current roster ${game.homeTeam} 2025-26 https://www.espn.com/nba/players", "current roster ${game.awayTeam} 2025-26 https://www.espn.com/nba/players", "latest NBA injury report ${game.homeTeam} vs ${game.awayTeam} https://www.rotowire.com/basketball/injury-report.php", "NBA starting lineups today ${game.homeTeam}", "NBA market expectations movement ${game.homeTeam} vs ${game.awayTeam} ESPN CBS Sports", "NBA expert consensus trends today", "site:official.nba.com injury report", "NBA_Injury_Report_Latest Google Drive 1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9", "last 3 injury reports for ${game.homeTeam} and ${game.awayTeam} key players", "${game.homeTeam} vs ${game.awayTeam} head-to-head record NBA", "NBA player stats points assists rebounds ${game.homeTeam} vs ${game.awayTeam}", "NBA team defensive ratings last 10 games"`;
 
       const prompt = `
         [Analysis Request Time: ${new Date().toISOString()}]
@@ -1135,18 +1137,23 @@ OPERATIONAL GUIDELINES:
         ${apiSportsContext}
         
         TASK:
-        1. LATEST INJURIES: Use your search tool to find the latest status of key players. Check the Official NBA Injury Report, Rotowire (https://www.rotowire.com/basketball/injury-report.php), and reputable news sites. If you can access the Google Drive folder (1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9), look specifically for the file 'NBA_Injury_Report_Latest' and use it as your primary reference. If not, ensure you have cross-referenced at least two other sources to confirm player availability. Quantify the impact on team efficiency.
-        2. ROSTER AUDIT: For every player you mention, you MUST confirm they are on the correct team for the 2025-26 season using the ESPN NBA Players directory (https://www.espn.com/nba/players). Ensure you are attributing them to their current real-world team.
-        3. MARKET ANALYSIS: Search for current market expectations, movement, and team trends (performance against expectations and Over/Under records for the last 10 games). Is there Reverse Market Movement?
-        4. SITUATIONAL FACTORS: Is this a back-to-back? 3rd game in 4 nights? Long road trip?
-        5. DEVIL'S ADVOCATE: Provide one strong reason why the OTHER team might win/perform better.
-        6. ANALYTICAL EDGE: Compare your winProbability to the market projected probability (if data is available).
-        7. SCENARIO ANALYSIS: Provide a detailed scenario breakdown. This MUST include:
+        1. ADVANCED MATCHUP ENGINE: You MUST perform a deep-dive analysis considering:
+           - HEAD-TO-HEAD RECORDS: Analyze the historical performance between these two teams. Does one team consistently outperform the other regardless of current form?
+           - INDIVIDUAL PLAYER STATISTICS: Evaluate key player metrics (e.g., Points, Assists, Rebounds, Defensive Ratings, PER, True Shooting %). Identify specific player-on-player matchups that create an advantage.
+           - RECENT TEAM PERFORMANCE TRENDS: Look at the last 10 games. Analyze Net Rating, Offensive/Defensive Efficiency, and performance against expectations (ATS/Spread).
+        2. LATEST INJURIES: Use your search tool to find the latest status of key players. Check the Official NBA Injury Report, Rotowire (https://www.rotowire.com/basketball/injury-report.php), and reputable news sites. If you can access the Google Drive folder (1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9), look specifically for the file 'NBA_Injury_Report_Latest' and use it as your primary reference. If not, ensure you have cross-referenced at least two other sources to confirm player availability. Quantify the impact on team efficiency.
+        3. ROSTER AUDIT: For every player you mention, you MUST confirm they are on the correct team for the 2025-26 season using the ESPN NBA Players directory (https://www.espn.com/nba/players). Ensure you are attributing them to their current real-world team.
+        4. MARKET ANALYSIS: Search for current market expectations, movement, and team trends (performance against expectations and Over/Under records for the last 10 games). Is there Reverse Market Movement?
+        5. SITUATIONAL FACTORS: Is this a back-to-back? 3rd game in 4 nights? Long road trip?
+        6. DEVIL'S ADVOCATE: Provide one strong reason why the OTHER team might win/perform better.
+        7. ANALYTICAL EDGE: Compare your winProbability to the market projected probability (if data is available).
+        8. SCENARIO ANALYSIS: Provide a detailed scenario breakdown. This MUST include:
            - Situation analysis: What happens if one team takes an early lead?
            - Potential outcomes: How to interpret performance shifts based on live game movement.
            - Analysis strategies: Specific advice for different analytical profiles (e.g., "If you favor Team A, consider how a lead at halftime might change the dynamic").
            - Probability-based triggers: When to adjust the analytical outlook.
-        8. LESSONS LEARNED: Explicitly state how you adjusted your prediction weighting based on the "LEARN FROM YOUR PAST MISTAKES" context.
+        9. CONFIDENCE CALCULATION: Your 'confidence' score (1-10) MUST be a direct reflection of the alignment between H2H records, player stats, and recent trends. If all three align, confidence should be high (8-10). If they conflict, confidence MUST be lower (5-7).
+        10. LESSONS LEARNED: Explicitly state how you adjusted your prediction weighting based on the "LEARN FROM YOUR PAST MISTAKES" context.
         
         Return JSON:
         {
@@ -1190,6 +1197,12 @@ OPERATIONAL GUIDELINES:
             "awayVsExp": "3-4 vs Exp last 10",
             "homeTotal": "4-3 Total last 10",
             "awayTotal": "2-5 Total last 10"
+          },
+          "matchupAnalysis": {
+            "h2h": "Detailed analysis of historical matchups and psychological edge.",
+            "playerStats": "Deep dive into key player metrics (PER, Defensive Rating, etc.) and specific matchup advantages.",
+            "trends": "Analysis of recent 10-game performance, efficiency shifts, and market performance.",
+            "confidenceBreakdown": "Explicit explanation of why the confidence score was assigned based on the alignment of H2H, stats, and trends."
           },
           "marketExpectations": {
             "homeWinProb": -110,
@@ -1401,8 +1414,28 @@ OPERATIONAL GUIDELINES:
       }
       prediction.confidence = conf;
       
-      // Ensure winner is a string
+      // Ensure winner is a string and not "TBD" (our internal placeholder)
       prediction.winner = String(prediction.winner || "PASS");
+      if (prediction.winner === "TBD") {
+        prediction.winner = "PASS";
+      }
+
+      // Normalize matchupAnalysis
+      if (prediction.matchupAnalysis) {
+        if (typeof prediction.matchupAnalysis !== 'object') {
+          prediction.matchupAnalysis = {
+            h2h: String(prediction.matchupAnalysis),
+            playerStats: "",
+            trends: "",
+            confidenceBreakdown: ""
+          };
+        } else {
+          prediction.matchupAnalysis.h2h = String(prediction.matchupAnalysis.h2h || "");
+          prediction.matchupAnalysis.playerStats = String(prediction.matchupAnalysis.playerStats || "");
+          prediction.matchupAnalysis.trends = String(prediction.matchupAnalysis.trends || "");
+          prediction.matchupAnalysis.confidenceBreakdown = String(prediction.matchupAnalysis.confidenceBreakdown || "");
+        }
+      }
 
       // MLB Pitcher Matchup Normalization
       if (game.league === 'MLB' && prediction.pitcherMatchup) {

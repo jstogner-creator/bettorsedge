@@ -31,6 +31,8 @@ interface GameCardProps {
   prediction?: Prediction | null;
   isAnalyzing?: boolean;
   isAdminUser?: boolean;
+  isSelected?: boolean;
+  onToggleSelection?: () => void;
   onReanalyze?: (game: Game) => void;
   onDiscuss?: () => void;
   onSelect?: (game: Game) => void;
@@ -41,6 +43,8 @@ export const GameCard: React.FC<GameCardProps> = ({
   prediction, 
   isAnalyzing, 
   isAdminUser,
+  isSelected,
+  onToggleSelection,
   onReanalyze, 
   onDiscuss,
   onSelect
@@ -210,6 +214,24 @@ export const GameCard: React.FC<GameCardProps> = ({
       >
         <div className="p-3 sm:p-4 border-b border-slate-800/50 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900/50 gap-3">
           <div className="flex flex-wrap items-center gap-2">
+            {isAdminUser && onToggleSelection && (
+              <div 
+                className="mr-2 flex items-center justify-center"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleSelection();
+                }}
+              >
+                <div className={cn(
+                  "w-5 h-5 rounded border flex items-center justify-center transition-all cursor-pointer",
+                  isSelected 
+                    ? "bg-indigo-600 border-indigo-500 shadow-lg shadow-indigo-500/20" 
+                    : "bg-slate-800 border-slate-700 hover:border-slate-600"
+                )}>
+                  {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                </div>
+              </div>
+            )}
             <span className="bg-slate-800 text-slate-400 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border border-slate-700/50">
               {game.league}
             </span>
@@ -1082,6 +1104,53 @@ export const GameCard: React.FC<GameCardProps> = ({
                           )}>{stat.homeValue}</div>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Advanced Matchup Engine Section */}
+                {prediction.matchupAnalysis && (
+                  <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-5 mb-4 shadow-lg shadow-indigo-500/5">
+                    <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                      <div className="p-1 bg-indigo-500/20 rounded">
+                        <Zap className="w-4 h-4 fill-current" />
+                      </div>
+                      Advanced Matchup Engine
+                      <span title="Deep analysis of H2H, player stats, and trends to inform confidence.">
+                        <Info className="w-3 h-3 text-indigo-500/50 cursor-help" />
+                      </span>
+                    </h4>
+                    
+                    <div className="space-y-4">
+                      {prediction.matchupAnalysis.h2h && (
+                        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
+                          <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Head-to-Head Record</span>
+                          <p className="text-xs text-slate-300 leading-relaxed">{prediction.matchupAnalysis.h2h}</p>
+                        </div>
+                      )}
+                      
+                      {prediction.matchupAnalysis.playerStats && (
+                        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
+                          <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Individual Player Stats</span>
+                          <p className="text-xs text-slate-300 leading-relaxed">{prediction.matchupAnalysis.playerStats}</p>
+                        </div>
+                      )}
+                      
+                      {prediction.matchupAnalysis.trends && (
+                        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
+                          <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Team Performance Trends</span>
+                          <p className="text-xs text-slate-300 leading-relaxed">{prediction.matchupAnalysis.trends}</p>
+                        </div>
+                      )}
+
+                      {prediction.matchupAnalysis.confidenceBreakdown && (
+                        <div className="bg-indigo-500/10 p-3 rounded-lg border border-indigo-500/20">
+                          <span className="text-[10px] text-indigo-400 font-bold uppercase block mb-1">Confidence Breakdown</span>
+                          <p className="text-xs text-indigo-200 leading-relaxed font-medium italic">
+                            "{prediction.matchupAnalysis.confidenceBreakdown}"
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

@@ -11,6 +11,7 @@ interface SportControlsProps {
   onDailyBriefing: () => void;
   onImportSchedule?: () => void;
   onStopAnalysis?: () => void;
+  selectedCount: number;
 }
 
 export const SportControls: React.FC<SportControlsProps> = ({
@@ -22,6 +23,7 @@ export const SportControls: React.FC<SportControlsProps> = ({
   onDailyBriefing,
   onImportSchedule,
   onStopAnalysis,
+  selectedCount,
 }) => {
   return (
     <div className="flex flex-wrap gap-2 items-center">
@@ -65,7 +67,7 @@ export const SportControls: React.FC<SportControlsProps> = ({
             ) : (
               <Zap className="w-3.5 h-3.5 mr-2" />
             )}
-            {analyzing ? `Analyzing...` : `Analyze`}
+            {analyzing ? `Analyzing...` : selectedCount > 0 ? `Analyze (${selectedCount})` : `Analyze`}
           </button>
 
           {!analyzing && (

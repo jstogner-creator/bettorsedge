@@ -16,7 +16,10 @@ interface DashboardHeaderProps {
   setIsBriefingOpen: (open: boolean) => void;
   handleImportSchedule: () => void;
   handleStopAnalysis: () => void;
+  timeFilter: "all" | "early" | "afternoon" | "late";
+  setTimeFilter: (filter: "all" | "early" | "afternoon" | "late") => void;
   apiSportsStatus?: { status: 'idle' | 'loading' | 'success' | 'error', count: number, message?: string };
+  selectedCount: number;
 }
 
 export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
@@ -31,7 +34,10 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   setIsBriefingOpen,
   handleImportSchedule,
   handleStopAnalysis,
+  timeFilter,
+  setTimeFilter,
   apiSportsStatus,
+  selectedCount,
 }) => {
   const isToday = isSameDay(selectedDate, new Date());
 
@@ -117,6 +123,45 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             </button>
           </div>
 
+          <div className="flex items-center bg-slate-900 border border-slate-800 rounded-2xl p-1 shadow-sm">
+            <button
+              onClick={() => setTimeFilter("all")}
+              className={cn(
+                "px-3 py-1.5 text-[10px] font-bold rounded-xl transition-all uppercase tracking-wider",
+                timeFilter === "all" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+              )}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setTimeFilter("early")}
+              className={cn(
+                "px-3 py-1.5 text-[10px] font-bold rounded-xl transition-all uppercase tracking-wider",
+                timeFilter === "early" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+              )}
+            >
+              Early
+            </button>
+            <button
+              onClick={() => setTimeFilter("afternoon")}
+              className={cn(
+                "px-3 py-1.5 text-[10px] font-bold rounded-xl transition-all uppercase tracking-wider",
+                timeFilter === "afternoon" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+              )}
+            >
+              Afternoon
+            </button>
+            <button
+              onClick={() => setTimeFilter("late")}
+              className={cn(
+                "px-3 py-1.5 text-[10px] font-bold rounded-xl transition-all uppercase tracking-wider",
+                timeFilter === "late" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+              )}
+            >
+              Evening
+            </button>
+          </div>
+
           {isAdminUser && (
             <div className="h-8 w-px bg-slate-800 hidden md:block mx-2" />
           )}
@@ -130,6 +175,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             onDailyBriefing={() => setIsBriefingOpen(true)}
             onImportSchedule={handleImportSchedule}
             onStopAnalysis={handleStopAnalysis}
+            selectedCount={selectedCount}
           />
         </div>
       </div>
