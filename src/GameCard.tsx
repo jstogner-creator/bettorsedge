@@ -20,6 +20,7 @@ import {
   DollarSign,
   Users,
   BarChart3,
+  Sparkles,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { Game, Prediction } from "./types";
@@ -34,6 +35,7 @@ interface GameCardProps {
   isSelected?: boolean;
   onToggleSelection?: () => void;
   onReanalyze?: (game: Game) => void;
+  onCheckInjuries?: (game: Game) => void;
   onDiscuss?: () => void;
   onSelect?: (game: Game) => void;
 }
@@ -46,11 +48,13 @@ export const GameCard: React.FC<GameCardProps> = ({
   isSelected,
   onToggleSelection,
   onReanalyze, 
+  onCheckInjuries,
   onDiscuss,
   onSelect
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
+  const [checkingInjuries, setCheckingInjuries] = useState(false);
 
   const handleCardClick = () => {
     setIsExpanded(!isExpanded);
@@ -194,6 +198,8 @@ export const GameCard: React.FC<GameCardProps> = ({
   const awayValue = prediction && awayImplied && isAIPredictedAway && (prediction.winProbability * 100) > awayImplied;
   const homeValue = prediction && homeImplied && isAIPredictedHome && (prediction.winProbability * 100) > homeImplied;
 
+  const isTopPick = prediction && prediction.winner && prediction.winner.toUpperCase() !== "PASS" && (prediction.confidence || 0) >= 7;
+
   return (
     <div 
       id={`game-${game.id}`}
@@ -212,123 +218,118 @@ export const GameCard: React.FC<GameCardProps> = ({
         className="cursor-pointer hover:bg-slate-800/30 transition-colors"
         onClick={handleCardClick}
       >
-        <div className="p-3 sm:p-4 border-b border-slate-800/50 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900/50 gap-3">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="p-2 sm:p-3 border-b border-slate-800/50 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900/50 gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             {isAdminUser && onToggleSelection && (
               <div 
-                className="mr-2 flex items-center justify-center"
+                className="mr-1 flex items-center justify-center"
                 onClick={(e) => {
                   e.stopPropagation();
                   onToggleSelection();
                 }}
               >
                 <div className={cn(
-                  "w-5 h-5 rounded border flex items-center justify-center transition-all cursor-pointer",
+                  "w-4 h-4 rounded border flex items-center justify-center transition-all cursor-pointer",
                   isSelected 
                     ? "bg-indigo-600 border-indigo-500 shadow-lg shadow-indigo-500/20" 
                     : "bg-slate-800 border-slate-700 hover:border-slate-600"
                 )}>
-                  {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                  {isSelected && <CheckCircle2 className="w-3 h-3 text-white" />}
                 </div>
               </div>
             )}
-            <span className="bg-slate-800 text-slate-400 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border border-slate-700/50">
+            <span className="bg-slate-800 text-slate-400 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider border border-slate-700/50">
               {game.league}
             </span>
             <span className={cn(
-              "text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border",
+              "text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider border",
               game.status === 'live' 
                 ? "bg-red-500/10 text-red-400 border-red-500/20 animate-pulse" 
                 : "bg-slate-800 text-slate-500 border-slate-700/50"
             )}>
               {game.status}
             </span>
-            <span title="This card displays game details, market expectations, and AI-driven analysis for the matchup.">
-              <Info className="w-3 h-3 text-slate-500 cursor-help" />
-            </span>
             {hasInjuries && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-amber-500/10 text-amber-500 border-amber-500/20 flex items-center">
-                <AlertTriangle className="w-3 h-3 mr-1" />
-                {prediction?.injuries?.length} Injuries
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider border bg-amber-500/10 text-amber-500 border-amber-500/20 flex items-center">
+                <AlertTriangle className="w-2.5 h-2.5 mr-1" />
+                {prediction?.injuries?.length}
               </span>
             )}
             {edge !== null && edge > 0.05 && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-emerald-500/10 text-emerald-400 border-emerald-500/20 flex items-center animate-pulse">
-                <Zap className="w-3 h-3 mr-1" />
-                +{(edge * 100).toFixed(0)}% Edge
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider border bg-emerald-500/10 text-emerald-400 border-emerald-500/20 flex items-center animate-pulse">
+                <Zap className="w-2.5 h-2.5 mr-1" />
+                +{(edge * 100).toFixed(0)}%
               </span>
             )}
-            {prediction?.qaStatus === 'flagged' && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-rose-500/10 text-rose-400 border-rose-500/20 flex items-center">
-                <AlertTriangle className="w-3 h-3 mr-1" />
-                QA Flagged
-              </span>
-            )}
-            {prediction?.qaStatus === 'corrected' && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-indigo-500/10 text-indigo-400 border-indigo-500/20 flex items-center">
-                <ShieldCheck className="w-3 h-3 mr-1" />
-                QA Corrected
+            {isTopPick && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider border bg-indigo-500/10 text-indigo-400 border-indigo-500/20 flex items-center">
+                <Sparkles className="w-2.5 h-2.5 mr-1" />
+                TOP PICK
               </span>
             )}
           </div>
-          <div className="flex items-center space-x-2 text-slate-500 text-[10px] font-mono w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 border-slate-800/50 pt-2 sm:pt-0 overflow-hidden">
+          <div className="flex items-center space-x-2 text-slate-500 text-[9px] font-mono w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 border-slate-800/50 pt-1.5 sm:pt-0 overflow-hidden">
             <div className="flex items-center truncate">
-              <Calendar className="w-3 h-3 mr-1 opacity-50 flex-shrink-0" />
+              <Calendar className="w-2.5 h-2.5 mr-1 opacity-50 flex-shrink-0" />
               <span className="truncate">{formattedDate}</span>
             </div>
             <div className="flex items-center flex-shrink-0">
-              <Clock className="w-3 h-3 mr-1 opacity-50 flex-shrink-0" />
+              <Clock className="w-2.5 h-2.5 mr-1 opacity-50 flex-shrink-0" />
               <span>{game.time}</span>
             </div>
           </div>
         </div>
 
-        <div className="p-4 space-y-4">
+        <div className="p-3 space-y-2">
           {/* Away Team Row */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center p-1 border border-slate-700/50">
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center p-1 border border-slate-700/50">
                 {game.awayLogo ? (
                   <img src={game.awayLogo} alt={game.awayTeam} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                 ) : (
-                  <div className="text-slate-600 font-bold text-xs">{game.awayTeam.substring(0, 2)}</div>
+                  <div className="text-slate-600 font-bold text-[10px]">{game.awayTeam.substring(0, 2)}</div>
                 )}
               </div>
               <div>
                 <div className="flex items-center overflow-hidden">
                   <h3 className={cn(
-                    "text-base font-bold transition-colors truncate",
+                    "text-sm font-bold transition-colors truncate",
                     isAIPredictedAway ? "text-indigo-400" : "text-white"
                   )}>
                     {game.awayTeam}
                   </h3>
                   {isAIPredictedAway && (
-                    <div className="flex items-center ml-2 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">
-                      <Brain className="w-3 h-3 text-indigo-400 mr-1" />
-                      <span className="text-[8px] font-black text-indigo-400 uppercase tracking-tighter">AI PICK</span>
+                    <div className="flex items-center ml-1.5 bg-indigo-500/10 px-1 py-0.5 rounded border border-indigo-500/20">
+                      <Brain className="w-2.5 h-2.5 text-indigo-400 mr-1" />
+                      <span className="text-[7px] font-black text-indigo-400 uppercase tracking-tighter">PICK</span>
                     </div>
                   )}
                 </div>
-                {game.awayTeamStats && (
-                  <div className="text-[10px] text-slate-500 font-mono flex flex-wrap items-center mt-1 gap-x-3 gap-y-1">
-                    <span className="bg-slate-800/50 px-2 py-0.5 rounded border border-slate-700/30 text-slate-400 font-bold">{game.awayTeamStats.record}</span>
-                    {game.awayTeamStats.winPercentage && <span className="text-slate-500">Win%: <span className="text-slate-400 font-bold">{game.awayTeamStats.winPercentage}</span></span>}
-                    {game.awayTeamStats.last5 !== "N/A" && <span className="text-slate-500">Last 5: <span className="text-slate-400 font-bold">{game.awayTeamStats.last5}</span></span>}
-                    {game.awayTeamStats.vsExp && <span className="text-slate-500">vs Exp: <span className="text-slate-400 font-bold">{game.awayTeamStats.vsExp}</span></span>}
+                {isExpanded && game.awayTeamStats && (
+                  <div className="text-[9px] text-slate-500 font-mono flex flex-wrap items-center mt-0.5 gap-x-2 gap-y-0.5">
+                    <span className="text-slate-400 font-bold">{game.awayTeamStats.record}</span>
+                    {game.awayTeamStats.winPercentage && <span className="text-slate-500">W%: <span className="text-slate-400">{game.awayTeamStats.winPercentage}</span></span>}
+                    {game.awayTeamStats.last5 !== "N/A" && <span className="text-slate-500">L5: <span className="text-slate-400">{game.awayTeamStats.last5}</span></span>}
                   </div>
+                )}
+                {!isExpanded && game.awayTeamStats && (
+                   <div className="text-[9px] text-slate-500 font-mono mt-0.5">
+                      <span className="text-slate-400 font-bold">{game.awayTeamStats.record}</span>
+                   </div>
                 )}
               </div>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
               {game.status === 'finished' && (
-                <span className="text-xl font-black text-white font-mono">{game.awayScore}</span>
+                <span className="text-lg font-black text-white font-mono">{game.awayScore}</span>
               )}
               {awayExpectation !== null && (
                 <div className={cn(
-                  "px-2 py-1 rounded border min-w-[50px] text-center",
+                  "px-1.5 py-0.5 rounded border min-w-[40px] text-center",
                   isAwayFav ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-500" : "bg-slate-800/50 border-slate-700/50 text-slate-400"
                 )}>
-                  <span className="text-xs font-mono font-bold">{(awayExpectation * 100).toFixed(0)}¢</span>
+                  <span className="text-[10px] font-mono font-bold">{(awayExpectation * 100).toFixed(0)}¢</span>
                 </div>
               )}
             </div>
@@ -336,49 +337,53 @@ export const GameCard: React.FC<GameCardProps> = ({
 
           {/* Home Team Row */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center p-1 border border-slate-700/50">
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center p-1 border border-slate-700/50">
                 {game.homeLogo ? (
                   <img src={game.homeLogo} alt={game.homeTeam} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                 ) : (
-                  <div className="text-slate-600 font-bold text-xs">{game.homeTeam.substring(0, 2)}</div>
+                  <div className="text-slate-600 font-bold text-[10px]">{game.homeTeam.substring(0, 2)}</div>
                 )}
               </div>
               <div>
                 <div className="flex items-center overflow-hidden">
                   <h3 className={cn(
-                    "text-base font-bold transition-colors truncate",
+                    "text-sm font-bold transition-colors truncate",
                     isAIPredictedHome ? "text-indigo-400" : "text-white"
                   )}>
                     {game.homeTeam}
                   </h3>
                   {isAIPredictedHome && (
-                    <div className="flex items-center ml-2 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">
-                      <Brain className="w-3 h-3 text-indigo-400 mr-1" />
-                      <span className="text-[8px] font-black text-indigo-400 uppercase tracking-tighter">AI PICK</span>
+                    <div className="flex items-center ml-1.5 bg-indigo-500/10 px-1 py-0.5 rounded border border-indigo-500/20">
+                      <Brain className="w-2.5 h-2.5 text-indigo-400 mr-1" />
+                      <span className="text-[7px] font-black text-indigo-400 uppercase tracking-tighter">PICK</span>
                     </div>
                   )}
                 </div>
-                {game.homeTeamStats && (
-                  <div className="text-[10px] text-slate-500 font-mono flex flex-wrap items-center mt-1 gap-x-3 gap-y-1">
-                    <span className="bg-slate-800/50 px-2 py-0.5 rounded border border-slate-700/30 text-slate-400 font-bold">{game.homeTeamStats.record}</span>
-                    {game.homeTeamStats.winPercentage && <span className="text-slate-500">Win%: <span className="text-slate-400 font-bold">{game.homeTeamStats.winPercentage}</span></span>}
-                    {game.homeTeamStats.last5 !== "N/A" && <span className="text-slate-500">Last 5: <span className="text-slate-400 font-bold">{game.homeTeamStats.last5}</span></span>}
-                    {game.homeTeamStats.vsExp && <span className="text-slate-500">vs Exp: <span className="text-slate-400 font-bold">{game.homeTeamStats.vsExp}</span></span>}
+                {isExpanded && game.homeTeamStats && (
+                  <div className="text-[9px] text-slate-500 font-mono flex flex-wrap items-center mt-0.5 gap-x-2 gap-y-0.5">
+                    <span className="text-slate-400 font-bold">{game.homeTeamStats.record}</span>
+                    {game.homeTeamStats.winPercentage && <span className="text-slate-500">W%: <span className="text-slate-400">{game.homeTeamStats.winPercentage}</span></span>}
+                    {game.homeTeamStats.last5 !== "N/A" && <span className="text-slate-500">L5: <span className="text-slate-400">{game.homeTeamStats.last5}</span></span>}
                   </div>
+                )}
+                {!isExpanded && game.homeTeamStats && (
+                   <div className="text-[9px] text-slate-500 font-mono mt-0.5">
+                      <span className="text-slate-400 font-bold">{game.homeTeamStats.record}</span>
+                   </div>
                 )}
               </div>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
               {game.status === 'finished' && (
-                <span className="text-xl font-black text-white font-mono">{game.homeScore}</span>
+                <span className="text-lg font-black text-white font-mono">{game.homeScore}</span>
               )}
               {homeExpectation !== null && (
                 <div className={cn(
-                  "px-2 py-1 rounded border min-w-[50px] text-center",
+                  "px-1.5 py-0.5 rounded border min-w-[40px] text-center",
                   isHomeFav ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-500" : "bg-slate-800/50 border-slate-700/50 text-slate-400"
                 )}>
-                  <span className="text-xs font-mono font-bold">{(homeExpectation * 100).toFixed(0)}¢</span>
+                  <span className="text-[10px] font-mono font-bold">{(homeExpectation * 100).toFixed(0)}¢</span>
                 </div>
               )}
             </div>
@@ -387,29 +392,29 @@ export const GameCard: React.FC<GameCardProps> = ({
 
         {/* Injury Summary (Collapsed) */}
         {hasInjuries && !isExpanded && (
-          <div className="px-4 pb-3 pt-1">
-            <div className="flex flex-wrap gap-2">
-              {prediction?.injuries?.slice(0, 3).map((injury, idx) => {
+          <div className="px-3 pb-2 pt-0">
+            <div className="flex flex-wrap gap-1.5">
+              {prediction?.injuries?.slice(0, 2).map((injury, idx) => {
                 const status = (injury.status || 'Unknown').toLowerCase();
                 return (
-                  <span key={idx} className="text-[10px] bg-slate-800 text-slate-300 px-2 py-1 rounded border border-slate-700/50 flex items-center">
-                    <span className="font-medium mr-1">{injury.player}</span>
+                  <span key={idx} className="text-[9px] bg-slate-800/50 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700/30 flex items-center">
+                    <span className="font-medium mr-1 truncate max-w-[60px]">{injury.player}</span>
                     <span className={cn(
-                      "font-bold uppercase tracking-wider ml-1",
+                      "font-bold uppercase tracking-wider",
                       status === 'out' ? "text-rose-400" : 
                       status === 'doubtful' ? "text-amber-400" : 
                       status === 'probable' ? "text-indigo-400" :
                       status === 'in' ? "text-emerald-400" :
                       "text-slate-400"
                     )}>
-                      {injury.status}
+                      {injury.status?.substring(0, 3)}
                     </span>
                   </span>
                 );
               })}
-              {(prediction?.injuries?.length || 0) > 3 && (
-                <span className="text-[10px] bg-slate-800/50 text-slate-500 px-2 py-1 rounded border border-slate-800 flex items-center">
-                  +{(prediction?.injuries?.length || 0) - 3} more
+              {(prediction?.injuries?.length || 0) > 2 && (
+                <span className="text-[9px] text-slate-500 flex items-center ml-1">
+                  +{(prediction?.injuries?.length || 0) - 2}
                 </span>
               )}
             </div>
@@ -417,20 +422,20 @@ export const GameCard: React.FC<GameCardProps> = ({
         )}
 
         {/* Expand Indicator */}
-        <div className="px-4 py-2 bg-slate-900/30 flex justify-center items-center border-t border-slate-800/30 group-hover:bg-slate-800/50 transition-colors">
+        <div className="px-3 py-1.5 bg-slate-900/30 flex justify-center items-center border-t border-slate-800/30 group-hover:bg-slate-800/50 transition-colors">
           <div className={cn(
-            "flex items-center space-x-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors",
+            "flex items-center space-x-1 text-[9px] font-bold uppercase tracking-widest transition-colors",
             isExpanded ? "text-indigo-400" : "text-slate-600 group-hover:text-slate-400"
           )}>
-            <span>{isExpanded ? "View Less" : "View Analysis & Stats"}</span>
-            {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            <span>{isExpanded ? "Less" : "Analysis"}</span>
+            {isExpanded ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
           </div>
         </div>
 
         {/* Quick Action Bar */}
-        {(onReanalyze || game.marketExpectations || game.allSources) && (
+        {(onReanalyze || (isExpanded && (game.marketExpectations || game.allSources))) && (
           <div className="px-4 pb-4 pt-2">
-            {(game.marketExpectations || game.allSources) && (
+            {isExpanded && (game.marketExpectations || game.allSources) && (
               <div className="mb-3 p-2.5 bg-slate-800/40 rounded-lg border border-slate-700/50">
                 <div className="text-[9px] uppercase text-slate-500 font-bold mb-2 flex justify-between items-center">
                   <div className="flex items-center gap-2">
@@ -480,38 +485,64 @@ export const GameCard: React.FC<GameCardProps> = ({
                 </div>
               </div>
             )}
-            {isAdminUser && onReanalyze && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onReanalyze(game);
-              }}
-              disabled={isAnalyzing}
-              className={cn(
-                "w-full py-2.5 rounded-lg flex items-center justify-center transition-all font-bold text-sm shadow-lg disabled:opacity-50",
-                prediction 
-                  ? "bg-slate-700 hover:bg-slate-600 text-slate-200 shadow-slate-900/20" 
-                  : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/20"
-              )}
-            >
-              <Brain className={cn("w-4 h-4 mr-2", isAnalyzing && "animate-bounce")} />
-              {isAnalyzing ? "Analyzing..." : (prediction ? "Reanalyze Matchup" : "Analyze Matchup")}
-            </button>
-            )}
             {isAdminUser && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  console.log("Confirm Injuries");
-                }}
-                className="w-full py-2.5 mt-2 rounded-lg flex items-center justify-center transition-all font-bold text-sm bg-rose-600 hover:bg-rose-500 text-white shadow-rose-500/20"
-              >
-                <CheckCircle className="w-4 h-4 mr-2" />
-                Confirm Injuries
-              </button>
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                {onReanalyze && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onReanalyze(game);
+                    }}
+                    disabled={isAnalyzing}
+                    className={cn(
+                      "py-2.5 rounded-lg flex items-center justify-center transition-all font-bold text-xs shadow-lg disabled:opacity-50",
+                      prediction 
+                        ? "bg-slate-700 hover:bg-slate-600 text-slate-200 shadow-slate-900/20" 
+                        : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/20"
+                    )}
+                    title={prediction ? "Reanalyze Matchup" : "Analyze Matchup"}
+                  >
+                    <Brain className={cn("w-3.5 h-3.5 mr-1.5", isAnalyzing && "animate-bounce")} />
+                    {isAnalyzing ? "..." : (prediction ? "Reanalyze" : "Analyze")}
+                  </button>
+                )}
+                {onCheckInjuries && (
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      setCheckingInjuries(true);
+                      try {
+                        await onCheckInjuries(game);
+                      } catch (err) {
+                        console.error("Error checking injuries:", err);
+                      } finally {
+                        setCheckingInjuries(false);
+                      }
+                    }}
+                    disabled={checkingInjuries}
+                    className={cn(
+                      "py-2.5 rounded-lg flex items-center justify-center transition-all font-bold text-xs bg-rose-600 hover:bg-rose-500 text-white shadow-rose-500/20 disabled:opacity-50",
+                      checkingInjuries && "animate-pulse"
+                    )}
+                    title="Check latest injury report"
+                  >
+                    {checkingInjuries ? (
+                      <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <Activity className="w-3.5 h-3.5 mr-1.5" />
+                    )}
+                    {checkingInjuries ? "Checking..." : "Injuries"}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}
+      </div>
+
+      {/* Expand/Collapse Indicator */}
+      <div className="absolute bottom-2 right-4 text-slate-600">
+        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
       </div>
 
       {/* Collapsible Content */}
@@ -643,7 +674,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                     prediction.outcome === 'incorrect' ? "text-red-300 line-through decoration-red-500/50" :
                     "text-indigo-300"
                   )}>
-                    {prediction.confidence < 5 ? "PASS (Too Close to Call)" : prediction.winner}
+                    {prediction.confidence < 3 ? "PASS (Too Close to Call)" : prediction.winner}
                   </span>
                   
                   {prediction.outcome === 'incorrect' && prediction.actualWinner && (
@@ -726,18 +757,35 @@ export const GameCard: React.FC<GameCardProps> = ({
                   </div>
                 )}
 
-                {/* Projected Score */}
-                {prediction.scorePrediction && (
-                  <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 mb-4 shadow-lg shadow-slate-950/20">
-                    <div className="text-[10px] uppercase text-slate-500 font-black mb-2 tracking-widest">Score Projection</div>
-                    <div className="text-lg font-mono font-bold text-white">
-                      {prediction.scorePrediction.away} - {prediction.scorePrediction.home}
-                      {prediction.actualScore && (
-                         <span className="ml-3 text-slate-500 text-sm font-normal">
-                           (Actual: {prediction.actualScore.away} - {prediction.actualScore.home})
-                         </span>
-                      )}
-                    </div>
+                {/* Projected Score & Totals */}
+                {(prediction.scorePrediction || prediction.projectedTotal) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                    {prediction.scorePrediction && (
+                      <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 shadow-lg shadow-slate-950/20">
+                        <div className="text-[10px] uppercase text-slate-500 font-black mb-2 tracking-widest">Score Projection</div>
+                        <div className="text-lg font-mono font-bold text-white">
+                          {prediction.scorePrediction.away} - {prediction.scorePrediction.home}
+                          {prediction.actualScore && (
+                             <span className="ml-3 text-slate-500 text-sm font-normal">
+                               (Actual: {prediction.actualScore.away} - {prediction.actualScore.home})
+                             </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {prediction.projectedTotal && (
+                      <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 shadow-lg shadow-slate-950/20">
+                        <div className="text-[10px] uppercase text-slate-500 font-black mb-2 tracking-widest">Total Runs / Points</div>
+                        <div className="text-lg font-mono font-bold text-indigo-400">
+                          {prediction.projectedTotal}
+                          {prediction.recommendedTotalLine && (
+                            <span className="ml-2 text-[10px] text-emerald-400 font-bold uppercase tracking-tighter bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                              {prediction.recommendedTotalLine}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -814,18 +862,33 @@ export const GameCard: React.FC<GameCardProps> = ({
                     </h4>
                     <div className="space-y-3">
                       {prediction.previousMatchups.map((match, idx) => (
-                        <div key={idx} className="flex justify-between items-center text-xs border-b border-slate-800/30 last:border-0 pb-2 last:pb-0 hover:bg-slate-800/20 px-2 -mx-2 rounded transition-colors">
-                          <span className="text-slate-500 font-bold uppercase tracking-tighter">{match.date}</span>
-                          <div className="flex items-center gap-3">
-                            <span className="text-slate-300 font-mono font-bold">
-                              {match.awayTeam} {match.awayScore} - {match.homeScore} {match.homeTeam}
-                            </span>
-                            {match.awayScore > match.homeScore ? (
-                              <span className="text-[8px] bg-indigo-500/10 text-indigo-400 px-1 py-0.5 rounded border border-indigo-500/20 font-black uppercase tracking-tighter">AWAY W</span>
-                            ) : match.homeScore > match.awayScore ? (
-                              <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1 py-0.5 rounded border border-emerald-500/20 font-black uppercase tracking-tighter">HOME W</span>
-                            ) : null}
+                        <div key={idx} className="flex flex-col border-b border-slate-800/30 last:border-0 pb-2 last:pb-0 hover:bg-slate-800/20 px-2 -mx-2 rounded transition-colors">
+                          <div className="flex justify-between items-center text-xs">
+                            <div className="flex flex-col">
+                              <span className="text-slate-500 font-bold uppercase tracking-tighter">{match.date}</span>
+                              {game.league === 'NBA' && match.date.startsWith('2026') && (
+                                <span className="text-[8px] text-indigo-400 font-black uppercase tracking-tighter">2026 Season</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-slate-300 font-mono font-bold">
+                                {match.awayTeam} {match.awayScore} - {match.homeScore} {match.homeTeam}
+                              </span>
+                              {match.awayScore > match.homeScore ? (
+                                <span className="text-[8px] bg-indigo-500/10 text-indigo-400 px-1 py-0.5 rounded border border-indigo-500/20 font-black uppercase tracking-tighter">AWAY W</span>
+                              ) : match.homeScore > match.awayScore ? (
+                                <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1 py-0.5 rounded border border-emerald-500/20 font-black uppercase tracking-tighter">HOME W</span>
+                              ) : null}
+                            </div>
                           </div>
+                          {match.lineupChanges && (
+                            <div className="mt-1 flex items-center gap-1.5">
+                              <div className="w-1 h-1 rounded-full bg-indigo-500/40" />
+                              <span className="text-[9px] text-slate-500 italic leading-tight">
+                                {match.lineupChanges}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -883,6 +946,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                                 "w-1.5 h-8 rounded-full shrink-0",
                                 status === 'out' ? "bg-rose-500" : 
                                 status === 'doubtful' ? "bg-amber-500" : 
+                                status === 'questionable' || status === 'gtd' ? "bg-orange-500" :
                                 status === 'probable' ? "bg-indigo-500" :
                                 status === 'in' ? "bg-emerald-500" :
                                 "bg-slate-700"
@@ -897,6 +961,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                                 "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded border",
                                 status === 'out' ? "bg-rose-500/10 text-rose-400 border-rose-500/20" : 
                                 status === 'doubtful' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : 
+                                status === 'questionable' || status === 'gtd' ? "bg-orange-500/10 text-orange-400 border-orange-500/20" :
                                 status === 'probable' ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
                                 status === 'in' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
                                 "bg-slate-800 text-slate-400 border-slate-700"
@@ -904,7 +969,12 @@ export const GameCard: React.FC<GameCardProps> = ({
                                 {injury.status}
                               </span>
                               {injury.impact && (
-                                <span className="text-[9px] text-slate-500 mt-1 italic max-w-[120px] truncate">{injury.impact}</span>
+                                <span className="text-[9px] text-slate-500 mt-1 italic max-w-[150px] truncate">{injury.impact}</span>
+                              )}
+                              {(injury.source_name || injury.source_timestamp) && (
+                                <span className="text-[8px] text-slate-600 mt-0.5 font-mono uppercase tracking-tighter">
+                                  [Source: {injury.source_name || 'Unknown'}, {injury.source_timestamp || 'N/A'}]
+                                </span>
                               )}
                             </div>
                           </div>

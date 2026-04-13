@@ -290,6 +290,11 @@ export function PredictionModal({ game, prediction, onClose }: PredictionModalPr
                           </span>
                         )}
                       </div>
+                      {(injury.source_name || injury.source_timestamp) && (
+                        <div className="text-[8px] text-slate-500 mt-1 font-mono uppercase tracking-tighter text-right">
+                          [Source: {injury.source_name || 'Unknown'}, {injury.source_timestamp || 'N/A'}]
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>

@@ -3,6 +3,7 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithRedirect,
+  signInWithPopup,
   getRedirectResult,
   signOut,
   User,
@@ -133,7 +134,7 @@ export interface LoginResult {
 
 export async function loginWithGoogle(): Promise<LoginResult> {
   const auth = getAuthInstance();
-  console.log('[Auth] Starting Google sign-in flow (Redirect)');
+  console.log('[Auth] Starting Google sign-in flow (Popup)');
 
   try {
     try {
@@ -146,12 +147,11 @@ export async function loginWithGoogle(): Promise<LoginResult> {
       }
     }
 
-    document.cookie = 'redirect_login_pending=true; path=/; max-age=300; SameSite=Lax';
-    await signInWithRedirect(auth, googleProvider);
+    await signInWithPopup(auth, googleProvider);
     return { success: true };
   } catch (error: any) {
-    console.error('[Auth] signInWithRedirect failed:', error.code, error.message);
-    await logLoginError(error, 'signInWithRedirect');
+    console.error('[Auth] signInWithPopup failed:', error.code, error.message);
+    await logLoginError(error, 'signInWithPopup');
     return { success: false, error: error.message, code: error.code };
   }
 }

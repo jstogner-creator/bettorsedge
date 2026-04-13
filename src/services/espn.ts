@@ -51,14 +51,14 @@ class ESPNService {
     // However, ESPN's scoreboard API is usually slate-based for a single date.
     const url = `/api/espn/schedule?sport=${config.sport}&league=${config.league}&dateStr=${dateStr}`;
     
-    const fetchWithRetry = async (retries = 2, delay = 2000): Promise<Game[]> => {
+    const fetchWithRetry = async (retries = 3, delay = 2000): Promise<Game[]> => {
       try {
         const token = await getIdToken();
         console.log(`[ESPN] getSchedule: token present: ${!!token}`);
         console.log(`[ESPN] Fetching schedule via proxy: ${url}`);
         
         const response = await axios.get(url, { 
-          timeout: 25000,
+          timeout: 30000, // Increased to 30s
           headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
         const data = response.data;
@@ -73,19 +73,6 @@ class ESPNService {
         const games = data.events.map((event: any) => {
           const competition = event.competitions?.[0];
           if (!competition) return null;
-
-          // Filter by date in ET to ensure it matches the requested slate
-          const gameDate = new Date(event.date);
-          const gameEtParts = etFormatter.formatToParts(gameDate);
-          const gYear = gameEtParts.find(p => p.type === 'year')?.value;
-          const gMonth = gameEtParts.find(p => p.type === 'month')?.value;
-          const gDay = gameEtParts.find(p => p.type === 'day')?.value;
-          const gDateStr = `${gYear}${gMonth}${gDay}`;
-
-          if (gDateStr !== dateStr) {
-            console.log(`[ESPN] Skipping game ${event.name} (${event.date}) - belongs to slate ${gDateStr}, not ${dateStr}`);
-            return null;
-          }
 
           const competitors = competition.competitors || [];
           const home = competitors.find((c: any) => c.homeAway === "home");
@@ -132,8 +119,12 @@ class ESPNService {
         this.cache.set(cacheKey, { data: games, timestamp: Date.now() });
         return games;
       } catch (error: any) {
-        if (error.response?.status === 429 && retries > 0) {
-          console.warn(`[ESPN] Rate limited (429). Retrying in ${delay}ms... (${retries} left)`);
+        const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
+        const isRateLimit = error.response?.status === 429;
+        const isNetworkError = !error.response;
+
+        if ((isRateLimit || isTimeout || isNetworkError) && retries > 0) {
+          console.warn(`[ESPN] Fetch failed (${isTimeout ? 'Timeout' : isRateLimit ? 'Rate Limit' : 'Network Error'}). Retrying in ${delay}ms... (${retries} left)`);
           await new Promise(resolve => setTimeout(resolve, delay));
           return fetchWithRetry(retries - 1, delay * 2);
         }

@@ -74,11 +74,15 @@ export interface Prediction {
     player: string;
     status: string;
     impact?: string;
+    source_name?: string;
+    source_timestamp?: string;
   }[];
   scorePrediction?: {
     home: number;
     away: number;
   };
+  projectedTotal?: number;
+  recommendedTotalLine?: string;
   matchupRankings?: {
     homeRank: number | string;
     awayRank: number | string;
@@ -99,6 +103,7 @@ export interface Prediction {
     awayScore: number;
     homeTeam: string;
     awayTeam: string;
+    lineupChanges?: string;
   }[];
   
   // Simulation Data

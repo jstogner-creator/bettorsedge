@@ -14,6 +14,7 @@ interface GameGridProps {
   onToggleGameSelection: (gameId: string) => void;
   onToggleAllGames: () => void;
   handleReanalyzeSingleGame: (game: Game) => void;
+  onCheckInjuries?: (game: Game) => void;
   handleDiscussWithSnark: (game: Game) => void;
 }
 
@@ -61,6 +62,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
   onToggleGameSelection,
   onToggleAllGames,
   handleReanalyzeSingleGame,
+  onCheckInjuries,
   handleDiscussWithSnark,
 }) => {
   if (loading) {
@@ -98,6 +100,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
             prediction={game.id ? savedPredictions[game.id] : null}
             isAnalyzing={analyzing && analysisProgress?.analyzingGameIds?.includes(game.id)}
             onReanalyze={handleReanalyzeSingleGame}
+            onCheckInjuries={onCheckInjuries}
             onDiscuss={() => handleDiscussWithSnark(game)}
             isAdminUser={isAdminUser}
             isSelected={selectedGameIds.has(game.id)}

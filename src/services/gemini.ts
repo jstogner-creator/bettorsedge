@@ -1,11 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
+import { format } from "date-fns";
+import { getNYDate } from "../lib/utils";
 import { getDb, getIdToken } from "../firebase";
 import { doc, getDoc, setDoc, addDoc, collection, query, where, getDocs, limit, orderBy } from "firebase/firestore";
 import { Game, Prediction, TournamentBracket } from "../types";
 import { logError, logApiCall, logSourceAudit } from "./logger";
 import { espnService } from "./espn";
 import { apiSportsService } from "./apiSports";
+import { apiSportsMlbService } from "./apiSportsMlb";
 import { NBA_ROSTER_DATABASE, GLOBAL_INJURY_LINKS, GLOBAL_ROSTER_LINKS } from "../data/nbaRosters";
 import { handleFirestoreError, OperationType } from "../lib/firestoreErrors";
 
@@ -55,7 +58,7 @@ function getOpenAIClient(): OpenAI | null {
 export class BettorsEdge {
   // Using the latest pro model for best reasoning and data synthesis
   private getModel() {
-    return localStorage.getItem("gemini_model") || "gemini-3-flash-preview";
+    return localStorage.getItem("gemini_model") || "gemini-3.1-flash-lite-preview";
   }
   
   private getOpenAIModel() {
@@ -503,7 +506,7 @@ export class BettorsEdge {
   async getDailySchedule(league: string, date: string, force: boolean = false): Promise<any[]> {
     const docId = `${league}-${date}`;
     const scheduleRef = doc(getDb(), "schedules", docId);
-    const today = new Date().toDateString();
+    const today = getNYDate().toDateString();
 
     try {
       // Check Firestore first unless force is true
@@ -668,7 +671,8 @@ export class BettorsEdge {
         // CRITICAL: Filter to ensure AI only returned games for the requested date
         // This prevents the AI from returning old games (e.g. from 2 days ago)
         if (game.date) {
-          const gDate = String(game.date).split('T')[0];
+          // Robust date extraction: split by 'T', ' ', or just take the first 10 chars
+          const gDate = String(game.date).split(/[T ]/)[0];
           if (gDate !== date) {
             console.warn(`[AI] Filtering out wrong-date game: ${game.awayTeam} @ ${game.homeTeam} (${gDate} vs ${date})`);
             return false;
@@ -866,12 +870,11 @@ export class BettorsEdge {
     const lastUpdated = new Date(prediction.lastUpdated).getTime();
     const ageMs = now - lastUpdated;
 
-    // If prediction is more than 6 hours old, re-analyze (more stable for daily runs)
-    if (ageMs > 21600000) return true;
+    // If prediction is more than 12 hours old, re-analyze (stable for daily runs)
+    if (ageMs > 43200000) return true;
     
-    // If confidence is low (< 7) and it's been more than 2 hours, try again
-    // This allows the AI to try and find better data as the game gets closer
-    if (prediction.confidence < 7 && ageMs > 7200000) return true;
+    // If confidence is low (< 7) and it's been more than 4 hours, try again
+    if (prediction.confidence < 7 && ageMs > 14400000) return true;
     
     return false;
   }
@@ -928,7 +931,7 @@ export class BettorsEdge {
       const useOpenAI = this.shouldUseOpenAI();
       
       // Ensure we have a valid date for the prompt
-      const gameDateStr = dateStr || game.date || new Date().toISOString().split('T')[0];
+      const gameDateStr = dateStr || game.date || format(getNYDate(), "yyyy-MM-dd");
       
       // Format date to be more human readable for the AI to avoid "unrecognized date" issues
       let formattedDate = gameDateStr;
@@ -972,7 +975,7 @@ export class BettorsEdge {
         })
         .catch(e => { console.warn("Failed to fetch previous matchups", e); return []; });
 
-      const yesterday = new Date();
+      const yesterday = getNYDate();
       yesterday.setDate(yesterday.getDate() - 1);
       const yesterdayPromise = espnService.getSchedule(game.league, yesterday)
         .then(games => games.filter(g => g.status === 'finished'))
@@ -983,12 +986,17 @@ export class BettorsEdge {
       let apiSportsHomeInjuriesPromise = Promise.resolve([]);
       let apiSportsAwayInjuriesPromise = Promise.resolve([]);
 
-      if (game.league === 'NBA' && game.apiSportsHomeTeamId && game.apiSportsAwayTeamId) {
-        const season = new Date().getFullYear().toString(); // Basic season logic
-        apiSportsHomeStatsPromise = apiSportsService.getTeamStats(game.apiSportsHomeTeamId, season);
-        apiSportsAwayStatsPromise = apiSportsService.getTeamStats(game.apiSportsAwayTeamId, season);
-        apiSportsHomeInjuriesPromise = apiSportsService.getInjuries(game.apiSportsHomeTeamId, season);
-        apiSportsAwayInjuriesPromise = apiSportsService.getInjuries(game.apiSportsAwayTeamId, season);
+      if ((game.league === 'NBA' || game.league === 'MLB') && game.apiSportsHomeTeamId && game.apiSportsAwayTeamId) {
+        const season = getNYDate().getFullYear().toString(); // Basic season logic
+        if (game.league === 'NBA') {
+          apiSportsHomeStatsPromise = apiSportsService.getTeamStats(game.apiSportsHomeTeamId, season);
+          apiSportsAwayStatsPromise = apiSportsService.getTeamStats(game.apiSportsAwayTeamId, season);
+          apiSportsHomeInjuriesPromise = apiSportsService.getInjuries(game.apiSportsHomeTeamId, season);
+          apiSportsAwayInjuriesPromise = apiSportsService.getInjuries(game.apiSportsAwayTeamId, season);
+        } else {
+          apiSportsHomeStatsPromise = apiSportsMlbService.getOdds({ game: game.apiSportsHomeTeamId, season });
+          apiSportsAwayStatsPromise = apiSportsMlbService.getOdds({ game: game.apiSportsAwayTeamId, season });
+        }
       }
 
       const [
@@ -1060,70 +1068,43 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
       `;
 
       const leagueSpecificContext = game.league === 'NCAA' 
-        ? "NCAA Men's Basketball: Consider team rankings (AP/Coaches), conference standings, home-court advantage (often more significant in college), coaching styles, and potential 'trap' games. Pay close attention to player eligibility, transfer portal impacts, and significant injuries to key starters."
+        ? "NCAA: Focus on rankings, home-court edge, coaching, and transfer portal/injury impact."
         : game.league === 'NBA'
-        ? `NBA: Analyze player availability, rest schedules, and travel fatigue. Use your search tool to find the latest injury data. You MUST check the Official NBA Injury Report and the specific NBA injury report on Rotowire (https://www.rotowire.com/basketball/injury-report.php). To verify team rosters and player assignments, use the ESPN NBA Players directory (https://www.espn.com/nba/players). There is also a dedicated Google Drive injury report folder (https://drive.google.com/drive/folders/1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9?usp=sharing) that contains a file named 'NBA_Injury_Report_Latest' which is your primary source of truth. If any specific source is unavailable, synthesize the best available information from other reputable sports news outlets to provide a complete analysis. IMPORTANT: Do NOT explicitly mention the Google Drive link in your final output; simply use the information to inform your PSI (Point Spread Impact) calculations. ${game.homeTeam.includes('Pistons') || game.awayTeam.includes('Pistons') ? "DETROIT PISTONS SPECIAL ALERT: There have been reports of conflicting injury data for the Pistons. You MUST be extremely thorough in verifying their injury report today. If a player is listed as 'Out' in any recent reports, do NOT mark them as 'In' unless there is a definitive, official update from today." : ""}`
+        ? `NBA: CRITICAL - It is April 2026. Regular season end. Star players (LeBron, AD, Steph, Luka Doncic, etc.) are frequently rested. You MUST verify the "Official NBA Injury Report" and look for "GTD", "Questionable", or "Late Scratch" news. If a star like Luka Doncic (often called Luke/Luka) is out, it MUST be reflected in the injuries and win probability. H2H RULE: ONLY include 2026 games.`
         : game.league === 'NHL'
-        ? "NHL: CRITICAL - Identify the starting goalies for both teams. Goalie performance is the most significant factor in NHL outcomes. Consider power play (PP%) and penalty kill (PK%) efficiency, shot volume (Corsi/Fenwick), and travel fatigue (especially on back-to-backs)."
+        ? "NHL: Focus on starting goalies, PP/PK%, and Corsi/Fenwick."
         : game.league === 'MLB'
-        ? "MLB: CRITICAL - Identify the starting pitchers for both teams. Pitching is the primary driver of MLB outcomes. Analyze starting pitcher advanced metrics: FIP (Fielding Independent Pitching), xERA, WHIP, K/9, and BB/9. Prioritize xERA and Barrel% allowed to identify regression candidates. Consider bullpen rest status (explicitly check if high-leverage arms like the Closer or Primary Setup men have pitched in 2 or 3 consecutive days), lineup vs. pitcher handedness (L/R splits, wRC+ vs. L/R), park factors (stadium dimensions, altitude, current weather impact on ball flight - temperature and humidity), and umpire tendencies (assigned home plate umpire's strike zone personality, Runs Per Game, and SO/BB ratios). Wind direction at parks like Wrigley Field is a major factor for Total runs. Also factor in Base Running (Sprint Speed, Stolen Base Success) vs. opposing catcher's Pop Time. Use Statcast data for exit velocity, launch angle, and expected batting average (xBA) for key hitters. Analyze team wRC+ in high-leverage situations and recent 7-day rolling offensive trends."
+        ? "MLB: Focus on SP xERA/Barrel%, bullpen rest, L/R splits, park/weather (wind!), and umpire RPG. For Totals, provide a 'projectedTotal' and a 'recommendedTotalLine' with a 1.5-run cushion (e.g., if projected is 8, recommend Under 9.5)."
         : game.league === 'NFL'
-        ? "NFL: CRITICAL - Analyze Quarterback (QB) performance and health. The QB is the most impactful player on the field. Consider offensive and defensive line matchups (Sacks, Pressure Rate), key skill position injuries (WR1, RB1), and defensive secondary strength. Weather conditions (wind speed, precipitation, temperature) are vital for Total points and passing efficiency. Factor in home-field advantage, travel, and situational factors like rest/bye weeks."
+        ? "NFL: Focus on QB health, O-Line/D-Line matchups, and weather."
         : "";
 
-      const systemInstruction = `You are a world-class sports data analyst and data scientist. Your goal is to identify high-probability outcomes by finding discrepancies between your rigorous data-driven projections and consensus market data.
+      const systemInstruction = `You are an elite sports data scientist. Goal: Find high-EV outcomes by identifying market discrepancies.
 
 ${leagueSpecificContext}
 
-DATA INTEGRITY & ACCURACY:
-1. ZERO TOLERANCE FOR INCORRECT INJURY ADVICE: You MUST be 100% certain of a player's status before marking them as 'In'. If there is ANY conflicting information (e.g., one source says 'Out' and another says 'Clear'), you MUST prioritize the more conservative status ('Out' or 'Doubtful') and explain the discrepancy in your reasoning. A player who is 'Out' in several recent reports but 'Clear' in one should be treated as 'Out' unless there is an official team announcement confirming their return.
-2. ROSTER INTEGRITY: You MUST verify that every player you mention is currently on the active roster for the team you assign them to. 
-   - CRITICAL: You MUST use your search tool to confirm every player's current team. Do not rely on outdated information.
-   - If you are unsure of a player's current team, you MUST use your search tool to confirm their roster status.
-   - If a player is not on the roster for the game you are analyzing, DO NOT mention them as an advantage or factor for that team.
-2. DATA GROUNDING: Use your search tools to find the latest statistics, projections, and injury statuses. Synthesize information from multiple high-quality sources (Official reports, ESPN, Rotowire, CBS Sports). If a specific mandated link is not appearing in your search results, do not halt the analysis; instead, provide the most accurate projection possible based on the wealth of other available real-time data.
-3. SOURCE VERIFICATION: Prioritize official team reports or reputable sports news outlets (ESPN, Rotowire, CBS Sports).
-
-HANDLING DATA GAPS:
-- If a specific mandated link (like the Google Drive folder) is not directly accessible or does not appear in search results, do NOT halt the analysis or issue a 'PASS' based on information deficiency.
-- Instead, use your search tool to gather the most recent data from other high-quality sources (ESPN, Rotowire, official team Twitter/X accounts).
-- Your goal is to provide the most accurate, data-driven projection possible using the totality of available real-time information.
-- A 'PASS' is only for analytical uncertainty, not for lack of access to a specific URL.
-
-CORE ANALYTICAL FRAMEWORK:
-1. SITUATIONAL ANALYSIS: Factor in days of rest, travel distance, altitude, and "look-ahead" or "trap" game scenarios.
-2. ROSTER & INJURY IMPACT: Do not just list injuries; quantify the "Performance Impact Score" (PIS) of missing players. How does their absence affect the team's Net Rating?
-3. MARKET SENTIMENT: Analyze market trends. If the projections are shifting against the consensus, identify the underlying data driving the change.
-4. DEVIL'S ADVOCATE: You MUST explicitly argue AGAINST your primary conclusion. If you think Team A wins, what is the most likely path to victory for Team B?
-5. MONTE CARLO SIMULATION: Mentally run 10,000 simulations. Your winProbability MUST reflect the percentage of times the team wins in these simulations.
-6. MLB ADVANCED ANALYTICS: For MLB, you MUST explicitly mention starting pitcher xERA, Barrel%, and bullpen rest status in your reasoning. If the umpire has a significant trend (e.g., high RPG), factor that into your score prediction and Total projection.
-7. INJURY TERMINOLOGY: You MUST use consistent terminology for player statuses in the 'injuries' array. Use ONLY these four statuses: "In", "Out", "Doubtful", or "Probable". Do NOT use "Questionable", "GTD", or other variations.
-   - "In": Confirmed to play.
-   - "Out": Confirmed to miss the game.
-   - "Doubtful": Unlikely to play (approx. 25% chance).
-   - "Probable": Likely to play (approx. 75% chance).
-   - If a player is "Questionable", map them to "Doubtful" or "Probable" based on the latest reports.
-
-OPERATIONAL GUIDELINES: 
-1. Prioritize accuracy and data-driven reasoning. 
-2. UNCERTAINTY-BASED PASSING: A 'PASS' is reserved for matchups where the analytical edge is minimal (win probability 48-52%) or the market is perfectly efficient. Do NOT use 'PASS' as a way to avoid analysis due to perceived information gaps; your role is to provide the best possible data-driven estimate using all available search results.
-3. If winProbability >= 0.60, you MUST pick a winner.
-4. Always return valid JSON. IMPORTANT: Do NOT include a '+' sign before positive numbers in the JSON (e.g., use 105, NOT +105). This is a strict requirement for JSON validity.
-5. KEY ADVANTAGES: In the 'keyFactors' field, you MUST provide actual, specific advantages (e.g., 'Celtics have a +8 rebounding edge with Porzingis back' or 'Nuggets 3PT% vs. Zone Defense') rather than generic references or source mentions.
-6. PRIVACY: NEVER mention the Google Drive link or 'official injury report' in your 'reasoning', 'qaNotes', or 'marketSentiment'. Use the information silently to provide accurate status updates.`;
+RULES:
+1. INJURIES: Only report verified injuries. Format: Player Name — Status (Injury) [Source: name, timestamp]. If unverified, label "UNVERIFIED".
+2. ROSTERS: Verify 2025-26 active roster.
+3. ANALYSIS: Use situational factors, roster impact, market sentiment, and Monte Carlo simulations.
+4. DEVIL'S ADVOCATE: Argue against your primary pick.
+5. MLB: Focus on xERA, Barrel%, bullpen rest, and weather/park factors.
+6. NBA: Prioritize advanced metrics (Net Rating, Efficiency). H2H: ONLY 2026 games.
+7. OUTPUT: Ultra-concise JSON. No '+' for positive numbers. No fluff.
+8. DECISIVENESS: Only 'PASS' if 50/50. If winProbability > 50.5%, pick a winner.`;
 
       const leagueSearchQueries = game.league === 'NCAA'
-        ? `"current roster ${game.homeTeam} basketball", "current roster ${game.awayTeam} basketball", "NCAA basketball injury report rotowire", "college basketball market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "expert consensus college basketball today", "${game.homeTeam} vs ${game.awayTeam} head-to-head record basketball", "${game.homeTeam} vs ${game.awayTeam} last 5 games results", "individual player stats ${game.homeTeam} vs ${game.awayTeam} basketball"`
+        ? `"current roster and injury report ${game.homeTeam} vs ${game.awayTeam} basketball", "NCAA basketball market expectations and expert consensus ${game.homeTeam} vs ${game.awayTeam}", "${game.homeTeam} vs ${game.awayTeam} h2h record and last 5 games basketball"`
         : game.league === 'NHL'
-        ? `"starting goalie ${game.homeTeam} today", "starting goalie ${game.awayTeam} today", "NHL injury report ${game.homeTeam}", "NHL market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "NHL expert consensus today", "${game.homeTeam} vs ${game.awayTeam} head-to-head record NHL", "NHL team defensive ratings today", "NHL player stats leaders ${game.homeTeam} vs ${game.awayTeam}"`
+        ? `"starting goalies and injury report ${game.homeTeam} vs ${game.awayTeam} today", "NHL market expectations and defensive ratings ${game.homeTeam} vs ${game.awayTeam}", "${game.homeTeam} vs ${game.awayTeam} h2h record and player stats leaders"`
         : game.league === 'MLB'
-        ? `"starting pitcher ${game.homeTeam} vs ${game.awayTeam} today", "MLB starting pitchers today ${game.homeTeam}", "MLB xERA and Barrel% ${game.homeTeam} vs ${game.awayTeam}", "MLB injury report ${game.homeTeam}", "MLB lineup ${game.homeTeam} today", "weather report for ${game.location} today", "MLB bullpen rest status high-leverage arms ${game.homeTeam}", "MLB umpire assignment today ${game.homeTeam}", "MLB market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "MLB advanced stats starting pitchers ${game.homeTeam} vs ${game.awayTeam}", "Statcast park factors ${game.location} MLB", "MLB pitcher vs batter matchups ${game.homeTeam} vs ${game.awayTeam}", "${game.homeTeam} vs ${game.awayTeam} head-to-head record MLB", "MLB team wRC+ trends last 10 games"`
+        ? `"starting pitchers advanced stats (xERA, Barrel%) ${game.homeTeam} vs ${game.awayTeam} today", "MLB injury report, lineups and bullpen rest ${game.homeTeam} vs ${game.awayTeam}", "weather and park factors ${game.location} MLB", "MLB market expectations, umpire and h2h record ${game.homeTeam} vs ${game.awayTeam}"`
         : game.league === 'NFL'
-        ? `"NFL injury report ${game.homeTeam} vs ${game.awayTeam} today", "NFL starting lineups ${game.homeTeam} vs ${game.awayTeam}", "NFL weather report ${game.location} today", "NFL market expectations movement ${game.homeTeam} vs ${game.awayTeam}", "NFL expert consensus today", "NFL QB stats ${game.homeTeam} vs ${game.awayTeam}", "${game.homeTeam} vs ${game.awayTeam} head-to-head record NFL", "NFL team defensive DVOA ratings 2025"`
-        : `"current roster ${game.homeTeam} 2025-26 https://www.espn.com/nba/players", "current roster ${game.awayTeam} 2025-26 https://www.espn.com/nba/players", "latest NBA injury report ${game.homeTeam} vs ${game.awayTeam} https://www.rotowire.com/basketball/injury-report.php", "NBA starting lineups today ${game.homeTeam}", "NBA market expectations movement ${game.homeTeam} vs ${game.awayTeam} ESPN CBS Sports", "NBA expert consensus trends today", "site:official.nba.com injury report", "NBA_Injury_Report_Latest Google Drive 1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9", "last 3 injury reports for ${game.homeTeam} and ${game.awayTeam} key players", "${game.homeTeam} vs ${game.awayTeam} head-to-head record NBA", "NBA player stats points assists rebounds ${game.homeTeam} vs ${game.awayTeam}", "NBA team defensive ratings last 10 games"`;
+        ? `"NFL injury report and starting lineups ${game.homeTeam} vs ${game.awayTeam}", "NFL weather ${game.location} and market expectations ${game.homeTeam} vs ${game.awayTeam}", "NFL QB stats and team defensive DVOA ${game.homeTeam} vs ${game.awayTeam} h2h"`
+        : `"NBA official injury report today ${game.homeTeam} vs ${game.awayTeam} April 2026", "NBA starting lineups and late scratches ${game.homeTeam} vs ${game.awayTeam}", "NBA star player rest status and playoff seeding motivation ${game.homeTeam} vs ${game.awayTeam}", "NBA advanced stats Net Rating and Pace last 10 games ${game.homeTeam} vs ${game.awayTeam}", "${game.homeTeam} vs ${game.awayTeam} 2026 head-to-head results and scores"`;
 
       const prompt = `
-        [Analysis Request Time: ${new Date().toISOString()}]
+        [Time: ${new Date().toISOString()}]
         Analyze ${game.league}: ${game.awayTeam} @ ${game.homeTeam} (${formattedDate}). 
         
         CONTEXT:
@@ -1137,85 +1118,50 @@ OPERATIONAL GUIDELINES:
         ${apiSportsContext}
         
         TASK:
-        1. ADVANCED MATCHUP ENGINE: You MUST perform a deep-dive analysis considering:
-           - HEAD-TO-HEAD RECORDS: Analyze the historical performance between these two teams. Does one team consistently outperform the other regardless of current form?
-           - INDIVIDUAL PLAYER STATISTICS: Evaluate key player metrics (e.g., Points, Assists, Rebounds, Defensive Ratings, PER, True Shooting %). Identify specific player-on-player matchups that create an advantage.
-           - RECENT TEAM PERFORMANCE TRENDS: Look at the last 10 games. Analyze Net Rating, Offensive/Defensive Efficiency, and performance against expectations (ATS/Spread).
-        2. LATEST INJURIES: Use your search tool to find the latest status of key players. Check the Official NBA Injury Report, Rotowire (https://www.rotowire.com/basketball/injury-report.php), and reputable news sites. If you can access the Google Drive folder (1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9), look specifically for the file 'NBA_Injury_Report_Latest' and use it as your primary reference. If not, ensure you have cross-referenced at least two other sources to confirm player availability. Quantify the impact on team efficiency.
-        3. ROSTER AUDIT: For every player you mention, you MUST confirm they are on the correct team for the 2025-26 season using the ESPN NBA Players directory (https://www.espn.com/nba/players). Ensure you are attributing them to their current real-world team.
-        4. MARKET ANALYSIS: Search for current market expectations, movement, and team trends (performance against expectations and Over/Under records for the last 10 games). Is there Reverse Market Movement?
-        5. SITUATIONAL FACTORS: Is this a back-to-back? 3rd game in 4 nights? Long road trip?
-        6. DEVIL'S ADVOCATE: Provide one strong reason why the OTHER team might win/perform better.
-        7. ANALYTICAL EDGE: Compare your winProbability to the market projected probability (if data is available).
-        8. SCENARIO ANALYSIS: Provide a detailed scenario breakdown. This MUST include:
-           - Situation analysis: What happens if one team takes an early lead?
-           - Potential outcomes: How to interpret performance shifts based on live game movement.
-           - Analysis strategies: Specific advice for different analytical profiles (e.g., "If you favor Team A, consider how a lead at halftime might change the dynamic").
-           - Probability-based triggers: When to adjust the analytical outlook.
-        9. CONFIDENCE CALCULATION: Your 'confidence' score (1-10) MUST be a direct reflection of the alignment between H2H records, player stats, and recent trends. If all three align, confidence should be high (8-10). If they conflict, confidence MUST be lower (5-7).
-        10. LESSONS LEARNED: Explicitly state how you adjusted your prediction weighting based on the "LEARN FROM YOUR PAST MISTAKES" context.
+        1. Deep-dive analysis (H2H, Trends).
+        2. Latest injuries & impact.
+        3. Confirm 2025-26 rosters.
+        4. Market & situational factors.
+        5. Scenario breakdown & confidence (1-10).
+        6. MLB: Cushioned Total Runs.
+        7. VERIFY H2H: 2026 only.
         
-        Return JSON:
+        OUTPUT (JSON):
         {
           "gameId": "${game.id}",
-          "winner": "Team Name", // Use "PASS" ONLY if winProbability is 48-52%
+          "winner": "Team Name",
           "confidence": 1-10,
           "winProbability": 0.00-1.00,
           "scorePrediction": {"home": 105, "away": 98},
-          "reasoning": "Direct summary of edge. MUST be 300 characters or less.",
-          "devilsAdvocate": "The strongest case for the opposing team.",
-          "marketSentiment": "Summary of market movement and expert consensus.",
-          "situationalFactors": "Rest, travel, and schedule impact.",
-          "scenarioAnalysis": "Detailed scenario breakdown based on probabilities and outcomes. Use markdown formatting (bullet points, bold text) for readability.",
-          "keyFactors": ["Factor 1", "Factor 2"],
-          "appliedLessons": ["How I adjusted my algorithm based on past mistake 1", "How I adjusted based on past mistake 2"],
-          "injuries": [{"team": "Team", "player": "Name", "status": "Status", "impact": "PSI value"}],
+          "projectedTotal": 203,
+          "recommendedTotalLine": "Under 204.5",
+          "reasoning": "Concise edge summary.",
+          "devilsAdvocate": "Counter-case.",
+          "marketSentiment": "Market summary.",
+          "situationalFactors": "Rest/travel.",
+          "scenarioAnalysis": "Bullet points.",
+          "keyFactors": ["Advantage 1", "Advantage 2"],
+          "injuries": [{"team": "Team", "player": "Name", "status": "Status", "impact": "PSI", "source_name": "Source", "source_timestamp": "Timestamp"}],
           "pitcherMatchup": {
-            "homePitcher": {"name": "Name", "era": 3.45, "whip": 1.12, "xERA": 3.21, "fip": 3.50, "k9": 9.5, "barrelRate": 6.5, "recentForm": "Summary"},
-            "awayPitcher": {"name": "Name", "era": 4.12, "whip": 1.34, "xERA": 4.50, "fip": 4.20, "k9": 7.2, "barrelRate": 8.1, "recentForm": "Summary"},
-            "weatherImpact": "Wind blowing out 15mph",
-            "parkFactor": "Hitter friendly",
-            "summary": "Overall pitching analysis summary."
+            "homePitcher": {"name": "Name", "era": 3.45, "whip": 1.12, "xERA": 3.21, "fip": 3.50, "k9": 9.5, "barrelRate": 6.5, "recentForm": "Concise"},
+            "awayPitcher": {"name": "Name", "era": 4.12, "whip": 1.34, "xERA": 4.50, "fip": 4.20, "k9": 7.2, "barrelRate": 8.1, "recentForm": "Concise"},
+            "weatherImpact": "Concise",
+            "parkFactor": "Concise",
+            "umpire": {"name": "Name", "runsPerGame": 9.2, "strikeZone": "Standard"},
+            "summary": "Concise summary."
           },
-          "previousMatchups": [{"date": "YYYY-MM-DD", "homeTeam": "Name", "awayTeam": "Name", "homeScore": 100, "awayScore": 90}],
-          "matchupRankings": {
-            "homeRank": 5,
-            "awayRank": 12,
-            "homeOffenseRank": 3,
-            "awayOffenseRank": 15,
-            "homeDefenseRank": 10,
-            "awayDefenseRank": 8
-          },
-          "playerMatchups": [
-            {"matchup": "Player A vs Player B", "analysis": "Detailed breakdown", "advantage": "Home Team"}
-          ],
-          "teamStatsComparison": [
-            {"category": "PPG", "homeValue": 115.4, "awayValue": 110.2, "advantage": "home"}
-          ],
-          "trends": {
-            "homeVsExp": "5-2 vs Exp last 10",
-            "awayVsExp": "3-4 vs Exp last 10",
-            "homeTotal": "4-3 Total last 10",
-            "awayTotal": "2-5 Total last 10"
-          },
+          "previousMatchups": [{"date": "2026-MM-DD", "homeScore": 100, "awayScore": 90}],
+          "matchupRankings": {"homeRank": 5, "awayRank": 12},
+          "teamStatsComparison": [{"category": "PPG", "homeValue": 115.4, "awayValue": 110.2}],
+          "trends": {"homeVsExp": "Trend", "awayVsExp": "Trend", "homeTotal": "Trend", "awayTotal": "Trend"},
           "matchupAnalysis": {
-            "h2h": "Detailed analysis of historical matchups and psychological edge.",
-            "playerStats": "Deep dive into key player metrics (PER, Defensive Rating, etc.) and specific matchup advantages.",
-            "trends": "Analysis of recent 10-game performance, efficiency shifts, and market performance.",
-            "confidenceBreakdown": "Explicit explanation of why the confidence score was assigned based on the alignment of H2H, stats, and trends."
+            "h2h": "Concise H2H analysis. Max 200 chars.",
+            "playerStats": "Concise player stats analysis. Max 200 chars.",
+            "trends": "Concise efficiency trends. Max 200 chars.",
+            "confidenceBreakdown": "Concise confidence logic. Max 200 chars."
           },
-          "marketExpectations": {
-            "homeWinProb": -110,
-            "awayWinProb": +110,
-            "margin": -2.5,
-            "homeMarginOdds": -110,
-            "awayMarginOdds": -110,
-            "total": 220.5,
-            "overOdds": -110,
-            "underOdds": -110
-          }
-        }
-      `;
+          "marketExpectations": {"homeWinProb": -110, "awayWinProb": 110, "margin": -2.5, "homeMarginOdds": -110, "awayMarginOdds": -110, "total": 220.5, "overOdds": -110, "underOdds": -110}
+        }`;
 
       const fullPrompt = `${systemInstruction}\n\n${prompt}`;
 
@@ -1309,6 +1255,116 @@ OPERATIONAL GUIDELINES:
       return this.processAIResponse(game, text, cost, dateStr, previousMatchups, existingPrediction, groundingUrls);
     } catch (error) {
       console.error("Error analyzing matchup:", error);
+      throw error;
+    }
+  }
+
+  async batchAnalyzeMatchups(
+    games: Game[],
+    dateStr: string,
+    existingPredictions: Record<string, any> = {},
+    yesterdayResults: any[] = [],
+    onProgress?: (msg: string) => void
+  ): Promise<Record<string, any>> {
+    if (!games || games.length === 0) return {};
+
+    onProgress?.(`Starting batch analysis for ${games.length} games...`);
+
+    const league = games[0].league;
+    const today = getNYDate().toDateString();
+
+    // Prepare context for all games
+    const gamesContext = games.map((game, index) => {
+      const existing = existingPredictions[game.id] || {};
+      return `
+GAME ${index + 1} (ID: ${game.id}):
+- Matchup: ${game.awayTeam} @ ${game.homeTeam}
+- League: ${game.league}
+- Date: ${dateStr}
+- Location: ${game.location || "Unknown"}
+- Market: ${JSON.stringify(game.marketExpectations || {})}
+- Existing Injuries: ${JSON.stringify(existing.injuries || [])}
+`;
+    }).join("\n---\n");
+
+    const systemInstruction = `You are an elite sports betting analyst. Analyze multiple ${league} games for ${dateStr}. Use search to find latest injuries, starting lineups, and market movement. Return a JSON object where keys are Game IDs.`;
+
+    const prompt = `
+${systemInstruction}
+
+Today is ${today}. Analyze these ${games.length} ${league} games:
+${gamesContext}
+
+Yesterday's ${league} Results: ${JSON.stringify(yesterdayResults.slice(0, 5))}
+
+For EACH game, provide a deep analysis including:
+1. Winner & Win Probability (0.00-1.00)
+2. Projected Score & Spread
+3. Key Factors & Scenario Analysis
+4. Injuries (Verified with source & timestamp)
+5. ${league === 'MLB' ? 'Pitcher Matchup (ERA, xERA, WHIP, K/9, etc.)' : 'Key Player Matchups'}
+
+Return ONLY a JSON object:
+{
+  "game-id-1": {
+    "winner": "Team Name",
+    "winProbability": 0.75,
+    "projectedScore": {"home": 110, "away": 105},
+    "confidence": 8,
+    "reasoning": "Concise.",
+    "scenarioAnalysis": "Bullet points.",
+    "keyFactors": ["Factor 1"],
+    "injuries": [{"team": "Team", "player": "Name", "status": "Status", "impact": "PSI", "source_name": "Source", "source_timestamp": "Timestamp"}],
+    ${league === 'MLB' ? `"pitcherMatchup": {"homePitcher": {"name": "Name", "era": 3.45, "whip": 1.12, "xERA": 3.21, "fip": 3.50, "k9": 9.5, "barrelRate": 6.5, "recentForm": "Concise"}, "awayPitcher": {"name": "Name", "era": 4.12, "whip": 1.34, "xERA": 4.50, "fip": 4.20, "k9": 7.2, "barrelRate": 8.1, "recentForm": "Concise"}, "weatherImpact": "Concise", "parkFactor": "Concise", "umpire": {"name": "Name", "runsPerGame": 9.2, "strikeZone": "Standard"}, "summary": "Concise summary."},` : ''}
+    "matchupAnalysis": {"h2h": "Concise", "playerStats": "Concise", "trends": "Concise", "confidenceBreakdown": "Concise"}
+  },
+  ...
+}
+`;
+
+    try {
+      const response = await this.callWithRetry(async (ai) => {
+        let timeoutId: NodeJS.Timeout;
+        const timeoutPromise = new Promise<any>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error("Gemini API timeout")), 300000); // 5 mins for batch
+        });
+
+        try {
+          return await Promise.race([
+            ai.models.generateContent({
+              model: this.getModel(),
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              config: {
+                tools: [{ googleSearch: {} }],
+              },
+            }),
+            timeoutPromise
+          ]);
+        } finally {
+          clearTimeout(timeoutId!);
+        }
+      }, 3, 20000, `batch-analysis-${league}-${dateStr}`);
+
+      const text = response.text;
+      if (!text) throw new Error("No response from AI");
+
+      const cleanedText = this.cleanJson(text);
+      const batchPredictions = JSON.parse(cleanedText);
+      const cost = this.calculateGeminiCost(response.usageMetadata);
+      const perGameCost = cost / games.length;
+
+      const results: Record<string, any> = {};
+      for (const game of games) {
+        const prediction = batchPredictions[game.id];
+        if (prediction) {
+          results[game.id] = this.processAIResponse(game, JSON.stringify(prediction), perGameCost, dateStr, [], existingPredictions[game.id]);
+        }
+      }
+
+      onProgress?.(`Batch analysis complete for ${Object.keys(results).length} games.`);
+      return results;
+    } catch (error) {
+      console.error("Error in batch analysis:", error);
       throw error;
     }
   }
@@ -1554,7 +1610,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
       ${rosterDatabaseContext}
       
       AUDIT STEPS:
-      1. ZERO TOLERANCE FOR INCORRECT INJURY ADVICE: You MUST be 100% certain of a player's status. If there is ANY conflicting information (e.g., one source says 'Out' and another says 'Clear'), you MUST prioritize the more conservative status ('Out' or 'Doubtful'). A player who is 'Out' in several recent reports but 'Clear' in one should be treated as 'Out' unless there is an official team announcement confirming their return.
+      1. INJURY REPORT VERIFICATION (ZERO TOLERANCE): You MUST ONLY report injury statuses explicitly present in provided data or search results. NO inferring or guessing. Every injury MUST include "source_name" and "source_timestamp". If missing, label "UNVERIFIED — DO NOT USE". If data is not from the current game window, label "STALE — REQUIRES RE-VERIFICATION". If sources disagree, label "CONFLICT — MULTIPLE SOURCES DISAGREE". Format: Player Name — Status (Injury) [Source: name, timestamp]. If no verified data exists, output "NO VERIFIED INJURY REPORT AVAILABLE FOR THIS GAME" in qaNotes.
       2. DETROIT PISTONS SPECIAL ALERT: If this game involves the Detroit Pistons, you MUST be extremely thorough. There have been reports of incorrect 'Clear' statuses for Pistons players who are actually 'Out'. Cross-reference multiple sources.
       3. ROSTER CHECK: For EVERY player mentioned (in injuries, reasoning, or factors), you MUST search "current roster [Team Name]" and confirm they are on that team using https://www.espn.com/nba/players.
          - CRITICAL: You MUST use your search tool to confirm every player's current team. Do not rely on outdated information.
@@ -1577,7 +1633,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
         "adjustedWinner": "Team Name",
         "adjustedConfidence": 1-10,
         "adjustedWinProbability": 0.00-1.00,
-        "adjustedInjuries": [{"team": "Team", "player": "Name", "status": "Status", "impact": "PSI value"}]
+        "adjustedInjuries": [{"team": "Team", "player": "Name", "status": "Status", "impact": "PSI value", "source_name": "Source", "source_timestamp": "Timestamp"}]
       }
     `;
 
@@ -1724,11 +1780,11 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
     return predictions;
   }
 
-  async importSchedule(league: string, startDate: Date, days: number = 7, onProgress?: (msg: string) => void): Promise<void> {
+  async importSchedule(league: string, startDate: Date, days: number = 7, onProgress?: (msg: string) => void, force: boolean = false): Promise<void> {
     const dates = Array.from({ length: days }, (_, i) => {
       const date = new Date(startDate);
       date.setDate(date.getDate() + i);
-      return date.toISOString().split('T')[0];
+      return format(date, "yyyy-MM-dd");
     });
 
     // Process in batches of 3 to speed up import while being nice to the API
@@ -1740,9 +1796,12 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
       await Promise.all(batch.map(async (dateStr) => {
         try {
           // This will check Firestore first, and if missing, fetch from API and save to Firestore
-          await this.getDailySchedule(league, dateStr);
+          const games = await this.getDailySchedule(league, dateStr, force);
+          console.log(`[Import] Imported ${games.length} games for ${league} on ${dateStr} (force=${force})`);
+          onProgress?.(`Imported ${games.length} games for ${dateStr}...`);
         } catch (e) {
           console.error(`Failed to import schedule for ${dateStr}`, e);
+          onProgress?.(`Failed to import for ${dateStr}.`);
         }
       }));
 
@@ -1775,14 +1834,20 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 
       const leagueSearchQuery = league === 'NCAA' 
         ? `"NCAA basketball injury report rotowire", "college basketball market expectations movement ${batchGames.map(g => g.homeTeam).join(' or ')}", "expert consensus college basketball today"` 
+        : league === 'MLB'
+        ? `"MLB injury report and starting lineups ${batchGames.map(g => g.homeTeam).join(' or ')}", "MLB market expectations and expert consensus ${batchGames.map(g => g.homeTeam).join(' or ')}", "starting pitchers and bullpen rest ${batchGames.map(g => g.homeTeam).join(' or ')}"`
+        : league === 'NFL'
+        ? `"NFL injury report and starting lineups ${batchGames.map(g => g.homeTeam).join(' or ')}", "NFL market expectations and expert consensus ${batchGames.map(g => g.homeTeam).join(' or ')}", "NFL QB and key player status ${batchGames.map(g => g.homeTeam).join(' or ')}"`
+        : league === 'NHL'
+        ? `"NHL injury report and starting goalies ${batchGames.map(g => g.homeTeam).join(' or ')}", "NHL market expectations and expert consensus ${batchGames.map(g => g.homeTeam).join(' or ')}", "NHL key player status ${batchGames.map(g => g.homeTeam).join(' or ')}"`
         : `"NBA market expectations movement today", "NBA expert consensus", "latest injuries for ${batchGames.map(g => g.homeTeam).join(' or ')}"`;
 
       const prompt = `
         TASK: Use your search tool to find the LATEST injury reports and MARKET MOVEMENT for these ${league} teams playing on ${date}: ${teams}.
-        ${league === 'NCAA' ? 'For NCAA, a primary source is https://www.rotowire.com/cbasketball/injury-report.php.' : `Search queries should be like: ${leagueSearchQuery}. For NBA, use https://www.rotowire.com/basketball/injury-report.php and look specifically for the file 'NBA_Injury_Report_Latest' in the Google Drive folder 1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9.`}
+        ${league === 'NCAA' ? 'For NCAA, a primary source is https://www.rotowire.com/cbasketball/injury-report.php.' : league === 'NBA' ? `For NBA, use https://www.rotowire.com/basketball/injury-report.php and look specifically for the file 'NBA_Injury_Report_Latest' in the Google Drive folder 1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9.` : `For ${league}, use reputable sources like Rotowire, ESPN, or official team reports.`}
 
         INSTRUCTIONS:
-        1. ZERO TOLERANCE FOR INCORRECT INJURY ADVICE: You MUST be 100% certain of a player's status before marking them as 'In'. If there is ANY conflicting information (e.g., one source says 'Out' and another says 'Clear'), you MUST prioritize the more conservative status ('Out' or 'Doubtful'). A player who is 'Out' in several recent reports but 'Clear' in one should be treated as 'Out' unless there is an official team announcement confirming their return.
+        1. INJURY REPORT VERIFICATION (ZERO TOLERANCE): You MUST ONLY report injury statuses explicitly present in provided data or search results. NO inferring or guessing. Every injury MUST include "source_name" and "source_timestamp". If missing, label "UNVERIFIED — DO NOT USE". If data is not from the current game window, label "STALE — REQUIRES RE-VERIFICATION". If sources disagree, label "CONFLICT — MULTIPLE SOURCES DISAGREE". Format: Player Name — Status (Injury) [Source: name, timestamp]. If no verified data exists, output "NO VERIFIED INJURY REPORT AVAILABLE FOR THIS GAME" in the update field.
         2. INJURIES: Find the latest status of key players. Verify roster integrity (e.g., ensure players are attributed to their correct current teams).
            - TERMINOLOGY: You MUST use ONLY these four statuses: "In", "Out", "Doubtful", or "Probable". Map all other statuses (Questionable, GTD, etc.) to one of these four.
         3. MARKET: Identify any significant market expectations movement or "expert consensus" reports.
@@ -1800,7 +1865,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
         Output Format:
         {
           "game-id-1": [
-            {"player": "Name", "team": "Team", "status": "Out/Probable/GTD/Doubtful/Questionable/In", "impact": "PSI value", "update": "Brief update text"}
+            {"player": "Name", "team": "Team", "status": "Out/Probable/GTD/Doubtful/Questionable/In", "impact": "PSI value", "update": "Brief update text", "source_name": "Source", "source_timestamp": "Timestamp"}
           ]
         }
         Only include games with RELEVANT updates. If a team has NO injuries, return an empty array for that game ID.
@@ -1925,6 +1990,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
       Maintain a professional, data-driven, and objective tone. Focus specifically on 'Impact Players'—explain how the absence of a top-tier player shifts the point spread. Ensure the information is presented in a clear, scannable format using tables or bulleted lists for high readability.
       
       IMPORTANT:
+      - INJURY REPORT VERIFICATION (ZERO TOLERANCE): You MUST ONLY report injury statuses explicitly present in provided data or search results. NO inferring or guessing. Every injury MUST include "source_name" and "source_timestamp". If missing, label "UNVERIFIED — DO NOT USE". If data is not from the current game window, label "STALE — REQUIRES RE-VERIFICATION". If sources disagree, label "CONFLICT — MULTIPLE SOURCES DISAGREE". Format: Player Name — Status (Injury) [Source: name, timestamp]. If no verified data exists, output "NO VERIFIED INJURY REPORT AVAILABLE FOR THIS GAME".
       - Provide ACTUAL, specific advantages (e.g., 'Celtics have a +8 rebounding edge with Porzingis back') rather than generic references.
       - NEVER mention the Google Drive link or 'official injury report' in your output. Use the information silently to provide accurate status updates.
     `;

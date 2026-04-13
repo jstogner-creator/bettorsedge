@@ -22,6 +22,15 @@ window.onerror = (message, source, lineno, colno, error) => {
 
 window.onunhandledrejection = (event) => {
   console.error('[Unhandled Promise Rejection]', event.reason);
+  // Log to Firestore if possible
+  try {
+    const error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
+    import('./services/logger').then(({ logError }) => {
+      logError(error, 'UnhandledPromiseRejection').catch(console.error);
+    }).catch(console.error);
+  } catch (e) {
+    console.error('Failed to log unhandled rejection:', e);
+  }
 };
 
 const rootElement = document.getElementById('root');

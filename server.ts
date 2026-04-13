@@ -393,6 +393,45 @@ async function startServer() {
     res.json({ received: true });
   });
 
+  app.get("/api/admin/qa-health", authenticate, async (req, res) => {
+    const adminUser = (req as any).user;
+    try {
+      const userDoc = await db.collection('users').doc(adminUser.uid).get();
+      const userData = userDoc.data();
+      const isAdmin = userData?.role === 'admin' || adminUser.email === 'jstogner@risenetworkcabling.com';
+      
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      res.json({
+        firebase: {
+          projectId: firebaseProjectId,
+          databaseId: firestoreDatabaseId || '(default)',
+          initialized: true
+        },
+        stripe: {
+          configured: !!process.env.STRIPE_SECRET_KEY,
+          webhookSecret: !!process.env.STRIPE_WEBHOOK_SECRET
+        },
+        kalshi: {
+          configured: !!process.env.KALSHI_API_KEY && !!process.env.KALSHI_API_SECRET
+        },
+        openai: {
+          configured: !!process.env.OPENAI_API_KEY
+        },
+        gemini: {
+          configured: !!process.env.GEMINI_API_KEY
+        },
+        apiSports: {
+          configured: !!process.env.API_SPORTS_KEY || !!apiSportsKey
+        }
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'QA Health Check Failed' });
+    }
+  });
+
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });

@@ -50,6 +50,32 @@ class ApiSportsBasketballService {
     return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
+  private async fetchWithRetry(url: string, config: any = {}, retries = 3, delay = 2000): Promise<any> {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const headers = await this.getHeaders();
+        const response = await axios.get(url, { 
+          ...config, 
+          headers: { ...headers, ...config.headers },
+          timeout: 30000 // 30s timeout
+        });
+        return response.data;
+      } catch (error: any) {
+        const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
+        const isRateLimit = error.response?.status === 429;
+        const isNetworkError = !error.response;
+
+        if ((isRateLimit || isTimeout || isNetworkError) && i < retries - 1) {
+          console.warn(`[API-Sports Basketball] Fetch failed (${isTimeout ? 'Timeout' : isRateLimit ? 'Rate Limit' : 'Network Error'}). Retrying in ${delay}ms... (${retries - i - 1} left)`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2;
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+
   /**
    * Get the full list of supported bookmakers.
    * Caches the result in memory for 24 hours.
@@ -60,11 +86,10 @@ class ApiSportsBasketballService {
     }
 
     try {
-      const headers = await this.getHeaders();
-      const response = await axios.get(`${this.baseUrl}/bookmakers`, { headers });
+      const data = await this.fetchWithRetry(`${this.baseUrl}/bookmakers`);
 
-      if (response.data && response.data.response) {
-        const bookmakers: Bookmaker[] = response.data.response.map((b: any) => ({
+      if (data && data.response) {
+        const bookmakers: Bookmaker[] = data.response.map((b: any) => ({
           id: b.id,
           name: b.name,
         }));
@@ -99,14 +124,10 @@ class ApiSportsBasketballService {
     }
 
     try {
-      const headers = await this.getHeaders();
-      const response = await axios.get(`${this.baseUrl}/odds`, {
-        params: filters,
-        headers,
-      });
+      const data = await this.fetchWithRetry(`${this.baseUrl}/odds`, { params: filters });
 
-      if (response.data && response.data.response) {
-        const normalized = await this.normalizeOddsResponse(response.data.response);
+      if (data && data.response) {
+        const normalized = await this.normalizeOddsResponse(data.response);
         this.oddsCache.set(cacheKey, { data: normalized, timestamp: Date.now() });
         return normalized;
       }

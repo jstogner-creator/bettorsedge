@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Prediction } from '../types';
 import { format, parseISO } from 'date-fns';
-import { CheckCircle, XCircle, MinusCircle, Activity, TrendingUp, Filter, RefreshCw, AlertTriangle, FileText } from 'lucide-react';
+import { CheckCircle, XCircle, MinusCircle, Activity, TrendingUp, Filter, RefreshCw, AlertTriangle, FileText, Calendar } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { bettorsEdge } from '../services/gemini';
 import Markdown from 'react-markdown';
@@ -16,6 +16,7 @@ export const AccuracyTab: React.FC<AccuracyTabProps> = ({ predictions, onSyncPen
   const [filterLeague, setFilterLeague] = useState<string>('ALL');
   const [filterType, setFilterType] = useState<'ALL' | 'TOP_PICKS'>('ALL');
   const [filterTime, setFilterTime] = useState<'ALL' | '2WEEKS'>('2WEEKS');
+  const [minConfidence, setMinConfidence] = useState<number>(0);
   const [performanceAnalysis, setPerformanceAnalysis] = useState<string | null>(null);
   const [isAnalyzingPerformance, setIsAnalyzingPerformance] = useState(false);
 
@@ -84,9 +85,17 @@ export const AccuracyTab: React.FC<AccuracyTabProps> = ({ predictions, onSyncPen
       });
       console.log("[AccuracyTab] After type filter (TOP_PICKS):", filtered.length);
     }
+
+    if (minConfidence > 0) {
+      filtered = filtered.filter(p => {
+        const confidence = typeof p.confidence === 'string' ? parseFloat(p.confidence) : p.confidence;
+        return confidence !== undefined && !isNaN(confidence) && confidence >= minConfidence;
+      });
+      console.log(`[AccuracyTab] After confidence filter (>= ${minConfidence}):`, filtered.length);
+    }
     
     return filtered;
-  }, [resolvedPredictions, filterLeague, filterType, filterTime]);
+  }, [resolvedPredictions, filterLeague, filterType, filterTime, minConfidence]);
 
   useEffect(() => {
     console.log("[AccuracyTab] Mounted with predictions:", predictions.length);
@@ -143,72 +152,113 @@ export const AccuracyTab: React.FC<AccuracyTabProps> = ({ predictions, onSyncPen
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center space-x-2 bg-slate-900 border border-slate-800 rounded-lg p-1">
-            <button
-              onClick={() => setFilterTime('2WEEKS')}
-              className={cn(
-                "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-                filterTime === '2WEEKS'
-                  ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              )}
-            >
-              Last 2 Weeks
-            </button>
-            <button
-              onClick={() => setFilterTime('ALL')}
-              className={cn(
-                "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-                filterTime === 'ALL'
-                  ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              )}
-            >
-              All Time
-            </button>
-          </div>
-
-          <div className="flex items-center space-x-2 bg-slate-900 border border-slate-800 rounded-lg p-1">
-            <button
-              onClick={() => setFilterType('ALL')}
-              className={cn(
-                "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-                filterType === 'ALL'
-                  ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              )}
-            >
-              All Matchups
-            </button>
-            <button
-              onClick={() => setFilterType('TOP_PICKS')}
-              className={cn(
-                "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-                filterType === 'TOP_PICKS'
-                  ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              )}
-            >
-              Top Picks Only
-            </button>
-          </div>
-
-          <div className="flex items-center space-x-2 bg-slate-900 border border-slate-800 rounded-lg p-1">
-            {leagues.map(league => (
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center">
+              <Calendar className="w-3 h-3 mr-1" />
+              Timeframe
+            </span>
+            <div className="flex items-center space-x-2 bg-slate-900 border border-slate-800 rounded-lg p-1">
               <button
-                key={league}
-                onClick={() => setFilterLeague(league as string)}
+                onClick={() => setFilterTime('2WEEKS')}
                 className={cn(
                   "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-                  filterLeague === league
+                  filterTime === '2WEEKS'
                     ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
                     : "text-slate-400 hover:text-white hover:bg-slate-800"
                 )}
               >
-                {league}
+                Last 2 Weeks
               </button>
-            ))}
+              <button
+                onClick={() => setFilterTime('ALL')}
+                className={cn(
+                  "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+                  filterTime === 'ALL'
+                    ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                    : "text-slate-400 hover:text-white hover:bg-slate-800"
+                )}
+              >
+                All Time
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center">
+              <TrendingUp className="w-3 h-3 mr-1" />
+              Type
+            </span>
+            <div className="flex items-center space-x-2 bg-slate-900 border border-slate-800 rounded-lg p-1">
+              <button
+                onClick={() => setFilterType('ALL')}
+                className={cn(
+                  "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+                  filterType === 'ALL'
+                    ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                    : "text-slate-400 hover:text-white hover:bg-slate-800"
+                )}
+              >
+                All Matchups
+              </button>
+              <button
+                onClick={() => setFilterType('TOP_PICKS')}
+                className={cn(
+                  "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+                  filterType === 'TOP_PICKS'
+                    ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                    : "text-slate-400 hover:text-white hover:bg-slate-800"
+                )}
+              >
+                Top Picks Only
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center">
+              <Activity className="w-3 h-3 mr-1" />
+              Confidence
+            </span>
+            <div className="flex items-center space-x-2 bg-slate-900 border border-slate-800 rounded-lg p-1">
+              {[0, 7, 8, 9].map(val => (
+                <button
+                  key={val}
+                  onClick={() => setMinConfidence(val)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+                    minConfidence === val
+                      ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  )}
+                >
+                  {val === 0 ? 'All' : `${val}+`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center">
+              <Filter className="w-3 h-3 mr-1" />
+              Sport
+            </span>
+            <div className="flex items-center space-x-2 bg-slate-900 border border-slate-800 rounded-lg p-1">
+              {leagues.map(league => (
+                <button
+                  key={league}
+                  onClick={() => setFilterLeague(league as string)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+                    filterLeague === league
+                      ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  )}
+                >
+                  {league}
+                </button>
+              ))}
+            </div>
           </div>
           
           {onSyncPending && (
