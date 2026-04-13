@@ -134,7 +134,15 @@ export interface LoginResult {
 
 export async function loginWithGoogle(): Promise<LoginResult> {
   const auth = getAuthInstance();
-  console.log('[Auth] Starting Google sign-in flow (Popup)');
+  const host = window.location.hostname;
+  const useRedirect =
+    host.endsWith(".run.app") ||
+    host.endsWith(".web.app") ||
+    host.endsWith(".firebaseapp.com");
+
+  console.log(
+    `[Auth] Starting Google sign-in flow (${useRedirect ? "Redirect" : "Popup"})`
+  );
 
   try {
     try {
@@ -147,15 +155,28 @@ export async function loginWithGoogle(): Promise<LoginResult> {
       }
     }
 
+    if (useRedirect) {
+      document.cookie =
+        "redirect_login_pending=true; path=/; max-age=600; SameSite=Lax";
+      await signInWithRedirect(auth, googleProvider);
+      return { success: true };
+    }
+
     await signInWithPopup(auth, googleProvider);
     return { success: true };
   } catch (error: any) {
-    console.error('[Auth] signInWithPopup failed:', error.code, error.message);
-    await logLoginError(error, 'signInWithPopup');
+    console.error(
+      `[Auth] ${useRedirect ? "signInWithRedirect" : "signInWithPopup"} failed:`,
+      error.code,
+      error.message
+    );
+    await logLoginError(
+      error,
+      useRedirect ? "signInWithRedirect" : "signInWithPopup"
+    );
     return { success: false, error: error.message, code: error.code };
   }
 }
-
 export async function handleGoogleRedirectResult(): Promise<User | null> {
   const auth = getAuthInstance();
   console.log('[Auth] Checking for redirect result...');
