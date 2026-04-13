@@ -33,14 +33,17 @@ let authInstance: Auth | null = null;
 function buildFirebaseConfig() {
   const config = { ...rawFirebaseConfig } as any;
 
-  const host = typeof window !== 'undefined' ? window.location.hostname : '';
+  const host = typeof window !== "undefined" ? window.location.hostname : "";
   const isLocalhost =
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
-    host.endsWith('.local');
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host.endsWith(".local");
 
-  const isGoogleRunDomain = host.endsWith('.run.app');
-  const isFirebaseDomain = host.endsWith('.firebaseapp.com') || host.endsWith('.web.app');
+  // On hosted domains, use the current hostname for Firebase Auth helper flows.
+  // This avoids redirect/popup handoff issues on custom domains like bettorsedge.net.
+  if (host && !isLocalhost) {
+    config.authDomain = host;
+  }
 
   return config;
 }
