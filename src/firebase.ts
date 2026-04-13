@@ -135,10 +135,12 @@ export interface LoginResult {
 export async function loginWithGoogle(): Promise<LoginResult> {
   const auth = getAuthInstance();
   const host = window.location.hostname;
-  const useRedirect =
-    host.endsWith(".run.app") ||
-    host.endsWith(".web.app") ||
-    host.endsWith(".firebaseapp.com");
+const isLocalhost =
+  host === "localhost" ||
+  host === "127.0.0.1" ||
+  host.endsWith(".local");
+
+const useRedirect = !isLocalhost;
 
   console.log(
     `[Auth] Starting Google sign-in flow (${useRedirect ? "Redirect" : "Popup"})`
