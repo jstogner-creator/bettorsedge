@@ -3,7 +3,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m
 const LandingPage = lazy(() => import("./pages/LandingPage").then(m => ({ default: m.LandingPage })));
 import { FAQ } from "./pages/FAQ";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
-import { getAuthInstance, handleGoogleRedirectResult } from "./firebase";
+import { getAuthInstance } from "./firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
@@ -19,13 +19,13 @@ const LoadingScreen = ({ message = "Initializing Bettors Edge" }) => (
         onClick={() => window.open(window.location.href, '_blank')}
         className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded-lg transition-all font-bold"
       >
-        Open in New Tab (Recommended)
+        Open in New Tab
       </button>
       <button
         onClick={() => window.location.reload()}
         className="px-6 py-2 bg-slate-900 hover:bg-slate-800 text-slate-400 text-xs rounded-lg border border-slate-800 transition-all"
       >
-        Still stuck? Tap to reload
+        Reload
       </button>
     </div>
   </div>
@@ -34,7 +34,6 @@ const LoadingScreen = ({ message = "Initializing Bettors Edge" }) => (
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [redirectError, setRedirectError] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<"main" | "faq">("main");
   const isOnline = useOnlineStatus();
   const authReadyRef = useRef(false);
@@ -47,13 +46,10 @@ export default function App() {
     let unsubscribe: (() => void) | undefined;
     let isMounted = true;
     let authTimeout: NodeJS.Timeout;
-    let redirectUserSet = false;
 
     const init = () => {
       console.log("[App] Initialization started");
-      
-      // Safety timeout: if auth doesn't ready in 10 seconds, force it
-      // This ensures the app renders even if Firebase is slow or hangs
+
       authTimeout = setTimeout(() => {
         if (isMounted && !authReadyRef.current) {
           console.warn("[App] Auth initialization timed out. Forcing ready state.");
@@ -63,8 +59,7 @@ export default function App() {
 
       console.log("[App] Attaching onAuthStateChanged listener");
       const auth = getAuthInstance();
-      
-      // 1. Attach listener synchronously
+
       unsubscribe = onAuthStateChanged(auth, (currentUser) => {
         console.log(
           "[App] Auth State Changed:",
@@ -73,46 +68,8 @@ export default function App() {
 
         if (!isMounted) return;
         clearTimeout(authTimeout);
-        
-        // Only update if it's a real change to avoid overwriting redirect result
-        setUser((prevUser) => {
-          console.log(`[App] setUser callback: prevUser=${prevUser?.email}, currentUser=${currentUser?.email}, redirectUserSet=${redirectUserSet}`);
-          if (prevUser && !currentUser) {
-            console.warn("[App] User transitioned from logged in to logged out!");
-            if (redirectUserSet) {
-              console.warn("[App] Ignoring null user because redirect user was just set");
-              return prevUser;
-            }
-            const wasRedirectPending = document.cookie.includes('redirect_login_pending=true');
-            if (wasRedirectPending) {
-              console.warn("[App] Ignoring null user because redirect was pending");
-              return prevUser;
-            }
-          }
-          return currentUser;
-        });
+        setUser(currentUser);
         setIsAuthReady(true);
-      });
-
-      // 2. Process redirect asynchronously without blocking the listener
-      handleGoogleRedirectResult().then((redirectUser) => {
-        if (isMounted && redirectUser) {
-          console.log("[App] Redirect result returned user, setting state explicitly");
-          redirectUserSet = true;
-          setUser(redirectUser);
-          setIsAuthReady(true);
-          
-          setTimeout(() => {
-            redirectUserSet = false;
-          }, 5000);
-        }
-      }).catch((e: any) => {
-        console.error("[App] Error handling redirect result:", e);
-        if (isMounted && e.code !== 'auth/redirect-cancelled-by-user') {
-          setRedirectError(e.message || "Failed to complete sign in. Please try again.");
-        }
-        // Ensure auth is marked ready even on error to prevent infinite loading
-        if (isMounted) setIsAuthReady(true);
       });
     };
 
@@ -144,7 +101,7 @@ export default function App() {
             <Dashboard user={user} onOpenFAQ={() => setCurrentView("faq")} />
           )
         ) : (
-          <LandingPage initialError={redirectError} />
+          <LandingPage />
         )}
       </Suspense>
     </ErrorBoundary>

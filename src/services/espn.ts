@@ -47,21 +47,21 @@ class ESPNService {
     }
 
     // We fetch a slightly wider range if it's "today" to catch games that might be 
-    // technically on a different date in UTC but are part of the same slate.
-    // However, ESPN's scoreboard API is usually slate-based for a single date.
-    const url = `/api/espn/schedule?sport=${config.sport}&league=${config.league}&dateStr=${dateStr}`;
+// technically on a different date in UTC but are part of the same slate.
+// However, ESPN's scoreboard API is usually slate-based for a single date.
+const url = `/api/espn/schedule?sport=${config.sport}&league=${config.league}&dateStr=${dateStr}&_ts=${Date.now()}`;
+
+const fetchWithRetry = async (retries = 3, delay = 2000): Promise<Game[]> => {
+  try {
+    const token = await getIdToken();
+    console.log(`[ESPN] getSchedule: token present: ${!!token}`);
+    console.log(`[ESPN] Fetching schedule via proxy: ${url}`);
     
-    const fetchWithRetry = async (retries = 3, delay = 2000): Promise<Game[]> => {
-      try {
-        const token = await getIdToken();
-        console.log(`[ESPN] getSchedule: token present: ${!!token}`);
-        console.log(`[ESPN] Fetching schedule via proxy: ${url}`);
-        
-        const response = await axios.get(url, { 
-          timeout: 30000, // Increased to 30s
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
-        });
-        const data = response.data;
+    const response = await axios.get(url, { 
+      timeout: 30000,
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    const data = response.data;
         
         if (!data.events) {
           console.log(`[ESPN] No events found in response for ${cacheKey}`);

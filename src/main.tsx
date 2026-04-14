@@ -1,12 +1,39 @@
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 
-// Global error handling for early detection
+function isChunkLoadError(value: unknown) {
+  const message =
+    value instanceof Error
+      ? value.message
+      : typeof value === 'string'
+      ? value
+      : '';
+
+  return (
+    message.includes('Failed to fetch dynamically imported module') ||
+    message.includes('Importing a module script failed') ||
+    message.includes('ChunkLoadError')
+  );
+}
+
+function reloadOnceForChunkError() {
+  const key = 'bettorsedge:chunk-reload-attempted';
+  if (sessionStorage.getItem(key) === '1') return false;
+  sessionStorage.setItem(key, '1');
+  window.location.reload();
+  return true;
+}
+
 window.onerror = (message, source, lineno, colno, error) => {
   console.error('[Global Error]', { message, source, lineno, colno, error });
+
+  if (isChunkLoadError(error || String(message))) {
+    if (reloadOnceForChunkError()) return true;
+  }
+
   const root = document.getElementById('root');
   if (root && root.innerHTML === '') {
     root.innerHTML = `
@@ -22,12 +49,18 @@ window.onerror = (message, source, lineno, colno, error) => {
 
 window.onunhandledrejection = (event) => {
   console.error('[Unhandled Promise Rejection]', event.reason);
-  // Log to Firestore if possible
+
+  if (isChunkLoadError(event.reason)) {
+    if (reloadOnceForChunkError()) return;
+  }
+
   try {
     const error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
-    import('./services/logger').then(({ logError }) => {
-      logError(error, 'UnhandledPromiseRejection').catch(console.error);
-    }).catch(console.error);
+    import('./services/logger')
+      .then(({ logError }) => {
+        logError(error, 'UnhandledPromiseRejection').catch(console.error);
+      })
+      .catch(console.error);
   } catch (e) {
     console.error('Failed to log unhandled rejection:', e);
   }
@@ -38,8 +71,10 @@ if (!rootElement) {
   console.error('Failed to find the root element');
 } else {
   createRoot(rootElement).render(
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
+    <StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </StrictMode>
   );
 }

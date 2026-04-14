@@ -5,13 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && cp -r dist build || true",
+    "build": "vite build",
     "start": "tsx server.ts",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^1.29.0",
+    "@google/genai": "^1.50.0",
     "@stripe/stripe-js": "^8.9.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.14",
@@ -45,6 +45,5 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   },
-  "devDependencies": {},
   "main": "server.ts"
 }

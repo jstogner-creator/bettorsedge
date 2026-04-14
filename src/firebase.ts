@@ -2,9 +2,7 @@ import { initializeApp, FirebaseApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithRedirect,
   signInWithPopup,
-  getRedirectResult,
   signOut,
   User,
   Auth,
@@ -33,14 +31,12 @@ let authInstance: Auth | null = null;
 function buildFirebaseConfig() {
   const config = { ...rawFirebaseConfig } as any;
 
-  const host = typeof window !== "undefined" ? window.location.hostname : "";
+  const host = typeof window !== 'undefined' ? window.location.hostname : '';
   const isLocalhost =
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host.endsWith(".local");
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host.endsWith('.local');
 
-  // On hosted domains, use the current hostname for Firebase Auth helper flows.
-  // This avoids redirect/popup handoff issues on custom domains like bettorsedge.net.
   if (host && !isLocalhost) {
     config.authDomain = host;
   }
@@ -118,7 +114,7 @@ export async function logLoginError(error: any, context: string) {
     const db = getDb();
     await addDoc(collection(db, 'login_errors'), {
       error: error instanceof Error ? error.message : String(error),
-      code: error.code || 'unknown',
+      code: error?.code || 'unknown',
       context,
       timestamp: serverTimestamp(),
       userAgent: navigator.userAgent,
@@ -137,17 +133,8 @@ export interface LoginResult {
 
 export async function loginWithGoogle(): Promise<LoginResult> {
   const auth = getAuthInstance();
-  const host = window.location.hostname;
-const isLocalhost =
-  host === "localhost" ||
-  host === "127.0.0.1" ||
-  host.endsWith(".local");
 
-const useRedirect = !isLocalhost;
-
-  console.log(
-    `[Auth] Starting Google sign-in flow (${useRedirect ? "Redirect" : "Popup"})`
-  );
+  console.log('[Auth] Starting Google sign-in flow (Popup)');
 
   try {
     try {
@@ -160,58 +147,17 @@ const useRedirect = !isLocalhost;
       }
     }
 
-    if (useRedirect) {
-      document.cookie =
-        "redirect_login_pending=true; path=/; max-age=600; SameSite=Lax";
-      await signInWithRedirect(auth, googleProvider);
-      return { success: true };
-    }
-
     await signInWithPopup(auth, googleProvider);
     return { success: true };
   } catch (error: any) {
-    console.error(
-      `[Auth] ${useRedirect ? "signInWithRedirect" : "signInWithPopup"} failed:`,
-      error.code,
-      error.message
-    );
-    await logLoginError(
-      error,
-      useRedirect ? "signInWithRedirect" : "signInWithPopup"
-    );
-    return { success: false, error: error.message, code: error.code };
+    console.error('[Auth] signInWithPopup failed:', error?.code, error?.message);
+    await logLoginError(error, 'signInWithPopup');
+    return { success: false, error: error?.message, code: error?.code };
   }
 }
+
 export async function handleGoogleRedirectResult(): Promise<User | null> {
-  const auth = getAuthInstance();
-  console.log('[Auth] Checking for redirect result...');
-  
-  const wasRedirectPending = document.cookie.includes('redirect_login_pending=true');
-  if (wasRedirectPending) {
-    console.log('[Auth] Found redirect_login_pending flag in cookie');
-  }
-  
-  try {
-    const result = await getRedirectResult(auth);
-    if (result) {
-      console.log('[Auth] Redirect result processed for:', result.user.email);
-      document.cookie = "redirect_login_pending=; path=/; max-age=0; SameSite=Lax";
-      return result.user;
-    }
-    
-    if (wasRedirectPending && !auth.currentUser) {
-      console.warn('[Auth] Redirect was pending but getRedirectResult returned null!');
-      document.cookie = "redirect_login_pending=; path=/; max-age=0; SameSite=Lax";
-      throw new Error("Login session lost during redirect. Your browser's tracking prevention (like Safari ITP) blocked the login. Please ALLOW POPUPS for this site and try signing in again, or use Chrome/Firefox.");
-    }
-    
-    return auth.currentUser;
-  } catch (error: any) {
-    console.error('[Auth] getRedirectResult error:', error.code, error.message);
-    document.cookie = "redirect_login_pending=; path=/; max-age=0; SameSite=Lax";
-    await logLoginError(error, 'getRedirectResult');
-    throw error; // Throw to let the caller handle the UI
-  }
+  return getAuthInstance().currentUser;
 }
 
 export const logout = () => signOut(getAuthInstance());

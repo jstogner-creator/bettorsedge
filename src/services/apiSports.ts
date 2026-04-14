@@ -64,9 +64,9 @@ class ApiSportsService {
       const token = await getIdToken();
       
       const response = await axios.get(`${this.baseUrl}/games`, {
-        params: { date: dateStr },
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
+  params: { date: dateStr, _ts: Date.now() },
+  headers: token ? { Authorization: `Bearer ${token}` } : {}
+});
 
       if (response.data && response.data.response) {
         return response.data.response;

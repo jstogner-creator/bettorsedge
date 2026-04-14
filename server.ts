@@ -7,7 +7,6 @@ import axios from "axios";
 import crypto from "crypto";
 import fs from "fs";
 import "dotenv/config";
-import { GoogleGenAI } from "@google/genai";
 import Stripe from "stripe";
 import OpenAI from "openai";
 import cors from "cors";
@@ -175,17 +174,18 @@ async function startServer() {
   });
 
   // CORS configuration
-  const corsOptions = {
-    origin: process.env.NODE_ENV === "production" 
-      ? [process.env.APP_URL || "", "https://ais-dev-qbd465a7sj355a2sbsxinj-19334567539.us-east1.run.app", "https://ais-pre-qbd465a7sj355a2sbsxinj-19334567539.us-east1.run.app"]
-      : true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  };
   app.use(cors(corsOptions));
 
-  // Authentication Middleware
-  const authenticate = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+// Prevent browsers/CDNs from caching API responses
+app.use("/api", (req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  next();
+});
+
+// Authentication Middleware
+const authenticate = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ error: "Unauthorized: No token provided" });
@@ -419,9 +419,6 @@ async function startServer() {
         },
         openai: {
           configured: !!process.env.OPENAI_API_KEY
-        },
-        gemini: {
-          configured: !!process.env.GEMINI_API_KEY
         },
         apiSports: {
           configured: !!process.env.API_SPORTS_KEY || !!apiSportsKey
