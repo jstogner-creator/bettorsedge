@@ -1268,107 +1268,62 @@ RULES:
   ): Promise<Record<string, any>> {
     if (!games || games.length === 0) return {};
 
-    onProgress?.(`Starting batch analysis for ${games.length} games...`);
+    onProgress?.(`Starting analysis for ${games.length} games...`);
 
-    const league = games[0].league;
-    const today = getNYDate().toDateString();
+    const results: Record<string, any> = {};
+    let completed = 0;
+    const BATCH_SIZE = 2;
 
-    // Prepare context for all games
-    const gamesContext = games.map((game, index) => {
-      const existing = existingPredictions[game.id] || {};
-      return `
-GAME ${index + 1} (ID: ${game.id}):
-- Matchup: ${game.awayTeam} @ ${game.homeTeam}
-- League: ${game.league}
-- Date: ${dateStr}
-- Location: ${game.location || "Unknown"}
-- Market: ${JSON.stringify(game.marketExpectations || {})}
-- Existing Injuries: ${JSON.stringify(existing.injuries || [])}
-`;
-    }).join("\n---\n");
+    for (let i = 0; i < games.length; i += BATCH_SIZE) {
+      const batch = games.slice(i, i + BATCH_SIZE);
 
-    const systemInstruction = `You are an elite sports betting analyst. Analyze multiple ${league} games for ${dateStr}. Use search to find latest injuries, starting lineups, and market movement. Return a JSON object where keys are Game IDs.`;
+      const batchResults = await Promise.all(
+        batch.map(async (game) => {
+          try {
+            onProgress?.(
+              `Analyzing ${game.awayTeam} @ ${game.homeTeam} (${completed + 1}/${games.length})...`
+            );
 
-    const prompt = `
-${systemInstruction}
+            const existingPrediction = existingPredictions[game.id];
 
-Today is ${today}. Analyze these ${games.length} ${league} games:
-${gamesContext}
+            const prediction = await this.analyzeMatchup(
+              game,
+              dateStr,
+              existingPrediction,
+              [],
+              undefined,
+              onProgress
+            );
 
-Yesterday's ${league} Results: ${JSON.stringify(yesterdayResults.slice(0, 5))}
+            if (prediction) {
+              return { gameId: game.id, prediction };
+            }
 
-For EACH game, provide a deep analysis including:
-1. Winner & Win Probability (0.00-1.00)
-2. Projected Score & Spread
-3. Key Factors & Scenario Analysis
-4. Injuries (Verified with source & timestamp)
-5. ${league === 'MLB' ? 'Pitcher Matchup (ERA, xERA, WHIP, K/9, etc.)' : 'Key Player Matchups'}
+            return null;
+          } catch (error) {
+            console.error(`Error analyzing game ${game.id}:`, error);
+            return null;
+          }
+        })
+      );
 
-Return ONLY a JSON object:
-{
-  "game-id-1": {
-    "winner": "Team Name",
-    "winProbability": 0.75,
-    "projectedScore": {"home": 110, "away": 105},
-    "confidence": 8,
-    "reasoning": "Concise.",
-    "scenarioAnalysis": "Bullet points.",
-    "keyFactors": ["Factor 1"],
-    "injuries": [{"team": "Team", "player": "Name", "status": "Status", "impact": "PSI", "source_name": "Source", "source_timestamp": "Timestamp"}],
-    ${league === 'MLB' ? `"pitcherMatchup": {"homePitcher": {"name": "Name", "era": 3.45, "whip": 1.12, "xERA": 3.21, "fip": 3.50, "k9": 9.5, "barrelRate": 6.5, "recentForm": "Concise"}, "awayPitcher": {"name": "Name", "era": 4.12, "whip": 1.34, "xERA": 4.50, "fip": 4.20, "k9": 7.2, "barrelRate": 8.1, "recentForm": "Concise"}, "weatherImpact": "Concise", "parkFactor": "Concise", "umpire": {"name": "Name", "runsPerGame": 9.2, "strikeZone": "Standard"}, "summary": "Concise summary."},` : ''}
-    "matchupAnalysis": {"h2h": "Concise", "playerStats": "Concise", "trends": "Concise", "confidenceBreakdown": "Concise"}
-  },
-  ...
-}
-`;
-
-    try {
-      const response = await this.callWithRetry(async (ai) => {
-        let timeoutId: NodeJS.Timeout;
-        const timeoutPromise = new Promise<any>((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error("Gemini API timeout")), 300000); // 5 mins for batch
-        });
-
-        try {
-          return await Promise.race([
-            ai.models.generateContent({
-              model: this.getModel(),
-              contents: [{ role: "user", parts: [{ text: prompt }] }],
-              config: {
-                tools: [{ googleSearch: {} }],
-              },
-            }),
-            timeoutPromise
-          ]);
-        } finally {
-          clearTimeout(timeoutId!);
+      for (const item of batchResults) {
+        if (item?.prediction) {
+          results[item.gameId] = item.prediction;
         }
-      }, 3, 20000, `batch-analysis-${league}-${dateStr}`);
-
-      const text = response.text;
-      if (!text) throw new Error("No response from AI");
-
-      const cleanedText = this.cleanJson(text);
-      const batchPredictions = JSON.parse(cleanedText);
-      const cost = this.calculateGeminiCost(response.usageMetadata);
-      const perGameCost = cost / games.length;
-
-      const results: Record<string, any> = {};
-      for (const game of games) {
-        const prediction = batchPredictions[game.id];
-        if (prediction) {
-          results[game.id] = this.processAIResponse(game, JSON.stringify(prediction), perGameCost, dateStr, [], existingPredictions[game.id]);
-        }
+        completed++;
       }
 
-      onProgress?.(`Batch analysis complete for ${Object.keys(results).length} games.`);
-      return results;
-    } catch (error) {
-      console.error("Error in batch analysis:", error);
-      throw error;
-    }
-  }
+      onProgress?.(`Completed ${completed} of ${games.length} games...`);
 
+      if (i + BATCH_SIZE < games.length) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+    }
+
+    onProgress?.(`Analysis complete for ${Object.keys(results).length} games.`);
+    return results;
+  }
   private processAIResponse(
     game: any, 
     text: string, 
@@ -2145,4 +2100,5 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 }
 
 export const bettorsEdge = new BettorsEdge();
+
 
