@@ -58,20 +58,22 @@ export interface ApiSportsGame {
 class ApiSportsService {
   private baseUrl = "/api/nba";
 
+  private async getAuthHeaders() {
+    const token = await getIdToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
   async getGames(date: Date): Promise<ApiSportsGame[]> {
     try {
       const dateStr = format(date, "yyyy-MM-dd");
-      const token = await getIdToken();
-      
-      const response = await axios.get(`${this.baseUrl}/games`, {
-  params: { date: dateStr, _ts: Date.now() },
-  headers: token ? { Authorization: `Bearer ${token}` } : {}
-});
+      const headers = await this.getAuthHeaders();
 
-      if (response.data && response.data.response) {
-        return response.data.response;
-      }
-      return [];
+      const response = await axios.get(`${this.baseUrl}/games`, {
+        params: { date: dateStr, _ts: Date.now() },
+        headers
+      });
+
+      return response.data?.response || [];
     } catch (error) {
       console.error("[API-Sports Service] Error fetching games:", error);
       return [];
@@ -80,16 +82,13 @@ class ApiSportsService {
 
   async getTeamStats(teamId: number, season: string): Promise<any> {
     try {
-      const token = await getIdToken();
+      const headers = await this.getAuthHeaders();
       const response = await axios.get(`${this.baseUrl}/teams/statistics`, {
         params: { id: teamId, season },
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
+        headers
       });
 
-      if (response.data && response.data.response) {
-        return response.data.response;
-      }
-      return null;
+      return response.data?.response || null;
     } catch (error) {
       console.error(`[API-Sports Service] Error fetching stats for team ${teamId}:`, error);
       return null;
@@ -98,18 +97,63 @@ class ApiSportsService {
 
   async getInjuries(teamId: number, season: string): Promise<any[]> {
     try {
-      const token = await getIdToken();
+      const headers = await this.getAuthHeaders();
       const response = await axios.get(`${this.baseUrl}/injuries`, {
         params: { team: teamId, season },
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
+        headers
       });
 
-      if (response.data && response.data.response) {
-        return response.data.response;
-      }
-      return [];
+      return response.data?.response || [];
     } catch (error) {
       console.error(`[API-Sports Service] Error fetching injuries for team ${teamId}:`, error);
+      return [];
+    }
+  }
+
+  async getPlayers(teamId: number, season: string): Promise<any[]> {
+    try {
+      const headers = await this.getAuthHeaders();
+      const response = await axios.get(`${this.baseUrl}/players`, {
+        params: { team: teamId, season },
+        headers
+      });
+
+      return response.data?.response || [];
+    } catch (error) {
+      console.error(`[API-Sports Service] Error fetching players for team ${teamId}:`, error);
+      return [];
+    }
+  }
+
+  async getPlayerStats(teamId: number, season: string): Promise<any[]> {
+    try {
+      const headers = await this.getAuthHeaders();
+      const response = await axios.get(`${this.baseUrl}/players/statistics`, {
+        params: { team: teamId, season },
+        headers
+      });
+
+      return response.data?.response || [];
+    } catch (error) {
+      console.error(`[API-Sports Service] Error fetching player stats for team ${teamId}:`, error);
+      return [];
+    }
+  }
+
+  async getH2H(homeTeamId: number, awayTeamId: number, season: string): Promise<any[]> {
+    try {
+      const headers = await this.getAuthHeaders();
+      const response = await axios.get(`${this.baseUrl}/games`, {
+        params: {
+          h2h: `${homeTeamId}-${awayTeamId}`,
+          season
+        },
+        headers
+      });
+
+      return response.data?.response || [];
+    } catch (error) {
+      console.error(`[API-Sports Service] Error fetching H2H for ${homeTeamId}-${awayTeamId}:`, error);
       return [];
     }
   }

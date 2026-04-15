@@ -1136,7 +1136,7 @@ RULES:
           "scorePrediction": {"home": 105, "away": 98},
           "projectedTotal": 203,
           "recommendedTotalLine": "Under 204.5",
-          "reasoning": "Concise edge summary with a concrete reason tied to roster, form, or market.",
+          "reasoning": "Concise edge summary with a concrete reason tied to verified stats, roster form, or market context.",
           "devilsAdvocate": "Counter-case.",
           "marketSentiment": "Market summary.",
           "situationalFactors": "Rest/travel.",
@@ -1154,7 +1154,7 @@ RULES:
           "previousMatchups": [{"date": "2026-MM-DD", "homeScore": 100, "awayScore": 90}],
           "matchupRankings": {"homeRank": 5, "awayRank": 12},
           "teamStatsComparison": [{"category": "PPG", "homeValue": 115.4, "awayValue": 110.2}],
-          "trends": {"homeVsExp": "Concrete trend vs spread/market", "awayVsExp": "Concrete trend vs spread/market", "homeTotal": "Concrete over/under trend", "awayTotal": "Concrete over/under trend"},
+          "trends": {"homeVsExp": "Concrete verified trend vs expectations", "awayVsExp": "Concrete verified trend vs expectations", "homeTotal": "Concrete projected scoring trend", "awayTotal": "Concrete projected scoring trend"},
           "matchupAnalysis": {
             "projectionBasis": "Explain what the projection is based on if data is incomplete.",
             "h2h": "Concise H2H analysis. Max 200 chars.",
@@ -1708,7 +1708,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
       ${rosterDatabaseContext}
       
       AUDIT STEPS:
-      1. INJURY REPORT VERIFICATION (ZERO TOLERANCE): You MUST ONLY report injury statuses explicitly present in provided data or search results. NO inferring or guessing. Every injury MUST include "source_name" and "source_timestamp". If missing, label "UNVERIFIED — DO NOT USE". If data is not from the current game window, label "STALE — REQUIRES RE-VERIFICATION". If sources disagree, label "CONFLICT — MULTIPLE SOURCES DISAGREE". Format: Player Name — Status (Injury) [Source: name, timestamp]. If no verified data exists, output "NO VERIFIED INJURY REPORT AVAILABLE FOR THIS GAME" in qaNotes.
+      1. INJURY REPORT VERIFICATION (ZERO TOLERANCE): You MUST ONLY report injury statuses explicitly present in provided data or search results. NO inferring or guessing. Every injury MUST include "source_name" and "source_timestamp". If missing, label "UNVERIFIED — DO NOT USE". If data is not from the current game window, label "STALE — REQUIRES RE-VERIFICATION". If sources disagree, label "CONFLICT — MULTIPLE SOURCES DISAGREE". Format: Player Name — Status (Injury) [Source: name, timestamp]. If no verified data exists, output "No active injuries returned by API-Sports for this game" in qaNotes.
       2. DETROIT PISTONS SPECIAL ALERT: If this game involves the Detroit Pistons, you MUST be extremely thorough. There have been reports of incorrect 'Clear' statuses for Pistons players who are actually 'Out'. Cross-reference multiple sources.
       3. ROSTER CHECK: For EVERY player mentioned (in injuries, reasoning, or factors), you MUST search "current roster [Team Name]" and confirm they are on that team using https://www.espn.com/nba/players.
          - CRITICAL: You MUST use your search tool to confirm every player's current team. Do not rely on outdated information.
@@ -1945,7 +1945,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
         ${league === 'NCAA' ? 'For NCAA, a primary source is https://www.rotowire.com/cbasketball/injury-report.php.' : league === 'NBA' ? `For NBA, use https://www.rotowire.com/basketball/injury-report.php and look specifically for the file 'NBA_Injury_Report_Latest' in the Google Drive folder 1cf6SvGHVE9M--wu3xzjbm2_MJLSeoSx9.` : `For ${league}, use reputable sources like Rotowire, ESPN, or official team reports.`}
 
         INSTRUCTIONS:
-        1. INJURY REPORT VERIFICATION (ZERO TOLERANCE): You MUST ONLY report injury statuses explicitly present in provided data or search results. NO inferring or guessing. Every injury MUST include "source_name" and "source_timestamp". If missing, label "UNVERIFIED — DO NOT USE". If data is not from the current game window, label "STALE — REQUIRES RE-VERIFICATION". If sources disagree, label "CONFLICT — MULTIPLE SOURCES DISAGREE". Format: Player Name — Status (Injury) [Source: name, timestamp]. If no verified data exists, output "NO VERIFIED INJURY REPORT AVAILABLE FOR THIS GAME" in the update field.
+        1. INJURY REPORT VERIFICATION (ZERO TOLERANCE): You MUST ONLY report injury statuses explicitly present in provided data or search results. NO inferring or guessing. Every injury MUST include "source_name" and "source_timestamp". If missing, label "UNVERIFIED — DO NOT USE". If data is not from the current game window, label "STALE — REQUIRES RE-VERIFICATION". If sources disagree, label "CONFLICT — MULTIPLE SOURCES DISAGREE". Format: Player Name — Status (Injury) [Source: name, timestamp]. If no verified data exists, output "No active injuries returned by API-Sports for this game" in the update field.
         2. INJURIES: Find the latest status of key players. Verify roster integrity (e.g., ensure players are attributed to their correct current teams).
            - TERMINOLOGY: You MUST use ONLY these four statuses: "In", "Out", "Doubtful", or "Probable". Map all other statuses (Questionable, GTD, etc.) to one of these four.
         3. MARKET: Identify any significant market expectations movement or "expert consensus" reports.
@@ -2088,7 +2088,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
       Maintain a professional, data-driven, and objective tone. Focus specifically on 'Impact Players'—explain how the absence of a top-tier player shifts the point spread. Ensure the information is presented in a clear, scannable format using tables or bulleted lists for high readability.
       
       IMPORTANT:
-      - INJURY REPORT VERIFICATION (ZERO TOLERANCE): You MUST ONLY report injury statuses explicitly present in provided data or search results. NO inferring or guessing. Every injury MUST include "source_name" and "source_timestamp". If missing, label "UNVERIFIED — DO NOT USE". If data is not from the current game window, label "STALE — REQUIRES RE-VERIFICATION". If sources disagree, label "CONFLICT — MULTIPLE SOURCES DISAGREE". Format: Player Name — Status (Injury) [Source: name, timestamp]. If no verified data exists, output "NO VERIFIED INJURY REPORT AVAILABLE FOR THIS GAME".
+      - INJURY REPORT VERIFICATION (ZERO TOLERANCE): You MUST ONLY report injury statuses explicitly present in provided data or search results. NO inferring or guessing. Every injury MUST include "source_name" and "source_timestamp". If missing, label "UNVERIFIED — DO NOT USE". If data is not from the current game window, label "STALE — REQUIRES RE-VERIFICATION". If sources disagree, label "CONFLICT — MULTIPLE SOURCES DISAGREE". Format: Player Name — Status (Injury) [Source: name, timestamp]. If no verified data exists, output "No active injuries returned by API-Sports for this game".
       - Provide ACTUAL, specific advantages (e.g., 'Celtics have a +8 rebounding edge with Porzingis back') rather than generic references.
       - NEVER mention the Google Drive link or 'official injury report' in your output. Use the information silently to provide accurate status updates.
     `;
@@ -2243,6 +2243,8 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 }
 
 export const bettorsEdge = new BettorsEdge();
+
+
 
 
 
