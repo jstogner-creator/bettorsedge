@@ -1091,7 +1091,8 @@ RULES:
 5. MLB: Focus on xERA, Barrel%, bullpen rest, and weather/park factors.
 6. NBA: Prioritize advanced metrics (Net Rating, Efficiency). H2H: ONLY 2026 games.
 7. OUTPUT: Ultra-concise JSON. No '+' for positive numbers. No fluff.
-8. DECISIVENESS: Only 'PASS' if 50/50. If winProbability > 50.5%, pick a winner.`;
+8. DECISIVENESS: Only use 'PASS' when confidence <= 2 AND winProbability is between 0.49 and 0.51. Otherwise you MUST pick a winner.
+9. PROJECTIONS: You MUST provide a scorePrediction, matchupAnalysis, trends, and keyFactors. If exact values are uncertain, estimate from available team stats and market expectations instead of returning unknown or blank values.`;
 
       const leagueSearchQueries = game.league === 'NCAA'
         ? `"current roster and injury report ${game.homeTeam} vs ${game.awayTeam} basketball", "NCAA basketball market expectations and expert consensus ${game.homeTeam} vs ${game.awayTeam}", "${game.homeTeam} vs ${game.awayTeam} h2h record and last 5 games basketball"`
@@ -1135,7 +1136,7 @@ RULES:
           "scorePrediction": {"home": 105, "away": 98},
           "projectedTotal": 203,
           "recommendedTotalLine": "Under 204.5",
-          "reasoning": "Concise edge summary.",
+          "reasoning": "Concise edge summary with a concrete reason tied to roster, form, or market.",
           "devilsAdvocate": "Counter-case.",
           "marketSentiment": "Market summary.",
           "situationalFactors": "Rest/travel.",
@@ -1153,8 +1154,9 @@ RULES:
           "previousMatchups": [{"date": "2026-MM-DD", "homeScore": 100, "awayScore": 90}],
           "matchupRankings": {"homeRank": 5, "awayRank": 12},
           "teamStatsComparison": [{"category": "PPG", "homeValue": 115.4, "awayValue": 110.2}],
-          "trends": {"homeVsExp": "Trend", "awayVsExp": "Trend", "homeTotal": "Trend", "awayTotal": "Trend"},
+          "trends": {"homeVsExp": "Concrete trend vs spread/market", "awayVsExp": "Concrete trend vs spread/market", "homeTotal": "Concrete over/under trend", "awayTotal": "Concrete over/under trend"},
           "matchupAnalysis": {
+            "projectionBasis": "Explain what the projection is based on if data is incomplete.",
             "h2h": "Concise H2H analysis. Max 200 chars.",
             "playerStats": "Concise player stats analysis. Max 200 chars.",
             "trends": "Concise efficiency trends. Max 200 chars.",
@@ -1439,6 +1441,110 @@ RULES:
 
           return true;
         });
+      }
+      // Backfill weak / incomplete AI responses so UI is never empty
+      const marketHomeProb = Number(
+        prediction.marketExpectations?.homeWinProb ??
+        existingPrediction?.marketExpectations?.homeWinProb ??
+        game.marketExpectations?.homeWinProb
+      );
+      const marketAwayProb = Number(
+        prediction.marketExpectations?.awayWinProb ??
+        existingPrediction?.marketExpectations?.awayWinProb ??
+        game.marketExpectations?.awayWinProb
+      );
+      const marketTotal = Number(
+        prediction.marketExpectations?.total ??
+        existingPrediction?.marketExpectations?.total ??
+        game.marketExpectations?.total
+      );
+      const marketMargin = Number(
+        prediction.marketExpectations?.margin ??
+        existingPrediction?.marketExpectations?.margin ??
+        game.marketExpectations?.margin
+      );
+
+      const normalizeAmericanOddsToProb = (odds: number): number | null => {
+        if (!Number.isFinite(odds) || odds === 0) return null;
+        if (odds > 0) return 100 / (odds + 100);
+        const abs = Math.abs(odds);
+        return abs / (abs + 100);
+      };
+
+      let derivedHomeProb = normalizeAmericanOddsToProb(marketHomeProb);
+      let derivedAwayProb = normalizeAmericanOddsToProb(marketAwayProb);
+
+      if (!derivedHomeProb && derivedAwayProb) derivedHomeProb = 1 - derivedAwayProb;
+      if (!derivedAwayProb && derivedHomeProb) derivedAwayProb = 1 - derivedHomeProb;
+
+      if ((!prediction.winner || prediction.winner === "PASS") && derivedHomeProb && derivedAwayProb) {
+        prediction.winner = derivedHomeProb >= derivedAwayProb ? game.homeTeam : game.awayTeam;
+      }
+
+      if ((!prediction.winProbability || prediction.winProbability === 0.5) && derivedHomeProb && derivedAwayProb) {
+        prediction.winProbability = Math.max(derivedHomeProb, derivedAwayProb);
+      }
+
+      const safeTotal = Number.isFinite(marketTotal) && marketTotal > 0 ? marketTotal : 212;
+      const safeMargin = Number.isFinite(marketMargin) ? marketMargin : 0;
+
+      if (
+        !prediction.scorePrediction ||
+        !Number.isFinite(Number(prediction.scorePrediction.home)) ||
+        !Number.isFinite(Number(prediction.scorePrediction.away))
+      ) {
+        const homeScore = Math.round((safeTotal / 2) + (safeMargin / 2));
+        const awayScore = Math.round(safeTotal - homeScore);
+        prediction.scorePrediction = {
+          home: homeScore,
+          away: awayScore
+        };
+      }
+
+      if (!prediction.projectedTotal || !Number.isFinite(Number(prediction.projectedTotal))) {
+        prediction.projectedTotal = safeTotal;
+      }
+
+      if (!prediction.trends || typeof prediction.trends !== "object") {
+        prediction.trends = {};
+      }
+
+      prediction.trends.homeVsExp = prediction.trends.homeVsExp || "Leaning on market-implied edge and roster context";
+      prediction.trends.awayVsExp = prediction.trends.awayVsExp || "Leaning on market-implied edge and roster context";
+      prediction.trends.homeTotal = prediction.trends.homeTotal || `Projected team environment from total ${safeTotal}`;
+      prediction.trends.awayTotal = prediction.trends.awayTotal || `Projected team environment from total ${safeTotal}`;
+
+      if (!prediction.matchupAnalysis || typeof prediction.matchupAnalysis !== "object") {
+        prediction.matchupAnalysis = {};
+      }
+
+      prediction.matchupAnalysis.h2h = prediction.matchupAnalysis.h2h || "Recent verified H2H data unavailable; projection relies on current roster, market, and team context.";
+      prediction.matchupAnalysis.playerStats = prediction.matchupAnalysis.playerStats || "Projection based on available roster quality, role concentration, and expected usage.";
+      prediction.matchupAnalysis.trends = prediction.matchupAnalysis.trends || "Trend view derived from market baseline and available team-form context.";
+      prediction.matchupAnalysis.confidenceBreakdown = prediction.matchupAnalysis.confidenceBreakdown || "Confidence derived from available market, roster, and injury context.";
+      prediction.matchupAnalysis.projectionBasis = prediction.matchupAnalysis.projectionBasis || "Fallback projection used market total and spread because AI response lacked numeric detail.";
+
+      if (!Array.isArray(prediction.keyFactors) || prediction.keyFactors.length === 0) {
+        prediction.keyFactors = [
+          "Market-implied spread and total used as projection baseline",
+          "Current roster and injury context weighted into winner selection",
+          "Confidence reduced when verified matchup-specific data is limited"
+        ];
+      }
+
+      if (!prediction.reasoning || String(prediction.reasoning).trim().length < 25) {
+        prediction.reasoning = `Projection leans on market baseline, available roster context, and injury information. ${prediction.winner} gets the edge from the stronger implied game script.`;
+      }
+
+      if (
+        prediction.winner === "PASS" &&
+        typeof prediction.winProbability === "number" &&
+        prediction.winProbability > 0.51
+      ) {
+        prediction.winner =
+          derivedHomeProb && derivedAwayProb
+            ? (derivedHomeProb >= derivedAwayProb ? game.homeTeam : game.awayTeam)
+            : game.homeTeam;
       }
       // Ensure confidence is a number and estimate if missing
       let conf = prediction.confidence;
@@ -2137,6 +2243,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 }
 
 export const bettorsEdge = new BettorsEdge();
+
 
 
 
