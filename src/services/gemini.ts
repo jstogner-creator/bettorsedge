@@ -1377,32 +1377,69 @@ RULES:
         }
       }
       
-      // Post-processing validation: Ensure injuries are assigned to the correct teams in the game
+      // Post-processing validation: keep likely-valid injuries while filtering obvious hallucinations
       if (Array.isArray(prediction.injuries)) {
+        const normalize = (value: string) =>
+          String(value || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9 ]/g, "")
+            .trim();
+
+        const tokens = (value: string) =>
+          normalize(value)
+            .split(/\s+/)
+            .filter((x) => x.length >= 3);
+
+        const homeTeam = normalize(game.homeTeam || "");
+        const awayTeam = normalize(game.awayTeam || "");
+        const homeTokens = tokens(game.homeTeam || "");
+        const awayTokens = tokens(game.awayTeam || "");
+
+        const knownTeamAbbreviations = new Set([
+          "atl","bos","bkn","bro","cha","chi","cle","dal","den","det","gsw","hou","ind","lac","lal","mem",
+          "mia","mil","min","nop","no","nyk","okc","orl","phi","phx","pho","por","sac","sas","sa","tor","uta","was"
+        ]);
+
         prediction.injuries = prediction.injuries.filter((injury: any) => {
-          const injuryTeam = (injury.team || "").toLowerCase();
-          const homeTeam = (game.homeTeam || "").toLowerCase();
-          const awayTeam = (game.awayTeam || "").toLowerCase();
-          
-          // Hard-coded common hallucination checks
-          const player = (injury.player || "").toLowerCase();
+          const injuryTeamRaw = String(injury.team || "").trim();
+          const injuryTeam = normalize(injuryTeamRaw);
+          const player = normalize(injury.player || "");
+
           if (player === "cade cunningham" && !homeTeam.includes("pistons") && !awayTeam.includes("pistons")) return false;
           if (player === "anthony davis" && !homeTeam.includes("lakers") && !awayTeam.includes("lakers")) return false;
           if (player === "lebron james" && !homeTeam.includes("lakers") && !awayTeam.includes("lakers")) return false;
           if (player === "luka doncic" && !homeTeam.includes("mavericks") && !awayTeam.includes("mavericks")) return false;
-          
-          // Check if the injury team is part of either the home or away team name
-          const isHome = homeTeam.includes(injuryTeam) || injuryTeam.includes(homeTeam);
-          const isAway = awayTeam.includes(injuryTeam) || injuryTeam.includes(awayTeam);
-          
-          if (!isHome && !isAway) {
+
+          if (!injuryTeam) {
+            return true;
+          }
+
+          if (knownTeamAbbreviations.has(injuryTeam)) {
+            return true;
+          }
+
+          const injuryTokens = tokens(injuryTeamRaw);
+
+          const matchesHome =
+            homeTeam.includes(injuryTeam) ||
+            injuryTeam.includes(homeTeam) ||
+            injuryTokens.some((t) => homeTokens.includes(t)) ||
+            homeTokens.some((t) => injuryTokens.includes(t));
+
+          const matchesAway =
+            awayTeam.includes(injuryTeam) ||
+            injuryTeam.includes(awayTeam) ||
+            injuryTokens.some((t) => awayTokens.includes(t)) ||
+            awayTokens.some((t) => injuryTokens.includes(t));
+
+          if (!matchesHome && !matchesAway) {
             console.warn(`[Gemini] Removing hallucinated injury in processAIResponse: ${injury.player} on ${injury.team} for game ${game.awayTeam} @ ${game.homeTeam}`);
             return false;
           }
+
           return true;
         });
       }
-      
       // Ensure confidence is a number and estimate if missing
       let conf = prediction.confidence;
       let prob = typeof prediction.winProbability === 'number' ? prediction.winProbability : parseFloat(prediction.winProbability);
@@ -2100,5 +2137,6 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 }
 
 export const bettorsEdge = new BettorsEdge();
+
 
 

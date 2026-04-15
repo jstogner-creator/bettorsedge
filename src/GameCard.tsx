@@ -398,7 +398,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                 const status = (injury.status || 'Unknown').toLowerCase();
                 return (
                   <span key={idx} className="text-[9px] bg-slate-800/50 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700/30 flex items-center">
-                    <span className="font-medium mr-1 truncate max-w-[60px]">{injury.player}</span>
+                    <span className="font-medium mr-1">{injury.player}</span>
                     <span className={cn(
                       "font-bold uppercase tracking-wider",
                       status === 'out' ? "text-rose-400" : 
@@ -941,7 +941,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                         const status = (injury.status || 'Unknown').toLowerCase();
                         return (
                           <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-950/40 rounded-lg border border-slate-800/50 hover:border-rose-500/20 transition-colors group/injury">
-                            <div className="flex items-center gap-3 min-w-0">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
                               <div className={cn(
                                 "w-1.5 h-8 rounded-full shrink-0",
                                 status === 'out' ? "bg-rose-500" : 
@@ -951,12 +951,14 @@ export const GameCard: React.FC<GameCardProps> = ({
                                 status === 'in' ? "bg-emerald-500" :
                                 "bg-slate-700"
                               )} />
-                              <div className="flex flex-col min-w-0">
-                                <span className="text-slate-200 font-bold text-sm truncate group-hover/injury:text-white transition-colors">{injury.player || 'Unknown'}</span>
+                              <div className="flex flex-col flex-1 min-w-0">
+                                <span className="text-slate-200 font-bold text-sm group-hover/injury:text-white transition-colors whitespace-normal break-words">
+  {injury.player || 'Unknown'}
+</span>
                                 <span className="text-[10px] text-slate-500 uppercase font-bold tracking-tighter">{injury.team || 'Unknown'}</span>
                               </div>
                             </div>
-                            <div className="flex flex-col items-end shrink-0">
+                            <div className="flex flex-col items-end ml-3 max-w-[180px] shrink-0">
                               <span className={cn(
                                 "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded border",
                                 status === 'out' ? "bg-rose-500/10 text-rose-400 border-rose-500/20" : 
@@ -972,7 +974,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                                 <span className="text-[9px] text-slate-500 mt-1 italic max-w-[150px] truncate">{injury.impact}</span>
                               )}
                               {(injury.source_name || injury.source_timestamp) && (
-                                <span className="text-[8px] text-slate-600 mt-0.5 font-mono uppercase tracking-tighter">
+                                <span className="text-[8px] text-slate-600 mt-0.5 font-mono uppercase tracking-tighter text-right break-words">
                                   [Source: {injury.source_name || 'Unknown'}, {injury.source_timestamp || 'N/A'}]
                                 </span>
                               )}
@@ -1384,3 +1386,4 @@ export const GameCard: React.FC<GameCardProps> = ({
     </div>
   );
 };
+
