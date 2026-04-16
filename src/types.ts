@@ -90,6 +90,14 @@ export interface Prediction {
     awayOffenseRank: number | string;
     homeDefenseRank: number | string;
     awayDefenseRank: number | string;
+    homeShootingRank?: number | string;
+    awayShootingRank?: number | string;
+    homeReboundingRank?: number | string;
+    awayReboundingRank?: number | string;
+    homeTurnoverRank?: number | string;
+    awayTurnoverRank?: number | string;
+    homeBenchRank?: number | string;
+    awayBenchRank?: number | string;
   };
   kalshiPrice: number; // 0.01 - 0.99
   winProbability?: number; // Added to match AI output and Dashboard usage
@@ -264,5 +272,6 @@ export interface UserProfile {
   acceptedTerms?: boolean;
   termsAcceptedAt?: string;
 }
+
 
 

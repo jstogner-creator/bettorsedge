@@ -2020,6 +2020,64 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
       }
 
       const batchGames = games.slice(i, i + BATCH_SIZE);
+
+      if (league === 'NBA') {
+        const season = getNYDate().getFullYear().toString();
+
+        const normalizeApiSportsStatus = (status: any): string => {
+          const s = String(status || "").toLowerCase();
+          if (s.includes("out")) return "Out";
+          if (s.includes("doubt")) return "Doubtful";
+          if (s.includes("prob")) return "Probable";
+          if (s.includes("available") || s.includes("active") || s === "in") return "In";
+          return "";
+        };
+
+        const batchResults = await Promise.all(batchGames.map(async (game) => {
+          if (!game.apiSportsHomeTeamId || !game.apiSportsAwayTeamId) {
+            return { gameId: game.id, injuries: [] as any[] };
+          }
+
+          const [homeInjuries, awayInjuries] = await Promise.all([
+            apiSportsService.getInjuries(game.apiSportsHomeTeamId, season),
+            apiSportsService.getInjuries(game.apiSportsAwayTeamId, season)
+          ]);
+
+          const mapTeamInjuries = (injuries: any[], teamName: string) =>
+            (injuries || []).map((inj: any) => {
+              const playerName =
+                inj?.player?.name ||
+                [inj?.player?.firstname, inj?.player?.lastname].filter(Boolean).join(" ") ||
+                inj?.player ||
+                inj?.name ||
+                "";
+
+              return {
+                player: String(playerName || "").trim(),
+                team: teamName,
+                status: normalizeApiSportsStatus(inj?.status || inj?.injury?.status || inj?.reason || inj?.description),
+                impact: String(inj?.reason || inj?.injury?.description || inj?.description || "").trim(),
+                source_name: "API-Sports",
+                source_timestamp: String(inj?.date || inj?.updatedAt || new Date().toISOString())
+              };
+            }).filter((inj: any) => inj.player && inj.status);
+
+          return {
+            gameId: game.id,
+            injuries: [
+              ...mapTeamInjuries(homeInjuries, game.homeTeam),
+              ...mapTeamInjuries(awayInjuries, game.awayTeam)
+            ]
+          };
+        }));
+
+        for (const item of batchResults) {
+          allUpdates[item.gameId] = item.injuries;
+        }
+
+        continue;
+      }
+
       const teams = batchGames.map(g => `${g.awayTeam} and ${g.homeTeam}`).join(", ");
 
       const leagueSearchQuery = league === 'NCAA' 
@@ -2335,6 +2393,8 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 }
 
 export const bettorsEdge = new BettorsEdge();
+
+
 
 
 
