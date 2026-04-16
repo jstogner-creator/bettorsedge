@@ -124,6 +124,7 @@ export function Dashboard({
   const [apiSportsStatus, setApiSportsStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', count: number, message?: string }>({ status: 'idle', count: 0 });
   const [selectedDate, setSelectedDate] = useState(getNYDate());
   const [games, setGames] = useState<Game[]>([]);
+  const gamesCacheRef = useRef<Record<string, Game[]>>({});
   const [loading, setLoading] = useState(false);
   const [analyzingMap, setAnalyzingMap] = useState<Record<string, boolean>>({});
   const importedSchedulesRef = useRef<Set<string>>(new Set());
@@ -1060,6 +1061,7 @@ const fetchGames = async (force: boolean = false) => {
   try {
     let fetchedGames: Game[] = [];
     const dateStrIso = format(selectedDate, "yyyy-MM-dd");
+    const cacheKey = `${activeTab}|${dateStrIso}`;
 
     console.log(`[Dashboard] fetchGames: Parallel fetch starting for ${activeTab}...`);
 
@@ -1454,12 +1456,19 @@ const fetchGames = async (force: boolean = false) => {
         console.warn(`[Dashboard] fetchGames: Empty response received, restoring cached games for ${activeTab} on ${dateStrIso}.`);
         setGames(cachedGames);
       } else {
+        const cachedGames = gamesCacheRef.current[cacheKey] || [];
+      if (cachedGames.length > 0) {
+        console.warn(`[Dashboard] fetchGames: Empty response received, restoring cached games for ${activeTab} on ${dateStrIso}.`);
+        setGames(cachedGames);
+      } else {
         setGames([]);
+      }
       }
     } else {
       console.log(
         `[Dashboard] fetchGames: Setting ${fetchedGames.length} games for ${activeTab}. Sample: ${fetchedGames[0].awayTeam}@${fetchedGames[0].homeTeam}`
-      );
+      );      gamesCacheRef.current[cacheKey] = fetchedGames;
+
       setGames(fetchedGames);
       fetchKalshiExpectations(activeTab).catch(console.error);
     }
@@ -2646,6 +2655,8 @@ const fetchGames = async (force: boolean = false) => {
     </Layout>
   );
 }
+
+
 
 
 
