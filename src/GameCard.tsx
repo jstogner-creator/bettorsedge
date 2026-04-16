@@ -690,7 +690,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                     <div id="win-prob" className="flex items-center justify-between text-xs text-slate-400 bg-slate-800/50 p-2.5 rounded border border-slate-700/30 flex-1 min-w-0">
                       <div className="flex items-center truncate mr-2">
                         <Activity className="w-3.5 h-3.5 mr-2 text-indigo-400 flex-shrink-0" />
-                        <span className="truncate">{prediction.simulationCount ? (prediction.simulationCount / 1000).toFixed(0) + 'k' : '10k'} Sims</span>
+                        <span className="truncate">{prediction.simulationCount === 10000 ? '10k Sims' : prediction.simulationCount ? (prediction.simulationCount / 1000).toFixed(0) + 'k Sims' : 'Model Estimate'}</span>
                       </div>
                       <div className="font-mono text-indigo-300 font-bold flex-shrink-0">
                         {(prediction.winProbability * 100).toFixed(1)}% Win Prob
@@ -1386,4 +1386,5 @@ export const GameCard: React.FC<GameCardProps> = ({
     </div>
   );
 };
+
 

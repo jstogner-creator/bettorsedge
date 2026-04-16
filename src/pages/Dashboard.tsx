@@ -126,7 +126,7 @@ export function Dashboard({
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(false);
   const [analyzingMap, setAnalyzingMap] = useState<Record<string, boolean>>({});
-  const importedTabsRef = useRef<Set<string>>(new Set());
+  const importedSchedulesRef = useRef<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [savedPredictions, setSavedPredictions] = useState<Record<string, Prediction>>({});
   const [allPredictions, setAllPredictions] = useState<Record<string, Prediction>>({});
@@ -2640,3 +2640,4 @@ const fetchGames = async (force: boolean = false) => {
     </Layout>
   );
 }
+

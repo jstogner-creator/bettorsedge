@@ -1254,7 +1254,7 @@ RULES:
         return null;
       }).filter(Boolean) || [];
 
-      return this.processAIResponse({ ...game, apiSportsH2H }, text, cost, dateStr, previousMatchups, existingPrediction, groundingUrls);
+      return this.processAIResponse({ ...game, apiSportsH2H, apiSportsVerifiedInjuries: [...(apiHomeInjuries || []), ...(apiAwayInjuries || [])] }, text, cost, dateStr, previousMatchups, existingPrediction, groundingUrls);
     } catch (error) {
       console.error("Error analyzing matchup:", error);
       throw error;
@@ -2243,6 +2243,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 }
 
 export const bettorsEdge = new BettorsEdge();
+
 
 
 
