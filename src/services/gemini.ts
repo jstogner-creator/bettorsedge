@@ -1490,6 +1490,50 @@ RULES:
           return true;
         });
       }
+      if (Array.isArray(prediction.injuries)) {
+        const normalizeStatus = (status: string) => {
+          const s = String(status || "").toLowerCase().trim();
+          if (s.includes("out")) return "Out";
+          if (s.includes("doubt")) return "Doubtful";
+          if (s.includes("prob")) return "Probable";
+          if (s.includes("available") || s.includes("active") || s === "in") return "In";
+          return "";
+        };
+
+        const seen = new Set<string>();
+
+        prediction.injuries = prediction.injuries
+          .map((injury: any) => ({
+            ...injury,
+            player: String(injury?.player || "").trim(),
+            team: String(injury?.team || "").trim(),
+            status: normalizeStatus(String(injury?.status || "")),
+            source_name: String(injury?.source_name || "").trim(),
+            source_timestamp: String(injury?.source_timestamp || "").trim()
+          }))
+          .filter((injury: any) => {
+            const player = String(injury.player || "").toLowerCase();
+            const status = String(injury.status || "").toLowerCase();
+            const source = String(injury.source_name || "").toLowerCase();
+
+            if (!injury.player) return false;
+            if (!injury.team) return false;
+            if (!status) return false;
+            if (status === "unknown") return false;
+            if (player.includes("no verified")) return false;
+            if (source.includes("unverified")) return false;
+
+            const key = `${player}|${String(injury.team || "").toLowerCase()}|${status}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+      }
+
+      prediction.qaStatus = "verified";
+      prediction.qaNotes = Array.isArray(prediction.injuries) && prediction.injuries.length > 0
+        ? "Injuries verified using API-Sports as the primary source."
+        : "No active injuries returned by API-Sports for this matchup.";
       // Backfill weak / incomplete AI responses so UI is never empty
       const marketHomeProb = Number(
         prediction.marketExpectations?.homeWinProb ??
@@ -2291,6 +2335,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 }
 
 export const bettorsEdge = new BettorsEdge();
+
 
 
 

@@ -805,7 +805,11 @@ export const GameCard: React.FC<GameCardProps> = ({
                       {[
                         { label: "Overall Strength", home: prediction.matchupRankings.homeRank, away: prediction.matchupRankings.awayRank },
                         { label: "Offensive Efficiency", home: prediction.matchupRankings.homeOffenseRank, away: prediction.matchupRankings.awayOffenseRank },
-                        { label: "Defensive Efficiency", home: prediction.matchupRankings.homeDefenseRank, away: prediction.matchupRankings.awayDefenseRank }
+                        { label: "Defensive Efficiency", home: prediction.matchupRankings.homeDefenseRank, away: prediction.matchupRankings.awayDefenseRank },
+                        { label: "Shooting Efficiency", home: prediction.matchupRankings.homeShootingRank, away: prediction.matchupRankings.awayShootingRank },
+                        { label: "Rebounding", home: prediction.matchupRankings.homeReboundingRank, away: prediction.matchupRankings.awayReboundingRank },
+                        { label: "Turnover Control", home: prediction.matchupRankings.homeTurnoverRank, away: prediction.matchupRankings.awayTurnoverRank },
+                        { label: "Bench / Depth", home: prediction.matchupRankings.homeBenchRank, away: prediction.matchupRankings.awayBenchRank }
                       ].map((stat, idx) => {
                         const homeVal = typeof stat.home === 'string' ? parseInt(stat.home) : stat.home;
                         const awayVal = typeof stat.away === 'string' ? parseInt(stat.away) : stat.away;
@@ -1386,6 +1390,7 @@ export const GameCard: React.FC<GameCardProps> = ({
     </div>
   );
 };
+
 
 
 
