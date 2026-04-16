@@ -1449,7 +1449,13 @@ const fetchGames = async (force: boolean = false) => {
         return;
       }
       
-      setGames([]);
+      const cachedGames = gamesCacheRef.current[cacheKey] || [];
+      if (cachedGames.length > 0) {
+        console.warn(`[Dashboard] fetchGames: Empty response received, restoring cached games for ${activeTab} on ${dateStrIso}.`);
+        setGames(cachedGames);
+      } else {
+        setGames([]);
+      }
     } else {
       console.log(
         `[Dashboard] fetchGames: Setting ${fetchedGames.length} games for ${activeTab}. Sample: ${fetchedGames[0].awayTeam}@${fetchedGames[0].homeTeam}`
@@ -2640,6 +2646,7 @@ const fetchGames = async (force: boolean = false) => {
     </Layout>
   );
 }
+
 
 
 
