@@ -744,7 +744,8 @@ export function Dashboard({
       } catch (error: any) {
         console.error("[Dashboard] History fetch error:", error);
         if (error.message?.includes("Quota exceeded")) {
-          setError("Firestore quota exceeded. History may be incomplete.");
+          console.warn("[Dashboard] Firestore quota exceeded for history fetch.");
+          setToast({ message: "Firestore quota exceeded. History may be incomplete.", type: "warning" });
         } else {
           handleFirestoreError(error, OperationType.LIST, "predictions");
         }
@@ -804,7 +805,8 @@ export function Dashboard({
       } catch (error: any) {
         console.error("[Dashboard] Predictions fetch error:", error);
         if (error.message?.includes("Quota exceeded")) {
-          setError("Firestore quota exceeded. Predictions for today may not be available.");
+          console.warn("[Dashboard] Firestore quota exceeded for predictions fetch. Continuing with schedule-only mode.");
+          setToast({ message: "Firestore quota exceeded. Running in schedule-only mode for now.", type: "warning" });
         } else {
           handleFirestoreError(error, OperationType.LIST, `predictions (date: ${dateStr})`);
         }
@@ -2676,6 +2678,7 @@ const fetchGames = async (force: boolean = false) => {
     </Layout>
   );
 }
+
 
 
 
