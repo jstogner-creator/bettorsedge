@@ -1421,12 +1421,14 @@ const fetchGames = async (force: boolean = false) => {
     fetchedGames = fetchedGames.filter((g) => {
       if (!g.date) return true;
 
-      const gameSlateDate = getSlateDate(g.date);
+      const rawDate = String(g.date).trim();
+      const directDateMatch = rawDate.match(/^\d{4}-\d{2}-\d{2}$/);
+      const gameSlateDate = directDateMatch ? rawDate : getSlateDate(rawDate);
       const isMatch = gameSlateDate === targetDateStr;
-      
+
       if (!isMatch) {
         console.log(
-          `[Dashboard] fetchGames: Filtering out game from different slate. Game: ${g.awayTeam}@${g.homeTeam}, Game Date: ${g.date}, Game Slate: ${gameSlateDate}, Target: ${targetDateStr}`
+          `[Dashboard] fetchGames: Filtering out game from different slate. Game: ${g.awayTeam}@${g.homeTeam}, Raw Date: ${g.date}, Game Slate: ${gameSlateDate}, Target: ${targetDateStr}`
         );
       }
 
@@ -1603,6 +1605,32 @@ const fetchGames = async (force: boolean = false) => {
         
             
    
+
+  const getGameHourFromTimeString = (timeStr?: string): number | null => {
+    if (!timeStr) return null;
+
+    const raw = String(timeStr).trim();
+    if (!raw || raw.toUpperCase() === "TBD") return null;
+
+    const ampmMatch = raw.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+    if (ampmMatch) {
+      let hour = parseInt(ampmMatch[1], 10);
+      const meridiem = ampmMatch[3].toUpperCase();
+
+      if (meridiem === "PM" && hour !== 12) hour += 12;
+      if (meridiem === "AM" && hour === 12) hour = 0;
+
+      return hour;
+    }
+
+    const militaryMatch = raw.match(/\b(\d{1,2}):(\d{2})\b/);
+    if (militaryMatch) {
+      const hour = parseInt(militaryMatch[1], 10);
+      return Number.isFinite(hour) ? hour : null;
+    }
+
+    return null;
+  };
   const getFilteredGames = () => {
     console.log(`[Dashboard] getFilteredGames: Filtering ${games.length} games for ${activeTab}`);
     let filtered = games.filter(game => {
@@ -1686,24 +1714,16 @@ const fetchGames = async (force: boolean = false) => {
       filtered = Array.from(mergedMap.values());
       console.log(`[Dashboard] getFilteredGames: Merged games into ${filtered.length} unique matchups.`);
     }
-
     // Time filtering
     if (timeFilter !== "all") {
       filtered = filtered.filter(game => {
-        const timeStr = game.time;
-        if (!timeStr || timeStr === "TBD") return false;
-        
-        const isPM = timeStr.includes("PM");
-        const [hourStr] = timeStr.replace(/ AM| PM/g, "").split(":");
-        let hour = parseInt(hourStr, 10);
-        
-        if (isPM && hour !== 12) hour += 12;
-        if (!isPM && hour === 12) hour = 0;
-        
-        if (timeFilter === "early") return hour < 16;
-        if (timeFilter === "afternoon") return hour >= 16 && hour < 19;
-        if (timeFilter === "late") return hour >= 19;
-        
+        const hour = getGameHourFromTimeString(game.time);
+        if (hour === null) return false;
+
+        if (timeFilter === "early") return hour < 12;
+        if (timeFilter === "afternoon") return hour >= 12 && hour < 17;
+        if (timeFilter === "late") return hour >= 17;
+
         return true;
       });
       console.log(`[Dashboard] getFilteredGames: After time filter (${timeFilter}): ${filtered.length} games`);
@@ -2655,6 +2675,11 @@ const fetchGames = async (force: boolean = false) => {
     </Layout>
   );
 }
+
+
+
+
+
 
 
 
