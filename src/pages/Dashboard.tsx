@@ -1438,9 +1438,9 @@ const fetchGames = async (force: boolean = false) => {
     if (!fetchedGames || !Array.isArray(fetchedGames) || fetchedGames.length === 0) {
       console.warn(`[Dashboard] fetchGames: NO GAMES FOUND for ${activeTab} on ${dateStrIso} from any source.`);
       
-      if (!importedTabsRef.current.has(activeTab)) {
+      if (!importedSchedulesRef.current.has(cacheKey)) {
         console.log(`[Dashboard] fetchGames: No games found for ${activeTab}. Auto-importing...`);
-        importedTabsRef.current.add(activeTab);
+        importedSchedulesRef.current.add(cacheKey);
         bettorsEdge.importSchedule(activeTab, selectedDate, 7, (msg) => {
           setToast({ message: msg, type: "info" });
         }, false).then(() => {
@@ -2640,4 +2640,5 @@ const fetchGames = async (force: boolean = false) => {
     </Layout>
   );
 }
+
 
