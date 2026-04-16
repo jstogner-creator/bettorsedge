@@ -1254,7 +1254,55 @@ RULES:
         return null;
       }).filter(Boolean) || [];
 
-      return this.processAIResponse({ ...game, apiSportsH2H, apiSportsVerifiedInjuries: [...(apiHomeInjuries || []), ...(apiAwayInjuries || [])] }, text, cost, dateStr, previousMatchups, existingPrediction, groundingUrls);
+      const normalizeApiSportsStatus = (status: any): string => {
+        const s = String(status || "").toLowerCase();
+        if (s.includes("out")) return "Out";
+        if (s.includes("doubt")) return "Doubtful";
+        if (s.includes("prob")) return "Probable";
+        if (s.includes("in") || s.includes("active") || s.includes("available")) return "In";
+        return "";
+      };
+
+      const mapApiSportsInjuries = (injuries: any[], teamName: string) =>
+        (injuries || []).map((inj: any) => {
+          const playerName =
+            inj?.player?.name ||
+            [inj?.player?.firstname, inj?.player?.lastname].filter(Boolean).join(" ") ||
+            inj?.player ||
+            inj?.name ||
+            "";
+
+          const mappedStatus = normalizeApiSportsStatus(
+            inj?.status ||
+            inj?.injury?.status ||
+            inj?.reason ||
+            inj?.description
+          );
+
+          return {
+            team: teamName,
+            player: String(playerName || "").trim(),
+            status: mappedStatus,
+            impact: String(inj?.reason || inj?.injury?.description || inj?.description || "").trim(),
+            source_name: "API-Sports",
+            source_timestamp: String(inj?.date || inj?.updatedAt || new Date().toISOString())
+          };
+        }).filter((inj: any) => inj.player && inj.status);
+
+      const normalizedApiSportsInjuries = [
+        ...mapApiSportsInjuries(apiHomeInjuries, game.homeTeam),
+        ...mapApiSportsInjuries(apiAwayInjuries, game.awayTeam)
+      ];
+
+      return this.processAIResponse(
+        { ...game, apiSportsH2H, apiSportsVerifiedInjuries: normalizedApiSportsInjuries },
+        text,
+        cost,
+        dateStr,
+        previousMatchups,
+        existingPrediction,
+        groundingUrls
+      );
     } catch (error) {
       console.error("Error analyzing matchup:", error);
       throw error;
@@ -2243,6 +2291,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 }
 
 export const bettorsEdge = new BettorsEdge();
+
 
 
 
