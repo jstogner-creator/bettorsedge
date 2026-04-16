@@ -790,7 +790,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                 )}
 
                 {/* Matchup Rankings Section */}
-                {prediction.matchupRankings && (
+                {game.league === 'NBA' && prediction.matchupRankings && (
                   <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 shadow-inner mb-4">
                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-5 flex items-center gap-2">
                       <div className="p-1 bg-slate-900 rounded border border-slate-800">
@@ -926,7 +926,7 @@ export const GameCard: React.FC<GameCardProps> = ({
 
                 {/* Injury Report */}
                 {(prediction && (Array.isArray(prediction.injuries) || prediction.qaStatus || prediction.qaNotes)) && (
-                  <div className="bg-rose-500/5 border border-rose-500/10 rounded-xl p-5 shadow-sm mb-4">
+                  <div id="injury-report" className="bg-rose-500/5 border border-rose-500/10 rounded-xl p-5 shadow-sm mb-4">
                     <h4 className="text-xs font-black text-rose-400 uppercase tracking-widest mb-4 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="p-1 bg-rose-500/20 rounded">
@@ -993,12 +993,8 @@ export const GameCard: React.FC<GameCardProps> = ({
                       </div>
                     ) : (
                       <div className="p-3 bg-slate-950/40 rounded-lg border border-slate-800/50">
-                        <div className="text-sm text-slate-200 font-bold">
-                          No active injuries returned by API-Sports
-                        </div>
-                        <div className="text-[11px] text-slate-500 mt-1">
-                          {prediction.qaNotes || 'Injury verification completed.'}
-                        </div>
+                        <div className="text-sm text-slate-200 font-bold">No active injuries returned by API-Sports</div>
+                        <div className="text-[11px] text-slate-500 mt-1">{prediction.qaNotes || 'Injury verification completed.'}</div>
                       </div>
                     )}
                   </div>
@@ -1158,7 +1154,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                       <div className="p-1 bg-slate-900 rounded border border-slate-800">
                         <BarChart3 className="w-3.5 h-3.5 text-indigo-400" />
                       </div>
-                      Team Statistical Comparison
+{game.league === 'MLB' ? 'MLB Team Edge Comparison' : game.league === 'NHL' ? 'NHL Team Edge Comparison' : game.league === 'NFL' ? 'NFL Team Edge Comparison' : game.league === 'NCAA' ? 'NCAA Team Edge Comparison' : 'Team Statistical Comparison'}
                     </h4>
                     <div className="space-y-3">
                       {prediction.teamStatsComparison.map((stat, idx) => (
@@ -1403,6 +1399,7 @@ export const GameCard: React.FC<GameCardProps> = ({
     </div>
   );
 };
+
 
 
 

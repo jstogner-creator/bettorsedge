@@ -1072,9 +1072,9 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
         : game.league === 'NBA'
         ? `NBA: CRITICAL - It is April 2026. Regular season end. Star players (LeBron, AD, Steph, Luka Doncic, etc.) are frequently rested. You MUST verify the "Official NBA Injury Report" and look for "GTD", "Questionable", or "Late Scratch" news. If a star like Luka Doncic (often called Luke/Luka) is out, it MUST be reflected in the injuries and win probability. H2H RULE: ONLY include 2026 games.`
         : game.league === 'NHL'
-        ? "NHL: Focus on starting goalies, PP/PK%, and Corsi/Fenwick."
+        ? "NHL: Focus on starting goalies, save percentage, GAA, shot quality, power play, penalty kill, rest/travel, and recent form. For teamStatsComparison, use NHL-only categories such as Record, Goals For, Goals Against, Power Play, Penalty Kill, Goalie Edge, and Projected Goals. NEVER use NBA categories for NHL."
         : game.league === 'MLB'
-        ? "MLB: Focus on SP xERA/Barrel%, bullpen rest, L/R splits, park/weather (wind!), and umpire RPG. For Totals, provide a 'projectedTotal' and a 'recommendedTotalLine' with a 1.5-run cushion (e.g., if projected is 8, recommend Under 9.5)."
+        ? "MLB: Focus on starting pitcher ERA/WHIP/xERA/FIP/K9, bullpen quality/rest, lineup splits, park/weather, and umpire run environment. For teamStatsComparison, use MLB-only categories such as Record, Starter ERA, Starter WHIP, Starter xERA or FIP, K/9, Bullpen Edge, and Projected Runs. NEVER use NBA categories like Shooting, Rebounding, Turnovers, or Bench for MLB. For Totals, provide a concrete projectedTotal and recommendedTotalLine."
         : game.league === 'NFL'
         ? "NFL: Focus on QB health, O-Line/D-Line matchups, and weather."
         : "";
@@ -1404,12 +1404,12 @@ RULES:
         }));
       }
 
-      // Merge existing injuries if the AI dropped them or returned an invalid format
-      if (existingPrediction && Array.isArray(existingPrediction.injuries) && existingPrediction.injuries.length > 0) {
-        if (!Array.isArray(prediction.injuries) || prediction.injuries.length === 0) {
-          console.log("[Gemini] AI dropped or returned empty injuries, restoring from existingPrediction");
-          prediction.injuries = existingPrediction.injuries;
-        }
+      // Use verified API-Sports injuries first, then fall back only if needed
+      if (Array.isArray(game.apiSportsVerifiedInjuries) && game.apiSportsVerifiedInjuries.length > 0) {
+        prediction.injuries = game.apiSportsVerifiedInjuries;
+      } else if (existingPrediction && Array.isArray(existingPrediction.injuries) && existingPrediction.injuries.length > 0) {
+        console.log("[Gemini] No API-Sports injuries found, restoring existingPrediction injuries");
+        prediction.injuries = existingPrediction.injuries;
       } else if (!Array.isArray(prediction.injuries)) {
         prediction.injuries = [];
       }
@@ -1616,6 +1616,50 @@ RULES:
       prediction.matchupAnalysis.confidenceBreakdown = prediction.matchupAnalysis.confidenceBreakdown || "Confidence derived from available market, roster, and injury context.";
       prediction.matchupAnalysis.projectionBasis = prediction.matchupAnalysis.projectionBasis || "Fallback projection used market total and spread because AI response lacked numeric detail.";
 
+      const parseNumericStat = (value: any): number | null => {
+        if (value === null || value === undefined || value === "") return null;
+        const cleaned = String(value).replace(/[^0-9.\-]/g, "");
+        const parsed = Number(cleaned);
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+
+      const lowerIsBetter = (homeVal: any, awayVal: any): 'home' | 'away' | 'neutral' => {
+        const h = parseNumericStat(homeVal);
+        const a = parseNumericStat(awayVal);
+        if (h === null || a === null || h === a) return 'neutral';
+        return h < a ? 'home' : 'away';
+      };
+
+      const higherIsBetter = (homeVal: any, awayVal: any): 'home' | 'away' | 'neutral' => {
+        const h = parseNumericStat(homeVal);
+        const a = parseNumericStat(awayVal);
+        if (h === null || a === null || h === a) return 'neutral';
+        return h > a ? 'home' : 'away';
+      };
+
+      if ((!Array.isArray(prediction.teamStatsComparison) || prediction.teamStatsComparison.length < 4) && game.league === 'MLB') {
+        const homePitcher = prediction.pitcherMatchup?.homePitcher || {};
+        const awayPitcher = prediction.pitcherMatchup?.awayPitcher || {};
+
+        prediction.teamStatsComparison = [
+          { category: 'Record', homeValue: game.homeTeamStats?.record || 'N/A', awayValue: game.awayTeamStats?.record || 'N/A', advantage: 'neutral' },
+          { category: 'Starter ERA', homeValue: homePitcher.era || 'N/A', awayValue: awayPitcher.era || 'N/A', advantage: lowerIsBetter(homePitcher.era, awayPitcher.era) },
+          { category: 'Starter WHIP', homeValue: homePitcher.whip || 'N/A', awayValue: awayPitcher.whip || 'N/A', advantage: lowerIsBetter(homePitcher.whip, awayPitcher.whip) },
+          { category: 'Starter xERA', homeValue: homePitcher.xERA || homePitcher.fip || 'N/A', awayValue: awayPitcher.xERA || awayPitcher.fip || 'N/A', advantage: lowerIsBetter(homePitcher.xERA || homePitcher.fip, awayPitcher.xERA || awayPitcher.fip) },
+          { category: 'K/9', homeValue: homePitcher.k9 || 'N/A', awayValue: awayPitcher.k9 || 'N/A', advantage: higherIsBetter(homePitcher.k9, awayPitcher.k9) },
+          { category: 'Projected Runs', homeValue: prediction.scorePrediction?.home ?? 'N/A', awayValue: prediction.scorePrediction?.away ?? 'N/A', advantage: higherIsBetter(prediction.scorePrediction?.home, prediction.scorePrediction?.away) }
+        ];
+      }
+
+      if ((!Array.isArray(prediction.teamStatsComparison) || prediction.teamStatsComparison.length < 4) && game.league === 'NHL') {
+        prediction.teamStatsComparison = [
+          { category: 'Record', homeValue: game.homeTeamStats?.record || 'N/A', awayValue: game.awayTeamStats?.record || 'N/A', advantage: 'neutral' },
+          { category: 'Projected Goals', homeValue: prediction.scorePrediction?.home ?? 'N/A', awayValue: prediction.scorePrediction?.away ?? 'N/A', advantage: higherIsBetter(prediction.scorePrediction?.home, prediction.scorePrediction?.away) },
+          { category: 'Total Goal Environment', homeValue: prediction.projectedTotal ?? 'N/A', awayValue: prediction.projectedTotal ?? 'N/A', advantage: 'neutral' },
+          { category: 'Recent Form', homeValue: game.homeTeamStats?.last5 || 'N/A', awayValue: game.awayTeamStats?.last5 || 'N/A', advantage: 'neutral' },
+          { category: 'Win %', homeValue: game.homeTeamStats?.winPercentage || 'N/A', awayValue: game.awayTeamStats?.winPercentage || 'N/A', advantage: 'neutral' }
+        ];
+      }
       if (!Array.isArray(prediction.keyFactors) || prediction.keyFactors.length === 0) {
         prediction.keyFactors = [
           "Market-implied spread and total used as projection baseline",
@@ -2393,6 +2437,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 }
 
 export const bettorsEdge = new BettorsEdge();
+
 
 
 
