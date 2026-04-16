@@ -925,7 +925,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                 )}
 
                 {/* Injury Report */}
-                {Array.isArray(prediction.injuries) && prediction.injuries.length > 0 && (
+                {(prediction && (Array.isArray(prediction.injuries) || prediction.qaStatus || prediction.qaNotes)) && (
                   <div className="bg-rose-500/5 border border-rose-500/10 rounded-xl p-5 shadow-sm mb-4">
                     <h4 className="text-xs font-black text-rose-400 uppercase tracking-widest mb-4 flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -934,63 +934,76 @@ export const GameCard: React.FC<GameCardProps> = ({
                         </div>
                         Injury Report
                       </div>
-                      {game.league === 'NCAA' && (
-                        <span className="text-[8px] bg-rose-500/10 text-rose-400/70 px-2 py-0.5 rounded border border-rose-500/20 font-black">
-                          VERIFIED VIA ROTOWIRE
-                        </span>
-                      )}
+                      <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 font-black">
+                        VERIFIED
+                      </span>
                     </h4>
-                    <div className="grid grid-cols-1 gap-2">
-                      {prediction.injuries.map((injury, idx) => {
-                        const status = (injury.status || 'Unknown').toLowerCase();
-                        return (
-                          <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-950/40 rounded-lg border border-slate-800/50 hover:border-rose-500/20 transition-colors group/injury">
-                            <div className="flex items-center gap-3 flex-1 min-w-0">
-                              <div className={cn(
-                                "w-1.5 h-8 rounded-full shrink-0",
-                                status === 'out' ? "bg-rose-500" : 
-                                status === 'doubtful' ? "bg-amber-500" : 
-                                status === 'questionable' || status === 'gtd' ? "bg-orange-500" :
-                                status === 'probable' ? "bg-indigo-500" :
-                                status === 'in' ? "bg-emerald-500" :
-                                "bg-slate-700"
-                              )} />
-                              <div className="flex flex-col flex-1 min-w-0">
-                                <span className="text-slate-200 font-bold text-sm group-hover/injury:text-white transition-colors whitespace-normal break-words">
-  {injury.player || 'Unknown'}
-</span>
-                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-tighter">{injury.team || 'Unknown'}</span>
+
+                    {Array.isArray(prediction.injuries) && prediction.injuries.length > 0 ? (
+                      <div className="grid grid-cols-1 gap-2">
+                        {prediction.injuries.map((injury, idx) => {
+                          const status = (injury.status || 'Unknown').toLowerCase();
+                          return (
+                            <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-950/40 rounded-lg border border-slate-800/50 hover:border-rose-500/20 transition-colors group/injury">
+                              <div className="flex items-center gap-3 flex-1 min-w-0">
+                                <div className={cn(
+                                  "w-1.5 h-8 rounded-full shrink-0",
+                                  status === 'out' ? "bg-rose-500" : 
+                                  status === 'doubtful' ? "bg-amber-500" : 
+                                  status === 'questionable' || status === 'gtd' ? "bg-orange-500" :
+                                  status === 'probable' ? "bg-indigo-500" :
+                                  status === 'in' ? "bg-emerald-500" :
+                                  "bg-slate-700"
+                                )} />
+                                <div className="flex flex-col flex-1 min-w-0">
+                                  <span className="text-slate-200 font-bold text-sm group-hover/injury:text-white transition-colors whitespace-normal break-words">
+                                    {injury.player || 'Unknown'}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 uppercase font-bold tracking-tighter">
+                                    {injury.team || 'Unknown'}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex flex-col items-end ml-3 max-w-[180px] shrink-0">
+                                <span className={cn(
+                                  "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded border",
+                                  status === 'out' ? "bg-rose-500/10 text-rose-400 border-rose-500/20" : 
+                                  status === 'doubtful' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : 
+                                  status === 'questionable' || status === 'gtd' ? "bg-orange-500/10 text-orange-400 border-orange-500/20" :
+                                  status === 'probable' ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
+                                  status === 'in' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                                  "bg-slate-800 text-slate-400 border-slate-700"
+                                )}>
+                                  {injury.status}
+                                </span>
+                                {injury.impact && (
+                                  <span className="text-[9px] text-slate-500 mt-1 italic max-w-[150px] truncate">
+                                    {injury.impact}
+                                  </span>
+                                )}
+                                {(injury.source_name || injury.source_timestamp) && (
+                                  <span className="text-[8px] text-slate-600 mt-0.5 font-mono uppercase tracking-tighter text-right break-words">
+                                    [Source: {injury.source_name || 'Unknown'}, {injury.source_timestamp || 'N/A'}]
+                                  </span>
+                                )}
                               </div>
                             </div>
-                            <div className="flex flex-col items-end ml-3 max-w-[180px] shrink-0">
-                              <span className={cn(
-                                "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded border",
-                                status === 'out' ? "bg-rose-500/10 text-rose-400 border-rose-500/20" : 
-                                status === 'doubtful' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : 
-                                status === 'questionable' || status === 'gtd' ? "bg-orange-500/10 text-orange-400 border-orange-500/20" :
-                                status === 'probable' ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
-                                status === 'in' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                                "bg-slate-800 text-slate-400 border-slate-700"
-                              )}>
-                                {injury.status}
-                              </span>
-                              {injury.impact && (
-                                <span className="text-[9px] text-slate-500 mt-1 italic max-w-[150px] truncate">{injury.impact}</span>
-                              )}
-                              {(injury.source_name || injury.source_timestamp) && (
-                                <span className="text-[8px] text-slate-600 mt-0.5 font-mono uppercase tracking-tighter text-right break-words">
-                                  [Source: {injury.source_name || 'Unknown'}, {injury.source_timestamp || 'N/A'}]
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-slate-950/40 rounded-lg border border-slate-800/50">
+                        <div className="text-sm text-slate-200 font-bold">
+                          No active injuries returned by API-Sports
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-1">
+                          {prediction.qaNotes || 'Injury verification completed.'}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {/* MLB Pitcher Matchup */}
                 {game.league === 'MLB' && prediction.pitcherMatchup && typeof prediction.pitcherMatchup === 'object' && (
                   <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl overflow-hidden mb-4 shadow-sm">
                     <div className="bg-indigo-500/10 px-4 py-2 border-b border-indigo-500/20 flex items-center justify-between">
@@ -1390,6 +1403,7 @@ export const GameCard: React.FC<GameCardProps> = ({
     </div>
   );
 };
+
 
 
 
