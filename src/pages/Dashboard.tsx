@@ -1422,7 +1422,7 @@ const fetchGames = async (force: boolean = false) => {
       if (!g.date) return true;
 
       const rawDate = String(g.date).trim();
-      const directDateMatch = rawDate.match(/^\d{4}-\d{2}-\d{2}$/);
+      const directDateMatch = /^\d{4}-\d{2}-\d{2}$/.test(rawDate);
       const gameSlateDate = directDateMatch ? rawDate : getSlateDate(rawDate);
       const isMatch = gameSlateDate === targetDateStr;
 
@@ -1458,13 +1458,7 @@ const fetchGames = async (force: boolean = false) => {
         console.warn(`[Dashboard] fetchGames: Empty response received, restoring cached games for ${activeTab} on ${dateStrIso}.`);
         setGames(cachedGames);
       } else {
-        const cachedGames = gamesCacheRef.current[cacheKey] || [];
-      if (cachedGames.length > 0) {
-        console.warn(`[Dashboard] fetchGames: Empty response received, restoring cached games for ${activeTab} on ${dateStrIso}.`);
-        setGames(cachedGames);
-      } else {
         setGames([]);
-      }
       }
     } else {
       console.log(
@@ -1718,7 +1712,11 @@ const fetchGames = async (force: boolean = false) => {
     if (timeFilter !== "all") {
       filtered = filtered.filter(game => {
         const hour = getGameHourFromTimeString(game.time);
-        if (hour === null) return false;
+
+        if (hour === null) {
+          console.log(`[Dashboard] getFilteredGames: Missing/unparseable time for ${game.awayTeam}@${game.homeTeam}: ${game.time}`);
+          return false;
+        }
 
         if (timeFilter === "early") return hour < 12;
         if (timeFilter === "afternoon") return hour >= 12 && hour < 17;
@@ -1726,6 +1724,7 @@ const fetchGames = async (force: boolean = false) => {
 
         return true;
       });
+
       console.log(`[Dashboard] getFilteredGames: After time filter (${timeFilter}): ${filtered.length} games`);
     }
 
@@ -2677,6 +2676,9 @@ const fetchGames = async (force: boolean = false) => {
     </Layout>
   );
 }
+
+
+
 
 
 
