@@ -1794,12 +1794,14 @@ const fetchGames = async (force: boolean = false) => {
     // If leagueOverride is provided, we ignore selectedGameIds as they are tab-specific
     const gamesToConsider = (selectedGameIds.size > 0 && !leagueOverride)
       ? filteredGames.filter(g => selectedGameIds.has(g.id))
-      : games.filter(g => {
-          if (!g.league) return false;
-          const gLeague = g.league.toUpperCase();
-          const tLeague = targetLeague.toUpperCase();
-          return gLeague === tLeague || gLeague.includes(tLeague) || tLeague.includes(gLeague);
-        });
+      : (!leagueOverride
+          ? filteredGames
+          : games.filter(g => {
+              if (!g.league) return false;
+              const gLeague = g.league.toUpperCase();
+              const tLeague = targetLeague.toUpperCase();
+              return gLeague === tLeague || gLeague.includes(tLeague) || tLeague.includes(gLeague);
+            }));
 
     if (gamesToConsider.length === 0) {
       if (!silent) setToast({ message: `No ${targetLeague} games available to analyze.`, type: "info" });
@@ -2675,6 +2677,7 @@ const fetchGames = async (force: boolean = false) => {
     </Layout>
   );
 }
+
 
 
 
