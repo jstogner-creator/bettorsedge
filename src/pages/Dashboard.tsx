@@ -854,6 +854,14 @@ export function Dashboard({
 
   useEffect(() => {
     setSelectedGameIds(new Set());
+
+    const cacheKey = `${activeTab}|${format(selectedDate, "yyyy-MM-dd")}`;
+    const cachedGames = gamesCacheRef.current[cacheKey];
+    if (cachedGames && cachedGames.length > 0) {
+      console.log(`[Dashboard] Restoring cached games for ${cacheKey}: ${cachedGames.length}`);
+      setGames(cachedGames);
+    }
+
     fetchGames().catch(console.error);
     // We no longer cancel analysis on tab change to allow background processing
   }, [activeTab, selectedDate]);
@@ -1443,7 +1451,7 @@ const fetchGames = async (force: boolean = false) => {
 
     if (!fetchedGames || !Array.isArray(fetchedGames) || fetchedGames.length === 0) {
       console.warn(`[Dashboard] fetchGames: NO GAMES FOUND for ${activeTab} on ${dateStrIso} from any source.`);
-      
+
       if (!importedSchedulesRef.current.has(cacheKey)) {
         console.log(`[Dashboard] fetchGames: No games found for ${activeTab}. Auto-importing...`);
         importedSchedulesRef.current.add(cacheKey);
@@ -1454,7 +1462,7 @@ const fetchGames = async (force: boolean = false) => {
         }).catch(console.error);
         return;
       }
-      
+
       const cachedGames = gamesCacheRef.current[cacheKey] || [];
       if (cachedGames.length > 0) {
         console.warn(`[Dashboard] fetchGames: Empty response received, restoring cached games for ${activeTab} on ${dateStrIso}.`);
@@ -1465,8 +1473,9 @@ const fetchGames = async (force: boolean = false) => {
     } else {
       console.log(
         `[Dashboard] fetchGames: Setting ${fetchedGames.length} games for ${activeTab}. Sample: ${fetchedGames[0].awayTeam}@${fetchedGames[0].homeTeam}`
-      );      gamesCacheRef.current[cacheKey] = fetchedGames;
-
+      );
+      gamesCacheRef.current[cacheKey] = fetchedGames;
+      setError(null);
       setGames(fetchedGames);
       fetchKalshiExpectations(activeTab).catch(console.error);
     }
@@ -1474,7 +1483,15 @@ const fetchGames = async (force: boolean = false) => {
     const msg = err?.message || "Failed to fetch schedule. Please try again.";
     setError(msg);
     console.error("[Dashboard] Error fetching games:", err);
-    setGames([]);
+
+    const fallbackCacheKey = `${activeTab}|${format(selectedDate, "yyyy-MM-dd")}`;
+    const cachedGames = gamesCacheRef.current[fallbackCacheKey] || [];
+    if (cachedGames.length > 0) {
+      console.warn(`[Dashboard] fetchGames: Error occurred, restoring cached games for ${activeTab}.`);
+      setGames(cachedGames);
+    } else {
+      setGames([]);
+    }
   } finally {
     setLoading(false);
   }
@@ -2678,6 +2695,12 @@ const fetchGames = async (force: boolean = false) => {
     </Layout>
   );
 }
+
+
+
+
+
+
 
 
 
