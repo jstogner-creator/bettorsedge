@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 import { format } from "date-fns";
-import { getNYDate } from "../lib/utils";
+import { getNYDate, getSlateDate } from "../lib/utils";
 import { getDb, getIdToken } from "../firebase";
 import { doc, getDoc, setDoc, addDoc, collection, query, where, getDocs, limit, orderBy } from "firebase/firestore";
 import { Game, Prediction, TournamentBracket } from "../types";
@@ -658,8 +658,7 @@ export class BettorsEdge {
       // Post-processing to ensure data quality
       const processedGames = (Array.isArray(games) ? games : []).filter(game => {
         if (!game || typeof game !== 'object' || !game.homeTeam || !game.awayTeam) return false;
-        
-        // Filter to ensure AI only returned games for the requested league
+
         if (game.league) {
           const gLeague = String(game.league).toUpperCase();
           const targetLeague = league.toUpperCase();
@@ -668,23 +667,28 @@ export class BettorsEdge {
           }
         }
 
-        // CRITICAL: Filter to ensure AI only returned games for the requested date
-        // This prevents the AI from returning old games (e.g. from 2 days ago)
-        if (game.date) {
-          // Robust date extraction: split by 'T', ' ', or just take the first 10 chars
-          const gDate = String(game.date).split(/[T ]/)[0];
-          if (gDate !== date) {
-            console.warn(`[AI] Filtering out wrong-date game: ${game.awayTeam} @ ${game.homeTeam} (${gDate} vs ${date})`);
-            return false;
-          }
+        const rawDate = game.date ? String(game.date) : date;
+        const normalizedGameSlateDate = getSlateDate(rawDate);
+
+        if (normalizedGameSlateDate !== date) {
+          console.warn(`[AI] Filtering out wrong-slate game: ${game.awayTeam} @ ${game.homeTeam} (raw=${rawDate}, slate=${normalizedGameSlateDate}, requested=${date})`);
+          return false;
         }
-        
+
         return true;
-      }).map(game => ({
-        ...game,
-        league: league,
-        date: date
-      }));
+      }).map(game => {
+        const normalizedRawDate = game.date ? String(game.date) : date;
+
+        return {
+          ...game,
+          league: league,
+          date: normalizedRawDate,
+          slateDate: getSlateDate(normalizedRawDate),
+          id: String(game.id || `${league}-${game.awayTeam}-${game.homeTeam}-${date}`)
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '-')
+        };
+      });
 
       // Save to Firestore
       try {
@@ -2031,6 +2035,16 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
         try {
           // This will check Firestore first, and if missing, fetch from API and save to Firestore
           const games = await this.getDailySchedule(league, dateStr, force);
+
+          const wrongSlateGames = (games || []).filter((g: any) => {
+            const gameSlate = getSlateDate(g?.date || dateStr);
+            return gameSlate !== dateStr;
+          });
+
+          if (wrongSlateGames.length > 0) {
+            console.warn(`[Import Validation] ${wrongSlateGames.length} wrong-slate games detected for ${league} on ${dateStr}:`, wrongSlateGames.map((g: any) => `${g.awayTeam} @ ${g.homeTeam} (${g.date})`));
+          }
+
           console.log(`[Import] Imported ${games.length} games for ${league} on ${dateStr} (force=${force})`);
           onProgress?.(`Imported ${games.length} games for ${dateStr}...`);
         } catch (e) {
@@ -2437,6 +2451,10 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 }
 
 export const bettorsEdge = new BettorsEdge();
+
+
+
+
 
 
 

@@ -26,11 +26,14 @@ export function getNYDate(): Date {
 export function getSlateDate(date: Date | string): string {
   try {
     const d = typeof date === 'string' ? new Date(date) : date;
-    if (isNaN(d.getTime())) return format(new Date(), "yyyy-MM-dd");
-    const slateDate = format(subHours(d, 6), "yyyy-MM-dd");
-    console.log(`[getSlateDate] Input: ${date}, Output: ${slateDate}`);
+    if (isNaN(d.getTime())) return formatInTimeZone(new Date(), 'America/New_York', 'yyyy-MM-dd');
+
+    const shifted = subHours(d, 6);
+    const slateDate = formatInTimeZone(shifted, 'America/New_York', 'yyyy-MM-dd');
+    console.log(`[getSlateDate] Input: ${date}, Shifted: ${shifted.toISOString()}, Output: ${slateDate}`);
     return slateDate;
   } catch (e) {
-    return format(new Date(), "yyyy-MM-dd");
+    return formatInTimeZone(new Date(), 'America/New_York', 'yyyy-MM-dd');
   }
 }
+
