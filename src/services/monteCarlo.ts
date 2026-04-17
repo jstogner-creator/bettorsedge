@@ -47,8 +47,8 @@ const LEAGUE_CONFIG: Record<string, LeagueConfig> = {
   },
   MLB: {
     homeAdvantage: 0.28,
-    marginStdDev: 3.1,
-    totalStdDev: 2.9,
+    marginStdDev: 2.7,
+    totalStdDev: 2.35,
     minimumScore: 0,
     defaultTotal: 8.7,
     totalLineThreshold: 0.55,
@@ -234,6 +234,34 @@ const buildRecommendedTotalLine = (projectedTotal: number, marketTotal: number, 
   return undefined;
 };
 
+const deriveMlbPitchingAdjustments = (prediction?: Prediction | null) => {
+  const homePitcher = prediction?.pitcherMatchup?.homePitcher;
+  const awayPitcher = prediction?.pitcherMatchup?.awayPitcher;
+
+  const homeEra = parseNumber(homePitcher?.xERA) ?? parseNumber(homePitcher?.fip) ?? parseNumber(homePitcher?.era) ?? 4.2;
+  const awayEra = parseNumber(awayPitcher?.xERA) ?? parseNumber(awayPitcher?.fip) ?? parseNumber(awayPitcher?.era) ?? 4.2;
+  const homeWhip = parseNumber(homePitcher?.whip) ?? 1.32;
+  const awayWhip = parseNumber(awayPitcher?.whip) ?? 1.32;
+  const homeK9 = parseNumber(homePitcher?.k9) ?? 8.3;
+  const awayK9 = parseNumber(awayPitcher?.k9) ?? 8.3;
+  const homeBarrel = parseNumber(homePitcher?.barrelRate) ?? 7.5;
+  const awayBarrel = parseNumber(awayPitcher?.barrelRate) ?? 7.5;
+
+  const homePitchQuality = ((4.35 - homeEra) * 0.85) + ((1.28 - homeWhip) * 1.35) + ((homeK9 - 8.1) * 0.08) - ((homeBarrel - 7.0) * 0.1);
+  const awayPitchQuality = ((4.35 - awayEra) * 0.85) + ((1.28 - awayWhip) * 1.35) + ((awayK9 - 8.1) * 0.08) - ((awayBarrel - 7.0) * 0.1);
+
+  const marginAdjustment = (homePitchQuality - awayPitchQuality) * 0.92;
+  const totalAdjustment = -((homePitchQuality + awayPitchQuality) * 0.42);
+
+  return {
+    marginAdjustment,
+    totalAdjustment,
+    homePitchQuality,
+    awayPitchQuality,
+    summary: `Pitching edge rated ${homePitchQuality.toFixed(2)} ${prediction?.homeTeam || 'home'} vs ${awayPitchQuality.toFixed(2)} ${prediction?.awayTeam || 'away'}.`,
+  };
+};
+
 export const runMonteCarloSimulation = ({ game, prediction, iterations = DEFAULT_ITERATIONS }: SimulationContext): MonteCarloResult => {
   const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const config = LEAGUE_CONFIG[game.league] || LEAGUE_CONFIG.NBA;
@@ -247,8 +275,13 @@ export const runMonteCarloSimulation = ({ game, prediction, iterations = DEFAULT
   const awayInjuryPenalty = collectWeightedInjuryPenalty(prediction?.injuries, game.awayTeam, game.league);
   const marketHomeEdge = (market.homeProb - market.awayProb) * (game.league === "NBA" ? 13 : game.league === "MLB" ? 2.4 : game.league === "NHL" ? 1.7 : 8.5);
   const statHomeEdge = deriveTeamStatsEdge(prediction, "home", game.league);
+  const mlbPitching = game.league === "MLB" ? deriveMlbPitchingAdjustments(prediction) : null;
 
   let expectedMargin = config.homeAdvantage + ((homeWinPct - awayWinPct) * 12) + homeFormBonus - awayFormBonus + marketHomeEdge + statHomeEdge - homeInjuryPenalty + awayInjuryPenalty;
+
+  if (mlbPitching) {
+    expectedMargin += mlbPitching.marginAdjustment;
+  }
 
   if (prediction?.winner && prediction.winner !== "PASS") {
     const aiLean = prediction.winner === game.homeTeam ? 1 : prediction.winner === game.awayTeam ? -1 : 0;
@@ -258,7 +291,8 @@ export const runMonteCarloSimulation = ({ game, prediction, iterations = DEFAULT
   const projectedTotalBase = clamp(
     (market.total * 0.72) +
       ((prediction?.projectedTotal ?? market.total) * 0.18) +
-      ((prediction?.scorePrediction ? prediction.scorePrediction.home + prediction.scorePrediction.away : market.total) * 0.10),
+      ((prediction?.scorePrediction ? prediction.scorePrediction.home + prediction.scorePrediction.away : market.total) * 0.10) +
+      (mlbPitching?.totalAdjustment ?? 0),
     config.minimumScore * 2,
     config.defaultTotal + (game.league === "NBA" ? 45 : game.league === "MLB" ? 8 : game.league === "NHL" ? 4 : 20)
   );
@@ -271,7 +305,7 @@ export const runMonteCarloSimulation = ({ game, prediction, iterations = DEFAULT
     const simulatedMargin = expectedMargin + gaussian() * config.marginStdDev;
     const simulatedTotal = Math.max(config.minimumScore * 2, projectedTotalBase + gaussian() * config.totalStdDev);
 
-    let homeScore = (simulatedTotal + simulatedMargin) / 2 + gaussian() * (game.league === "NBA" ? 2.4 : game.league === "MLB" ? 0.45 : game.league === "NHL" ? 0.35 : 1.35);
+    let homeScore = (simulatedTotal + simulatedMargin) / 2 + gaussian() * (game.league === "NBA" ? 2.4 : game.league === "MLB" ? 0.35 : game.league === "NHL" ? 0.35 : 1.35);
     let awayScore = simulatedTotal - homeScore;
 
     if (game.league === "NBA" || game.league === "NCAA" || game.league === "NFL") {
@@ -324,6 +358,10 @@ export const runMonteCarloSimulation = ({ game, prediction, iterations = DEFAULT
     keyFactors.push(`Structured stat comparison leaned ${statHomeEdge > 0 ? game.homeTeam : game.awayTeam} before variance was added.`);
   }
 
+  if (mlbPitching) {
+    keyFactors.push(mlbPitching.summary);
+  }
+
   const finishedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
 
   return {
@@ -342,6 +380,6 @@ export const runMonteCarloSimulation = ({ game, prediction, iterations = DEFAULT
     recommendedTotalLine: buildRecommendedTotalLine(projectedTotal, market.total, config.totalLineThreshold),
     keyFactors,
     confidenceBreakdown: `Monte Carlo engine split ${Math.round(homeWinProbability * 100)}% ${game.homeTeam} / ${Math.round(awayWinProbability * 100)}% ${game.awayTeam} over ${iterations.toLocaleString()} trials.`,
-    projectionBasis: `10k Monte Carlo engine blended market expectations, team form, available stat edges, and weighted injuries in ${Math.round(finishedAt - startedAt)}ms.`,
+    projectionBasis: `10k Monte Carlo engine blended market expectations, team form, available stat edges${mlbPitching ? ', pitcher quality,' : ','} and weighted injuries in ${Math.round(finishedAt - startedAt)}ms.`,
   };
 };
