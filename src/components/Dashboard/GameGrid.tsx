@@ -65,11 +65,11 @@ export const GameGrid: React.FC<GameGridProps> = ({
   onCheckInjuries,
   handleDiscussWithSnark,
 }) => {
-  if (loading) {
+  if (loading && filteredGames.length === 0) {
     return <div className="text-slate-400">Loading games...</div>;
   }
 
-  if (error) {
+  if (error && filteredGames.length === 0) {
     return <div className="text-red-400">{error}</div>;
   }
 
@@ -82,6 +82,9 @@ export const GameGrid: React.FC<GameGridProps> = ({
       <div className="mb-4 flex items-center justify-between">
         <div className="text-xs text-slate-500 font-medium">
           {selectedGameIds.size > 0 ? `${selectedGameIds.size} games selected for analysis` : `Showing ${filteredGames.length} games`}
+          {error && (
+            <span className="ml-2 text-amber-400">• Using currently loaded slate while a background fetch reports: {error}</span>
+          )}
         </div>
         {isAdminUser && (
           <button 
