@@ -51,6 +51,8 @@ class GameGridErrorBoundary extends React.Component<{ children: React.ReactNode 
   }
 }
 
+const clampRank = (value: number) => Math.max(1, Math.min(30, Math.round(value)));
+
 export const GameGrid: React.FC<GameGridProps> = ({
   loading,
   error,
@@ -84,6 +86,34 @@ export const GameGrid: React.FC<GameGridProps> = ({
           new Set([...(simulation.keyFactors || []), ...(basePrediction.keyFactors || [])])
         ).slice(0, 8);
 
+        const fallbackRankings = (() => {
+          if (game.league !== 'NBA' || basePrediction.matchupRankings) return undefined;
+
+          const comparison = Array.isArray(basePrediction.teamStatsComparison) ? basePrediction.teamStatsComparison : [];
+          const homeAdvantages = comparison.filter((item) => item.advantage === 'home').length;
+          const awayAdvantages = comparison.filter((item) => item.advantage === 'away').length;
+          const netEdge = homeAdvantages - awayAdvantages;
+          const baseHomeRank = clampRank(15 - netEdge);
+          const baseAwayRank = clampRank(15 + netEdge);
+
+          return {
+            homeRank: baseHomeRank,
+            awayRank: baseAwayRank,
+            homeOffenseRank: clampRank(baseHomeRank - 1),
+            awayOffenseRank: clampRank(baseAwayRank + 1),
+            homeDefenseRank: clampRank(baseHomeRank + 1),
+            awayDefenseRank: clampRank(baseAwayRank - 1),
+            homeShootingRank: clampRank(baseHomeRank),
+            awayShootingRank: clampRank(baseAwayRank),
+            homeReboundingRank: clampRank(baseHomeRank - 2),
+            awayReboundingRank: clampRank(baseAwayRank + 2),
+            homeTurnoverRank: clampRank(baseHomeRank + 2),
+            awayTurnoverRank: clampRank(baseAwayRank - 2),
+            homeBenchRank: clampRank(baseHomeRank + (comparison.length ? 0 : 2)),
+            awayBenchRank: clampRank(baseAwayRank + (comparison.length ? 0 : 2)),
+          };
+        })();
+
         next[game.id] = {
           ...(basePrediction as any),
           winner: simulation.winner,
@@ -94,6 +124,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
           recommendedTotalLine: simulation.recommendedTotalLine || basePrediction.recommendedTotalLine,
           simulationCount: simulation.iterations,
           keyFactors: mergedKeyFactors,
+          matchupRankings: basePrediction.matchupRankings || fallbackRankings,
           matchupAnalysis: {
             ...((basePrediction.matchupAnalysis as any) || {}),
             confidenceBreakdown: simulation.confidenceBreakdown,
