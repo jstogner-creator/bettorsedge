@@ -1,6 +1,7 @@
 import React from 'react';
 import { Game, Prediction } from '../../types';
 import { GameCard } from '../../GameCard';
+import { runMonteCarloSimulation } from '../../services/monteCarlo';
 
 interface GameGridProps {
   loading: boolean;
@@ -65,6 +66,50 @@ export const GameGrid: React.FC<GameGridProps> = ({
   onCheckInjuries,
   handleDiscussWithSnark,
 }) => {
+  const enhancedPredictions = React.useMemo<Record<string, Prediction>>(() => {
+    const next: Record<string, Prediction> = {};
+
+    filteredGames.forEach((game) => {
+      const basePrediction = game.id ? savedPredictions[game.id] : null;
+      if (!game.id || !basePrediction) return;
+
+      try {
+        const simulation = runMonteCarloSimulation({
+          game,
+          prediction: basePrediction,
+          iterations: 10000,
+        });
+
+        const mergedKeyFactors = Array.from(
+          new Set([...(simulation.keyFactors || []), ...(basePrediction.keyFactors || [])])
+        ).slice(0, 8);
+
+        next[game.id] = {
+          ...(basePrediction as any),
+          winner: simulation.winner,
+          winProbability: simulation.winProbability,
+          confidence: simulation.confidence,
+          scorePrediction: simulation.scorePrediction,
+          projectedTotal: simulation.projectedTotal,
+          recommendedTotalLine: simulation.recommendedTotalLine || basePrediction.recommendedTotalLine,
+          simulationCount: simulation.iterations,
+          keyFactors: mergedKeyFactors,
+          matchupAnalysis: {
+            ...((basePrediction.matchupAnalysis as any) || {}),
+            confidenceBreakdown: simulation.confidenceBreakdown,
+            projectionBasis: simulation.projectionBasis,
+          } as any,
+          reasoning: `${simulation.projectionBasis} ${basePrediction.reasoning || ''}`.trim(),
+        } as Prediction;
+      } catch (simulationError) {
+        console.error(`[GameGrid] Monte Carlo simulation failed for ${game.awayTeam} @ ${game.homeTeam}:`, simulationError);
+        next[game.id] = basePrediction;
+      }
+    });
+
+    return next;
+  }, [filteredGames, savedPredictions]);
+
   if (loading && filteredGames.length === 0) {
     return <div className="text-slate-400">Loading games...</div>;
   }
@@ -100,7 +145,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
           <GameCard
             key={game.id || `game-${index}`}
             game={game}
-            prediction={game.id ? savedPredictions[game.id] : null}
+            prediction={game.id ? enhancedPredictions[game.id] || savedPredictions[game.id] : null}
             isAnalyzing={analyzing && analysisProgress?.analyzingGameIds?.includes(game.id)}
             onReanalyze={handleReanalyzeSingleGame}
             onCheckInjuries={onCheckInjuries}
