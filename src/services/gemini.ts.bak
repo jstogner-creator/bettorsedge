@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 import { format } from "date-fns";
-import { getNYDate, getSlateDate } from "../lib/utils";
+import { getNYDate } from "../lib/utils";
 import { getDb, getIdToken } from "../firebase";
 import { doc, getDoc, setDoc, addDoc, collection, query, where, getDocs, limit, orderBy } from "firebase/firestore";
 import { Game, Prediction, TournamentBracket } from "../types";
@@ -658,7 +658,8 @@ export class BettorsEdge {
       // Post-processing to ensure data quality
       const processedGames = (Array.isArray(games) ? games : []).filter(game => {
         if (!game || typeof game !== 'object' || !game.homeTeam || !game.awayTeam) return false;
-
+        
+        // Filter to ensure AI only returned games for the requested league
         if (game.league) {
           const gLeague = String(game.league).toUpperCase();
           const targetLeague = league.toUpperCase();
@@ -667,28 +668,23 @@ export class BettorsEdge {
           }
         }
 
-        const rawDate = game.date ? String(game.date) : date;
-        const normalizedGameSlateDate = getSlateDate(rawDate);
-
-        if (normalizedGameSlateDate !== date) {
-          console.warn(`[AI] Filtering out wrong-slate game: ${game.awayTeam} @ ${game.homeTeam} (raw=${rawDate}, slate=${normalizedGameSlateDate}, requested=${date})`);
-          return false;
+        // CRITICAL: Filter to ensure AI only returned games for the requested date
+        // This prevents the AI from returning old games (e.g. from 2 days ago)
+        if (game.date) {
+          // Robust date extraction: split by 'T', ' ', or just take the first 10 chars
+          const gDate = String(game.date).split(/[T ]/)[0];
+          if (gDate !== date) {
+            console.warn(`[AI] Filtering out wrong-date game: ${game.awayTeam} @ ${game.homeTeam} (${gDate} vs ${date})`);
+            return false;
+          }
         }
-
+        
         return true;
-      }).map(game => {
-        const normalizedRawDate = game.date ? String(game.date) : date;
-
-        return {
-          ...game,
-          league: league,
-          date: normalizedRawDate,
-          slateDate: getSlateDate(normalizedRawDate),
-          id: String(game.id || `${league}-${game.awayTeam}-${game.homeTeam}-${date}`)
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, '-')
-        };
-      });
+      }).map(game => ({
+        ...game,
+        league: league,
+        date: date
+      }));
 
       // Save to Firestore
       try {
@@ -1076,9 +1072,9 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
         : game.league === 'NBA'
         ? `NBA: CRITICAL - It is April 2026. Regular season end. Star players (LeBron, AD, Steph, Luka Doncic, etc.) are frequently rested. You MUST verify the "Official NBA Injury Report" and look for "GTD", "Questionable", or "Late Scratch" news. If a star like Luka Doncic (often called Luke/Luka) is out, it MUST be reflected in the injuries and win probability. H2H RULE: ONLY include 2026 games.`
         : game.league === 'NHL'
-        ? "NHL: Focus on starting goalies, save percentage, GAA, shot quality, power play, penalty kill, rest/travel, and recent form. For teamStatsComparison, use NHL-only categories such as Record, Goals For, Goals Against, Power Play, Penalty Kill, Goalie Edge, and Projected Goals. NEVER use NBA categories for NHL."
+        ? "NHL: Focus on starting goalies, PP/PK%, and Corsi/Fenwick."
         : game.league === 'MLB'
-        ? "MLB: Focus on starting pitcher ERA/WHIP/xERA/FIP/K9, bullpen quality/rest, lineup splits, park/weather, and umpire run environment. For teamStatsComparison, use MLB-only categories such as Record, Starter ERA, Starter WHIP, Starter xERA or FIP, K/9, Bullpen Edge, and Projected Runs. NEVER use NBA categories like Shooting, Rebounding, Turnovers, or Bench for MLB. For Totals, provide a concrete projectedTotal and recommendedTotalLine."
+        ? "MLB: Focus on SP xERA/Barrel%, bullpen rest, L/R splits, park/weather (wind!), and umpire RPG. For Totals, provide a 'projectedTotal' and a 'recommendedTotalLine' with a 1.5-run cushion (e.g., if projected is 8, recommend Under 9.5)."
         : game.league === 'NFL'
         ? "NFL: Focus on QB health, O-Line/D-Line matchups, and weather."
         : "";
@@ -1258,55 +1254,7 @@ RULES:
         return null;
       }).filter(Boolean) || [];
 
-      const normalizeApiSportsStatus = (status: any): string => {
-        const s = String(status || "").toLowerCase();
-        if (s.includes("out")) return "Out";
-        if (s.includes("doubt")) return "Doubtful";
-        if (s.includes("prob")) return "Probable";
-        if (s.includes("in") || s.includes("active") || s.includes("available")) return "In";
-        return "";
-      };
-
-      const mapApiSportsInjuries = (injuries: any[], teamName: string) =>
-        (injuries || []).map((inj: any) => {
-          const playerName =
-            inj?.player?.name ||
-            [inj?.player?.firstname, inj?.player?.lastname].filter(Boolean).join(" ") ||
-            inj?.player ||
-            inj?.name ||
-            "";
-
-          const mappedStatus = normalizeApiSportsStatus(
-            inj?.status ||
-            inj?.injury?.status ||
-            inj?.reason ||
-            inj?.description
-          );
-
-          return {
-            team: teamName,
-            player: String(playerName || "").trim(),
-            status: mappedStatus,
-            impact: String(inj?.reason || inj?.injury?.description || inj?.description || "").trim(),
-            source_name: "API-Sports",
-            source_timestamp: String(inj?.date || inj?.updatedAt || new Date().toISOString())
-          };
-        }).filter((inj: any) => inj.player && inj.status);
-
-      const normalizedApiSportsInjuries = [
-        ...mapApiSportsInjuries(apiHomeInjuries, game.homeTeam),
-        ...mapApiSportsInjuries(apiAwayInjuries, game.awayTeam)
-      ];
-
-      return this.processAIResponse(
-        { ...game, apiSportsH2H, apiSportsVerifiedInjuries: normalizedApiSportsInjuries },
-        text,
-        cost,
-        dateStr,
-        previousMatchups,
-        existingPrediction,
-        groundingUrls
-      );
+      return this.processAIResponse({ ...game, apiSportsH2H }, text, cost, dateStr, previousMatchups, existingPrediction, groundingUrls);
     } catch (error) {
       console.error("Error analyzing matchup:", error);
       throw error;
@@ -1408,9 +1356,12 @@ RULES:
         }));
       }
 
-      // Use verified API-Sports injuries as the source of truth; do not restore stale unverified injuries
-      if (Array.isArray(game.apiSportsVerifiedInjuries) && game.apiSportsVerifiedInjuries.length > 0) {
-        prediction.injuries = game.apiSportsVerifiedInjuries;
+      // Merge existing injuries if the AI dropped them or returned an invalid format
+      if (existingPrediction && Array.isArray(existingPrediction.injuries) && existingPrediction.injuries.length > 0) {
+        if (!Array.isArray(prediction.injuries) || prediction.injuries.length === 0) {
+          console.log("[Gemini] AI dropped or returned empty injuries, restoring from existingPrediction");
+          prediction.injuries = existingPrediction.injuries;
+        }
       } else if (!Array.isArray(prediction.injuries)) {
         prediction.injuries = [];
       }
@@ -1491,50 +1442,6 @@ RULES:
           return true;
         });
       }
-      if (Array.isArray(prediction.injuries)) {
-        const normalizeStatus = (status: string) => {
-          const s = String(status || "").toLowerCase().trim();
-          if (s.includes("out")) return "Out";
-          if (s.includes("doubt")) return "Doubtful";
-          if (s.includes("prob")) return "Probable";
-          if (s.includes("available") || s.includes("active") || s === "in") return "In";
-          return "";
-        };
-
-        const seen = new Set<string>();
-
-        prediction.injuries = prediction.injuries
-          .map((injury: any) => ({
-            ...injury,
-            player: String(injury?.player || "").trim(),
-            team: String(injury?.team || "").trim(),
-            status: normalizeStatus(String(injury?.status || "")),
-            source_name: String(injury?.source_name || "").trim(),
-            source_timestamp: String(injury?.source_timestamp || "").trim()
-          }))
-          .filter((injury: any) => {
-            const player = String(injury.player || "").toLowerCase();
-            const status = String(injury.status || "").toLowerCase();
-            const source = String(injury.source_name || "").toLowerCase();
-
-            if (!injury.player) return false;
-            if (!injury.team) return false;
-            if (!status) return false;
-            if (status === "unknown") return false;
-            if (player.includes("no verified")) return false;
-            if (source.includes("unverified")) return false;
-
-            const key = `${player}|${String(injury.team || "").toLowerCase()}|${status}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-      }
-
-      prediction.qaStatus = "verified";
-      prediction.qaNotes = Array.isArray(prediction.injuries) && prediction.injuries.length > 0
-        ? "Injuries verified using API-Sports as the primary source."
-        : "No active injuries returned by API-Sports for this matchup.";
       // Backfill weak / incomplete AI responses so UI is never empty
       const marketHomeProb = Number(
         prediction.marketExpectations?.homeWinProb ??
@@ -1617,60 +1524,6 @@ RULES:
       prediction.matchupAnalysis.confidenceBreakdown = prediction.matchupAnalysis.confidenceBreakdown || "Confidence derived from available market, roster, and injury context.";
       prediction.matchupAnalysis.projectionBasis = prediction.matchupAnalysis.projectionBasis || "Fallback projection used market total and spread because AI response lacked numeric detail.";
 
-      const parseNumericStat = (value: any): number | null => {
-        if (value === null || value === undefined || value === "") return null;
-        const cleaned = String(value).replace(/[^0-9.\-]/g, "");
-        const parsed = Number(cleaned);
-        return Number.isFinite(parsed) ? parsed : null;
-      };
-
-      const lowerIsBetter = (homeVal: any, awayVal: any): 'home' | 'away' | 'neutral' => {
-        const h = parseNumericStat(homeVal);
-        const a = parseNumericStat(awayVal);
-        if (h === null || a === null || h === a) return 'neutral';
-        return h < a ? 'home' : 'away';
-      };
-
-      const higherIsBetter = (homeVal: any, awayVal: any): 'home' | 'away' | 'neutral' => {
-        const h = parseNumericStat(homeVal);
-        const a = parseNumericStat(awayVal);
-        if (h === null || a === null || h === a) return 'neutral';
-        return h > a ? 'home' : 'away';
-      };
-
-      if ((!Array.isArray(prediction.teamStatsComparison) || prediction.teamStatsComparison.length < 4) && game.league === 'MLB') {
-        const homePitcher = prediction.pitcherMatchup?.homePitcher || {};
-        const awayPitcher = prediction.pitcherMatchup?.awayPitcher || {};
-
-        prediction.teamStatsComparison = [
-          { category: 'Record', homeValue: game.homeTeamStats?.record || 'N/A', awayValue: game.awayTeamStats?.record || 'N/A', advantage: 'neutral' },
-          { category: 'Starter ERA', homeValue: homePitcher.era || 'N/A', awayValue: awayPitcher.era || 'N/A', advantage: lowerIsBetter(homePitcher.era, awayPitcher.era) },
-          { category: 'Starter WHIP', homeValue: homePitcher.whip || 'N/A', awayValue: awayPitcher.whip || 'N/A', advantage: lowerIsBetter(homePitcher.whip, awayPitcher.whip) },
-          { category: 'Starter xERA', homeValue: homePitcher.xERA || homePitcher.fip || 'N/A', awayValue: awayPitcher.xERA || awayPitcher.fip || 'N/A', advantage: lowerIsBetter(homePitcher.xERA || homePitcher.fip, awayPitcher.xERA || awayPitcher.fip) },
-          { category: 'K/9', homeValue: homePitcher.k9 || 'N/A', awayValue: awayPitcher.k9 || 'N/A', advantage: higherIsBetter(homePitcher.k9, awayPitcher.k9) },
-          { category: 'Projected Runs', homeValue: prediction.scorePrediction?.home ?? 'N/A', awayValue: prediction.scorePrediction?.away ?? 'N/A', advantage: higherIsBetter(prediction.scorePrediction?.home, prediction.scorePrediction?.away) }
-        ];
-      }
-
-      if ((!Array.isArray(prediction.teamStatsComparison) || prediction.teamStatsComparison.length < 4) && game.league === 'NHL') {
-        prediction.teamStatsComparison = [
-          { category: 'Record', homeValue: game.homeTeamStats?.record || 'N/A', awayValue: game.awayTeamStats?.record || 'N/A', advantage: 'neutral' },
-          { category: 'Projected Goals', homeValue: prediction.scorePrediction?.home ?? 'N/A', awayValue: prediction.scorePrediction?.away ?? 'N/A', advantage: higherIsBetter(prediction.scorePrediction?.home, prediction.scorePrediction?.away) },
-          { category: 'Total Goal Environment', homeValue: prediction.projectedTotal ?? 'N/A', awayValue: prediction.projectedTotal ?? 'N/A', advantage: 'neutral' },
-          { category: 'Recent Form', homeValue: game.homeTeamStats?.last5 || 'N/A', awayValue: game.awayTeamStats?.last5 || 'N/A', advantage: 'neutral' },
-          { category: 'Win %', homeValue: game.homeTeamStats?.winPercentage || 'N/A', awayValue: game.awayTeamStats?.winPercentage || 'N/A', advantage: 'neutral' }
-        ];
-      }
-
-      if ((!Array.isArray(prediction.teamStatsComparison) || prediction.teamStatsComparison.length < 4) && game.league === 'NFL') {
-        prediction.teamStatsComparison = [
-          { category: 'Record', homeValue: game.homeTeamStats?.record || 'N/A', awayValue: game.awayTeamStats?.record || 'N/A', advantage: 'neutral' },
-          { category: 'Projected Points', homeValue: prediction.scorePrediction?.home ?? 'N/A', awayValue: prediction.scorePrediction?.away ?? 'N/A', advantage: higherIsBetter(prediction.scorePrediction?.home, prediction.scorePrediction?.away) },
-          { category: 'Total Point Environment', homeValue: prediction.projectedTotal ?? 'N/A', awayValue: prediction.projectedTotal ?? 'N/A', advantage: 'neutral' },
-          { category: 'Recent Form', homeValue: game.homeTeamStats?.last5 || 'N/A', awayValue: game.awayTeamStats?.last5 || 'N/A', advantage: 'neutral' },
-          { category: 'Win %', homeValue: game.homeTeamStats?.winPercentage || 'N/A', awayValue: game.awayTeamStats?.winPercentage || 'N/A', advantage: 'neutral' }
-        ];
-      }
       if (!Array.isArray(prediction.keyFactors) || prediction.keyFactors.length === 0) {
         prediction.keyFactors = [
           "Market-implied spread and total used as projection baseline",
@@ -2042,16 +1895,6 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
         try {
           // This will check Firestore first, and if missing, fetch from API and save to Firestore
           const games = await this.getDailySchedule(league, dateStr, force);
-
-          const wrongSlateGames = (games || []).filter((g: any) => {
-            const gameSlate = getSlateDate(g?.date || dateStr);
-            return gameSlate !== dateStr;
-          });
-
-          if (wrongSlateGames.length > 0) {
-            console.warn(`[Import Validation] ${wrongSlateGames.length} wrong-slate games detected for ${league} on ${dateStr}:`, wrongSlateGames.map((g: any) => `${g.awayTeam} @ ${g.homeTeam} (${g.date})`));
-          }
-
           console.log(`[Import] Imported ${games.length} games for ${league} on ${dateStr} (force=${force})`);
           onProgress?.(`Imported ${games.length} games for ${dateStr}...`);
         } catch (e) {
@@ -2085,64 +1928,6 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
       }
 
       const batchGames = games.slice(i, i + BATCH_SIZE);
-
-      if (league === 'NBA') {
-        const season = getNYDate().getFullYear().toString();
-
-        const normalizeApiSportsStatus = (status: any): string => {
-          const s = String(status || "").toLowerCase();
-          if (s.includes("out")) return "Out";
-          if (s.includes("doubt")) return "Doubtful";
-          if (s.includes("prob")) return "Probable";
-          if (s.includes("available") || s.includes("active") || s === "in") return "In";
-          return "";
-        };
-
-        const batchResults = await Promise.all(batchGames.map(async (game) => {
-          if (!game.apiSportsHomeTeamId || !game.apiSportsAwayTeamId) {
-            return { gameId: game.id, injuries: [] as any[] };
-          }
-
-          const [homeInjuries, awayInjuries] = await Promise.all([
-            apiSportsService.getInjuries(game.apiSportsHomeTeamId, season),
-            apiSportsService.getInjuries(game.apiSportsAwayTeamId, season)
-          ]);
-
-          const mapTeamInjuries = (injuries: any[], teamName: string) =>
-            (injuries || []).map((inj: any) => {
-              const playerName =
-                inj?.player?.name ||
-                [inj?.player?.firstname, inj?.player?.lastname].filter(Boolean).join(" ") ||
-                inj?.player ||
-                inj?.name ||
-                "";
-
-              return {
-                player: String(playerName || "").trim(),
-                team: teamName,
-                status: normalizeApiSportsStatus(inj?.status || inj?.injury?.status || inj?.reason || inj?.description),
-                impact: String(inj?.reason || inj?.injury?.description || inj?.description || "").trim(),
-                source_name: "API-Sports",
-                source_timestamp: String(inj?.date || inj?.updatedAt || new Date().toISOString())
-              };
-            }).filter((inj: any) => inj.player && inj.status);
-
-          return {
-            gameId: game.id,
-            injuries: [
-              ...mapTeamInjuries(homeInjuries, game.homeTeam),
-              ...mapTeamInjuries(awayInjuries, game.awayTeam)
-            ]
-          };
-        }));
-
-        for (const item of batchResults) {
-          allUpdates[item.gameId] = item.injuries;
-        }
-
-        continue;
-      }
-
       const teams = batchGames.map(g => `${g.awayTeam} and ${g.homeTeam}`).join(", ");
 
       const leagueSearchQuery = league === 'NCAA' 
@@ -2458,20 +2243,6 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 }
 
 export const bettorsEdge = new BettorsEdge();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
