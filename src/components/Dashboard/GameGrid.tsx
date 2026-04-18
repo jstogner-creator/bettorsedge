@@ -87,7 +87,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
         ).slice(0, 8);
 
         const fallbackRankings = (() => {
-          if (game.league !== 'NBA' || basePrediction.matchupRankings) return undefined;
+          if (game.league !== 'NBA') return undefined;
 
           const comparison = Array.isArray(basePrediction.teamStatsComparison) ? basePrediction.teamStatsComparison : [];
           const homeAdvantages = comparison.filter((item) => item.advantage === 'home').length;
@@ -114,6 +114,13 @@ export const GameGrid: React.FC<GameGridProps> = ({
           };
         })();
 
+        const mergedMatchupRankings = fallbackRankings
+          ? {
+              ...fallbackRankings,
+              ...(basePrediction.matchupRankings || {}),
+            }
+          : basePrediction.matchupRankings;
+
         next[game.id] = {
           ...(basePrediction as any),
           winner: simulation.winner,
@@ -124,7 +131,7 @@ export const GameGrid: React.FC<GameGridProps> = ({
           recommendedTotalLine: simulation.recommendedTotalLine || basePrediction.recommendedTotalLine,
           simulationCount: simulation.iterations,
           keyFactors: mergedKeyFactors,
-          matchupRankings: basePrediction.matchupRankings || fallbackRankings,
+          matchupRankings: mergedMatchupRankings,
           matchupAnalysis: {
             ...((basePrediction.matchupAnalysis as any) || {}),
             confidenceBreakdown: simulation.confidenceBreakdown,
