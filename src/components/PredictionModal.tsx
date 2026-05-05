@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, TrendingUp, AlertTriangle, ShieldCheck, BrainCircuit, Coins, Flag, Scale, Zap, Activity, ExternalLink } from "lucide-react";
+import { X, TrendingUp, AlertTriangle, ShieldCheck, BrainCircuit, Coins, Flag, Scale, Zap, Activity, ExternalLink, Info } from "lucide-react";
 import { Prediction, Game } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import ReactMarkdown from "react-markdown";
@@ -300,6 +300,71 @@ export function PredictionModal({ game, prediction, onClose }: PredictionModalPr
                 </ul>
               </div>
             </div>
+            
+            {/* Previous Matchups */}
+            {Array.isArray(prediction.previousMatchups) && prediction.previousMatchups.length > 0 && (
+              <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-6 shadow-sm">
+                <h4 className="text-sm font-mono text-indigo-400 uppercase tracking-widest mb-4 flex items-center justify-between">
+                  <div className="flex items-center">
+                    <Activity className="w-4 h-4 mr-2" />
+                    Head-to-Head Matchups
+                  </div>
+                  {(game.league === 'MLB' || game.league === 'NBA') && (
+                    <span className="text-[10px] bg-indigo-500/10 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/20">
+                      2026 Season Only
+                    </span>
+                  )}
+                </h4>
+                <div className="space-y-4">
+                  {prediction.previousMatchups.map((match, idx) => (
+                    <div key={idx} className="flex flex-col border-b border-slate-700/30 last:border-0 pb-3 last:pb-0">
+                      <div className="flex justify-between items-center text-sm">
+                        <div className="flex flex-col">
+                          <span className="text-slate-500 font-bold uppercase tracking-tighter text-xs">{match.date}</span>
+                          {(game.league === 'NBA' || game.league === 'MLB') && (match.date || '').includes('2026') && (
+                            <span className="text-[10px] text-indigo-400/70 font-black uppercase tracking-tighter">Current Season</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-2">
+                             <span className="text-slate-400 font-mono text-xs">{match.awayTeam}</span>
+                             <span className={cn(
+                               "text-lg font-bold font-mono",
+                               match.awayScore > match.homeScore ? "text-emerald-400" : "text-white"
+                             )}>{match.awayScore}</span>
+                          </div>
+                          <span className="text-slate-600 font-mono">-</span>
+                          <div className="flex items-center gap-2 text-right">
+                             <span className={cn(
+                               "text-lg font-bold font-mono",
+                               match.homeScore > match.awayScore ? "text-emerald-400" : "text-white"
+                             )}>{match.homeScore}</span>
+                             <span className="text-slate-400 font-mono text-xs">{match.homeTeam}</span>
+                          </div>
+                        </div>
+                        <div className="w-16 flex justify-end">
+                          {match.awayScore > match.homeScore ? (
+                            <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 font-black uppercase tracking-tighter">AWAY W</span>
+                          ) : match.homeScore > match.awayScore ? (
+                            <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 font-black uppercase tracking-tighter">HOME W</span>
+                          ) : (
+                            <span className="text-[9px] bg-slate-500/10 text-slate-500 px-2 py-0.5 rounded border border-slate-700/20 font-black uppercase tracking-tighter">PUSH</span>
+                          )}
+                        </div>
+                      </div>
+                      {match.lineupChanges && (
+                        <div className="mt-2 flex items-start gap-2 bg-slate-800/40 p-2 rounded border border-slate-700/30">
+                          <Info className="w-3 h-3 text-indigo-400/50 mt-0.5 flex-shrink-0" />
+                          <span className="text-xs text-slate-400 italic leading-relaxed">
+                            {match.lineupChanges}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             
             {/* Sources & Grounding */}
             {prediction.groundingUrls && prediction.groundingUrls.length > 0 && (

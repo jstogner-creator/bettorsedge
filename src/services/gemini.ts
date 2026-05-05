@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
+import axios from "axios";
 import { format } from "date-fns";
 import { getNYDate } from "../lib/utils";
 import { getDb, getIdToken } from "../firebase";
@@ -9,6 +10,7 @@ import { logError, logApiCall, logSourceAudit } from "./logger";
 import { espnService } from "./espn";
 import { apiSportsService } from "./apiSports";
 import { apiSportsMlbService } from "./apiSportsMlb";
+import { apiSportsNhlService } from "./apiSportsNhl";
 import { NBA_ROSTER_DATABASE, GLOBAL_INJURY_LINKS, GLOBAL_ROSTER_LINKS } from "../data/nbaRosters";
 import { handleFirestoreError, OperationType } from "../lib/firestoreErrors";
 
@@ -58,21 +60,32 @@ function getOpenAIClient(): OpenAI | null {
 export class BettorsEdge {
   // Using the latest pro model for best reasoning and data synthesis
   private getModel() {
-    return localStorage.getItem("gemini_model") || "gemini-3.1-flash-lite-preview";
+    return localStorage.getItem("gemini_model") || "gemini-2.0-flash";
   }
   
   private getOpenAIModel() {
-    return localStorage.getItem("openai_model") || "gpt-5-mini";
+    return localStorage.getItem("openai_model") || "gpt-4o";
   }
 
   private shouldUseOpenAI(): boolean {
     const localKey = typeof window !== "undefined" ? localStorage.getItem("openai_api_key") : null;
-    const hasKey = !!getEnvOpenAIKey() || !!localKey;
-    if (!hasKey) return false;
+    const useOpenAIFlag = typeof window !== "undefined" ? localStorage.getItem("use_openai") === "true" : false;
+    // Allow using OpenAI if locally configured OR if user has explicitly toggled it OR if VITE key is present
+    return useOpenAIFlag || !!localKey || !!import.meta.env.VITE_OPENAI_API_KEY;
+  }
 
-    const storedUseOpenAI = typeof window !== "undefined" ? localStorage.getItem("use_openai") : null;
-    // Default to true if key is present but flag is not set, otherwise respect the flag
-    return storedUseOpenAI === null ? true : storedUseOpenAI === "true";
+  private async callServerAI(params: {
+    provider: "openai" | "gemini";
+    model?: string;
+    messages: Array<{ role: string; content: string }>;
+    systemPrompt?: string;
+    config?: any;
+  }): Promise<any> {
+    const token = await getIdToken();
+    const response = await axios.post("/api/ai/analyze", params, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return response.data;
   }
   
   // Circuit breaker state
@@ -143,20 +156,39 @@ export class BettorsEdge {
     `;
 
     try {
-      const ai = getGeminiClient();
-      const response = await this.callWithRetry(async (ai) => {
-        return await ai.models.generateContent({
-          model: this.getModel(),
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          config: { tools: [{ googleSearch: {} }] },
-        });
-      }, 3, 5000, `bracket-${league}-${year}`, prompt);
+      const useOpenAI = this.shouldUseOpenAI();
+      let text = "";
 
-      if (response.candidates?.[0]?.groundingMetadata) {
-        console.log("[Gemini Debug] Grounding Metadata:", JSON.stringify(response.candidates[0].groundingMetadata, null, 2));
+      if (useOpenAI) {
+        const openai = getOpenAIClient();
+        if (!openai) throw new Error("OpenAI client not initialized");
+
+        const response = await openai.chat.completions.create({
+          model: this.getOpenAIModel(),
+          messages: [
+            { role: "system", content: "You are a professional sports data analyst specialized in tournament brackets." },
+            { role: "user", content: prompt }
+          ],
+          response_format: { type: "json_object" }
+        });
+        text = response.choices[0].message.content || "";
+      } else {
+        const ai = getGeminiClient();
+        const response = await this.callWithRetry(async (ai) => {
+          return await ai.models.generateContent({
+            model: this.getModel(),
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            config: { tools: [{ googleSearch: {} }] },
+          });
+        }, 3, 5000, `bracket-${league}-${year}`, prompt);
+
+        if (response.candidates?.[0]?.groundingMetadata) {
+          console.log("[Gemini Debug] Grounding Metadata:", JSON.stringify(response.candidates[0].groundingMetadata, null, 2));
+        }
+
+        text = response.text;
       }
 
-      const text = response.text;
       if (!text) {
         console.warn("Gemini returned empty text for tournament bracket.");
         return null;
@@ -529,6 +561,80 @@ export class BettorsEdge {
       console.warn("Failed to read schedule from Firestore:", e);
     }
 
+    // Try official APIs first for specific leagues to ensure 100% accuracy (e.g. San Antonio game)
+    let officialGames: any[] = [];
+    const dateObj = new Date(date + 'T12:00:00'); // Mid-day for correct date parsing
+    
+    try {
+      if (league === "NBA") {
+        // Fetch requested date, and also check +/- 1 day if it's late night/early morning to avoid missing games due to timezone shifts
+        const [todayGames, prevGames, nextGames] = await Promise.all([
+          apiSportsService.getGames(dateObj),
+          apiSportsService.getGames(new Date(dateObj.getTime() - 86400000)),
+          apiSportsService.getGames(new Date(dateObj.getTime() + 86400000))
+        ]);
+        
+        // Filter adjacent days to only include games that match the target date either in their timestamp or if the API returned them
+        // For NBA specifically, sometimes games start late.
+        // We combine them but deduplicate by ID.
+        const combined = [...todayGames, ...prevGames, ...nextGames];
+        const seen = new Set();
+        officialGames = combined.filter(g => {
+          if (seen.has(g.id)) return false;
+          seen.add(g.id);
+          
+          // Only keep if the game date matches our target string OR if it's within a few hours of the slate
+          const gDateStr = String(g.date).split(/[T ]/)[0];
+          return gDateStr === date;
+        });
+      } else if (league === "MLB") {
+        officialGames = await apiSportsMlbService.getGames(dateObj);
+      } else if (league === "NHL") {
+        officialGames = await apiSportsNhlService.getGames(dateObj);
+      }
+      
+      if (officialGames.length > 0) {
+        console.log(`[API-Sports] Found ${officialGames.length} games for ${league} on ${date}`);
+        const mapped = officialGames.map(g => {
+          const homeName = g.teams.home.name;
+          const awayName = g.teams.away.name;
+          return {
+            id: `${league.toLowerCase()}-${awayName.toLowerCase().replace(/\s+/g, '-')}-${homeName.toLowerCase().replace(/\s+/g, '-')}-${date}`,
+            league: league as any,
+            homeTeam: homeName,
+            awayTeam: awayName,
+            homeLogo: g.teams.home.logo,
+            awayLogo: g.teams.away.logo,
+            date: date,
+            time: g.status?.long === 'Not Started' || !g.status?.long ? g.time || "TBD" : g.status.long,
+            location: g.venue || "Arena",
+            status: 'scheduled',
+            apiSportsGameId: g.id,
+            apiSportsHomeTeamId: g.teams.home.id,
+            apiSportsAwayTeamId: g.teams.away.id
+          };
+        });
+        
+        // Save to Firestore
+        try {
+          await setDoc(scheduleRef, {
+            games: mapped,
+            updatedAt: new Date().toISOString(),
+            league,
+            date,
+            source: 'official-api'
+          });
+          console.log(`[Cache] Saved official API schedule to Firestore for ${docId}`);
+        } catch (fsError) {
+          console.error("Failed to save official schedule to Firestore:", fsError);
+        }
+        
+        return mapped;
+      }
+    } catch (apiError) {
+      console.warn(`[Official API] Failed to fetch for ${league} on ${date}. Falling back to AI search.`, apiError);
+    }
+
     // Map generic league names to specific search terms to avoid confusion
     const searchLeague = league === "NCAA" ? "NCAA Men's Basketball" : 
                         league === "NBA" ? "NBA Basketball" : 
@@ -539,11 +645,12 @@ export class BettorsEdge {
     const prompt = `
       Today is ${today}. 
       Find EVERY SINGLE ${searchLeague} game scheduled for ${date}. 
-      CRITICAL: Do not miss any matchups. Check multiple sources (ESPN, Yahoo Sports, NBA.com, etc.) to ensure 100% coverage.
-      If there are 10 games, return 10. If there are 15, return 15. Do not truncate the list.
+      CRITICAL: Do not miss any matchups. Check multiple sources (ESPN, Yahoo Sports, NBA.com, NBA App, etc.) to ensure 100% coverage.
+      Ensure you include all teams, especially those in smaller markets or with early/late start times (e.g., San Antonio Spurs, Utah Jazz, Sacramento Kings, etc.).
+      If there are 10 games, return 10. If there are 15, return 15. Do not truncate the list for any reason.
       
       CRITICAL: ONLY return games that are actually scheduled for ${date}. 
-      If a game was played on a previous date (like March 28th), DO NOT include it unless it is also scheduled for ${date}.
+      If a game was played on a previous date, DO NOT include it.
       
       Return valid JSON ${useOpenAI ? 'object with a "games" array' : 'array'}:
       ${useOpenAI ? '{"games": [' : '['}
@@ -669,12 +776,18 @@ export class BettorsEdge {
         }
 
         // CRITICAL: Filter to ensure AI only returned games for the requested date
-        // This prevents the AI from returning old games (e.g. from 2 days ago)
+        // This prevents the AI from returning old games or tomorrow's games if we are strictly looking for one day.
+        // However, we allow a +/- 1 day mismatch if the game seems relevant, though for strict daily slates,
+        // it's better to keep it tight. We'll stick to strict but match against multiple parts if provided.
         if (game.date) {
-          // Robust date extraction: split by 'T', ' ', or just take the first 10 chars
           const gDate = String(game.date).split(/[T ]/)[0];
-          if (gDate !== date) {
-            console.warn(`[AI] Filtering out wrong-date game: ${game.awayTeam} @ ${game.homeTeam} (${gDate} vs ${date})`);
+          const targetDate = date;
+          
+          // If the gDate is within 1 day of targetDate, we might consider it, 
+          // but usually slates are day-specific. Let's stick to matching targetDate 
+          // but maybe log instead of just filtering if it's very close or has same teams.
+          if (gDate !== targetDate) {
+            console.warn(`[AI] Filtering out wrong-date game: ${game.awayTeam} @ ${game.homeTeam} (${gDate} vs ${targetDate})`);
             return false;
           }
         }
@@ -966,11 +1079,18 @@ export class BettorsEdge {
         .then(snapshot => snapshot.docs.map(doc => doc.data().report))
         .catch(e => { console.warn("Failed to fetch reports", e); return []; });
 
-      const matchupsPromise = getDocs(query(collection(db, "predictions"), where("teams", "array-contains", game.homeTeam), orderBy("lastUpdated", "desc"), limit(5)))
+      const matchupsPromise = getDocs(query(collection(db, "predictions"), where("teams", "array-contains", game.homeTeam), orderBy("lastUpdated", "desc")))
         .then(snapshot => {
           return snapshot.docs
             .map(doc => doc.data() as Prediction)
-            .filter(p => p.teams && p.teams.includes(game.awayTeam) && p.actualScore)
+            .filter(p => {
+              // Strictly filter to MLB 2026 only if requested
+              if (game.league === 'MLB' || game.league === 'NBA') {
+                const pDate = p.date || p.lastUpdated || "";
+                if (!pDate.includes('2026')) return false;
+              }
+              return p.teams && p.teams.includes(game.awayTeam) && p.actualScore;
+            })
             .slice(0, 3);
         })
         .catch(e => { console.warn("Failed to fetch previous matchups", e); return []; });
@@ -985,17 +1105,26 @@ export class BettorsEdge {
       let apiSportsAwayStatsPromise = Promise.resolve(null);
       let apiSportsHomeInjuriesPromise = Promise.resolve([]);
       let apiSportsAwayInjuriesPromise = Promise.resolve([]);
+      let apiSportsH2HPromise = Promise.resolve([]);
+      let apiSportsStandingsPromise = Promise.resolve([]);
 
-      if ((game.league === 'NBA' || game.league === 'MLB') && game.apiSportsHomeTeamId && game.apiSportsAwayTeamId) {
+      if ((game.league === 'NBA' || game.league === 'MLB' || game.league === 'NHL') && game.apiSportsHomeTeamId && game.apiSportsAwayTeamId) {
         const season = getNYDate().getFullYear().toString(); // Basic season logic
         if (game.league === 'NBA') {
-          apiSportsHomeStatsPromise = apiSportsService.getTeamStats(game.apiSportsHomeTeamId, season);
-          apiSportsAwayStatsPromise = apiSportsService.getTeamStats(game.apiSportsAwayTeamId, season);
-          apiSportsHomeInjuriesPromise = apiSportsService.getInjuries(game.apiSportsHomeTeamId, season);
-          apiSportsAwayInjuriesPromise = apiSportsService.getInjuries(game.apiSportsAwayTeamId, season);
-        } else {
-          apiSportsHomeStatsPromise = apiSportsMlbService.getOdds({ game: game.apiSportsHomeTeamId, season });
-          apiSportsAwayStatsPromise = apiSportsMlbService.getOdds({ game: game.apiSportsAwayTeamId, season });
+          apiSportsHomeStatsPromise = apiSportsService.getTeamStats(game.apiSportsHomeTeamId, season).catch(e => { console.warn("Failed to fetch home stats", e); return null; });
+          apiSportsAwayStatsPromise = apiSportsService.getTeamStats(game.apiSportsAwayTeamId, season).catch(e => { console.warn("Failed to fetch away stats", e); return null; });
+          apiSportsHomeInjuriesPromise = apiSportsService.getInjuries(game.apiSportsHomeTeamId, season).catch(e => { console.warn("Failed to fetch home injuries", e); return []; });
+          apiSportsAwayInjuriesPromise = apiSportsService.getInjuries(game.apiSportsAwayTeamId, season).catch(e => { console.warn("Failed to fetch away injuries", e); return []; });
+          apiSportsH2HPromise = apiSportsService.getH2H(game.apiSportsHomeTeamId, game.apiSportsAwayTeamId).catch(e => { console.warn("Failed to fetch NBA H2H", e); return []; });
+        } else if (game.league === 'MLB') {
+          apiSportsHomeStatsPromise = apiSportsMlbService.getTeamStatistics(game.apiSportsHomeTeamId, season).catch(e => { console.warn("Failed to fetch home stats", e); return null; });
+          apiSportsAwayStatsPromise = apiSportsMlbService.getTeamStatistics(game.apiSportsAwayTeamId, season).catch(e => { console.warn("Failed to fetch away stats", e); return null; });
+          apiSportsHomeInjuriesPromise = apiSportsMlbService.getInjuries(game.apiSportsHomeTeamId, season).catch(e => { console.warn("Failed to fetch home injuries", e); return []; });
+          apiSportsAwayInjuriesPromise = apiSportsMlbService.getInjuries(game.apiSportsAwayTeamId, season).catch(e => { console.warn("Failed to fetch away injuries", e); return []; });
+          apiSportsH2HPromise = apiSportsMlbService.getH2H(game.apiSportsHomeTeamId, game.apiSportsAwayTeamId).catch(e => { console.warn("Failed to fetch MLB H2H", e); return []; });
+          apiSportsStandingsPromise = apiSportsMlbService.getStandings(season).catch(e => { console.warn("Failed to fetch MLB standings", e); return []; });
+        } else if (game.league === 'NHL') {
+          apiSportsH2HPromise = apiSportsNhlService.getH2H(game.apiSportsHomeTeamId, game.apiSportsAwayTeamId).catch(e => { console.warn("Failed to fetch NHL H2H", e); return []; });
         }
       }
 
@@ -1006,7 +1135,9 @@ export class BettorsEdge {
         apiHomeStats,
         apiAwayStats,
         apiHomeInjuries,
-        apiAwayInjuries
+        apiAwayInjuries,
+        apiH2H,
+        apiStandings
       ] = await Promise.all([
         reportsPromise,
         matchupsPromise,
@@ -1014,25 +1145,50 @@ export class BettorsEdge {
         apiSportsHomeStatsPromise,
         apiSportsAwayStatsPromise,
         apiSportsHomeInjuriesPromise,
-        apiSportsAwayInjuriesPromise
+        apiSportsAwayInjuriesPromise,
+        apiSportsH2HPromise,
+        apiSportsStandingsPromise
       ]);
 
       const reportsText = reports.length > 0 ? `\n\nCRITICAL: User reports of incorrect player status for this game: ${reports.join("; ")}. PLEASE VERIFY THESE CLAIMS.` : "";
 
       let apiSportsContext = "";
-      if (apiHomeStats || apiAwayStats || apiHomeInjuries.length > 0 || apiAwayInjuries.length > 0) {
+      if (apiHomeStats || apiAwayStats || apiHomeInjuries.length > 0 || apiAwayInjuries.length > 0 || (apiH2H && apiH2H.length > 0) || (apiStandings && apiStandings.length > 0)) {
         apiSportsContext = `\nAPI-SPORTS DATA (HIGH PRIORITY SOURCE):\n`;
         if (apiHomeStats) apiSportsContext += `- ${game.homeTeam} Stats: ${JSON.stringify(apiHomeStats)}\n`;
         if (apiAwayStats) apiSportsContext += `- ${game.awayTeam} Stats: ${JSON.stringify(apiAwayStats)}\n`;
         if (apiHomeInjuries.length > 0) apiSportsContext += `- ${game.homeTeam} Injuries: ${JSON.stringify(apiHomeInjuries)}\n`;
         if (apiAwayInjuries.length > 0) apiSportsContext += `- ${game.awayTeam} Injuries: ${JSON.stringify(apiAwayInjuries)}\n`;
+
+        if (apiStandings && apiStandings.length > 0) {
+          const homeStandings = apiStandings.find((s: any) => s.team.id === game.apiSportsHomeTeamId);
+          const awayStandings = apiStandings.find((s: any) => s.team.id === game.apiSportsAwayTeamId);
+          if (homeStandings) apiSportsContext += `- ${game.homeTeam} Standings: ${homeStandings.games.win.total}-${homeStandings.games.lose.total} (Streak: ${homeStandings.streak})\n`;
+          if (awayStandings) apiSportsContext += `- ${game.awayTeam} Standings: ${awayStandings.games.win.total}-${awayStandings.games.lose.total} (Streak: ${awayStandings.streak})\n`;
+        }
+
+        if (apiH2H && apiH2H.length > 0) {
+          // Filter to only include current year (2026) for MLB/NBA/NHL
+          let filteredH2H = apiH2H;
+          if (game.league === 'MLB' || game.league === 'NBA' || game.league === 'NHL') {
+            filteredH2H = apiH2H.filter((h: any) => h.date && String(h.date).includes('2026'));
+          }
+
+          if (filteredH2H.length > 0) {
+            apiSportsContext += `- Head-to-Head History (Last ${filteredH2H.length} games in 2026):\n`;
+            filteredH2H.slice(0, 5).forEach((h: any) => {
+              const hDate = h.date ? format(new Date(h.date), "MMM d, yyyy") : "Unknown Date";
+              apiSportsContext += `  - ${hDate}: ${h.teams.away.name} ${h.scores.away.total} @ ${h.teams.home.name} ${h.scores.home.total}\n`;
+            });
+          }
+        }
       }
 
       let previousMatchupsText = "";
       if (previousMatchups.length > 0) {
-        previousMatchupsText = `\nPREVIOUS MATCHUPS (AI PREDICTIONS):\n${previousMatchups.map(p => `- ${p.date}: ${p.awayTeam} ${p.actualScore?.away} @ ${p.homeTeam} ${p.actualScore?.home} (Predicted: ${p.projectedWinner} ${p.projectedScore?.away}-${p.projectedScore?.home})`).join('\n')}\n`;
+        previousMatchupsText = `\nPREVIOUS MATCHUPS (STRICTLY 2026 SEASON ONLY):\n${previousMatchups.map(p => `- ${p.date}: ${p.awayTeam} ${p.actualScore?.away} @ ${p.homeTeam} ${p.actualScore?.home} (Predicted: ${p.projectedWinner} ${p.projectedScore?.away}-${p.projectedScore?.home})`).join('\n')}\n`;
       }
-      previousMatchupsText += `\nCRITICAL: ZERO TOLERANCE FOR HALLUCINATIONS. You MUST only use the provided previous matchup data. If no data is provided, do NOT invent scores or dates. If you use your search tool, you MUST verify the scores from at least two independent sources (e.g., ESPN and Baseball-Reference).`;
+      previousMatchupsText += `\nCRITICAL: DO NOT use any data from 2023, 2024, or 2025. ONLY USE 2026 DATA. If no 2026 data is present, state "No 2026 H2H data available".`;
 
       let yesterdayResultsText = "";
       if (finishedGames.length > 0) {
@@ -1070,7 +1226,7 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
       const leagueSpecificContext = game.league === 'NCAA' 
         ? "NCAA: Focus on rankings, home-court edge, coaching, and transfer portal/injury impact."
         : game.league === 'NBA'
-        ? `NBA: CRITICAL - It is April 2026. Regular season end. Star players (LeBron, AD, Steph, Luka Doncic, etc.) are frequently rested. You MUST verify the "Official NBA Injury Report" and look for "GTD", "Questionable", or "Late Scratch" news. If a star like Luka Doncic (often called Luke/Luka) is out, it MUST be reflected in the injuries and win probability. H2H RULE: ONLY include 2026 games.`
+        ? `NBA: CRITICAL - It is April 2026. Regular season end. Star players (LeBron, AD, Steph, Luka Doncic, etc.) are frequently rested. You MUST verify the "Official NBA Injury Report" and look for "GTD", "Questionable", or "Late Scratch" news. If a star like Luka Doncic is out, it MUST be reflected in the injuries and win probability. H2H RULE: ONLY include 2026 games. For Totals, provide a 'projectedTotal' and a 'recommendedTotalLine' with a 20% cushion for safety (e.g., if you project 210, and you recommend Under, move the line up by 20% to Under 252 for the recommendation).`
         : game.league === 'NHL'
         ? "NHL: Focus on starting goalies, PP/PK%, and Corsi/Fenwick."
         : game.league === 'MLB'
@@ -1123,8 +1279,16 @@ RULES:
         3. Confirm 2025-26 rosters.
         4. Market & situational factors.
         5. Scenario breakdown & confidence (1-10).
-        6. MLB: Cushioned Total Runs.
-        7. VERIFY H2H: 2026 only.
+        6. MLB CRITICAL: For Over/Under and Moneyline analysis, evaluate:
+           - Starting Pitcher LH/RH splits: How the opponent lineup performs against the starter's throwing hand.
+           - Starter ERA/WHIP & recent form (last 3 starts).
+           - Bullpen depth & recent workload: Identify if top closers/relievers have played multiple days in a row.
+           - Team Run Production (last 10 games).
+           - Ballpark factors (e.g., hitter-friendly vs pitcher-friendly).
+           - Weather effects (Wind blowing out increases HR/runs, cold/humidity decreases travel).
+           - "Clutch" performance: RISP (Runners in Scoring Position) averages.
+           - Head-to-Head total runs and outcomes in previous matchups.
+        7. VERIFY H2H: 2026 only for NBA and MLB. For MLB, use the provided Head-to-Head History and Standings section (record, streak) to populate the "previousMatchups" array in the JSON response. You MUST include the scores and dates for the last 5 matchups from the context, strictly from the 2026 season.
         
         OUTPUT (JSON):
         {
@@ -1132,8 +1296,8 @@ RULES:
           "winner": "Team Name",
           "confidence": 1-10,
           "winProbability": 0.00-1.00,
-          "scorePrediction": {"home": 105, "away": 98},
-          "projectedTotal": 203,
+          "scorePrediction": {"home": 105, "away": 98}, // MANDATORY: Include projected score for ALL matchups
+          "projectedTotal": 203, // MANDATORY: Project total points/runs
           "recommendedTotalLine": "Under 204.5",
           "reasoning": "Concise edge summary.",
           "devilsAdvocate": "Counter-case.",
@@ -1150,7 +1314,7 @@ RULES:
             "umpire": {"name": "Name", "runsPerGame": 9.2, "strikeZone": "Standard"},
             "summary": "Concise summary."
           },
-          "previousMatchups": [{"date": "2026-MM-DD", "homeScore": 100, "awayScore": 90}],
+          "previousMatchups": [{"date": "2026-MM-DD", "homeScore": 100, "awayScore": 90, "homeTeam": "Home Team", "awayTeam": "Away Team", "lineupChanges": "Optional change notes"}],
           "matchupRankings": {"homeRank": 5, "awayRank": 12},
           "teamStatsComparison": [{"category": "PPG", "homeValue": 115.4, "awayValue": 110.2}],
           "trends": {"homeVsExp": "Trend", "awayVsExp": "Trend", "homeTotal": "Trend", "awayTotal": "Trend"},
@@ -1160,27 +1324,44 @@ RULES:
             "trends": "Concise efficiency trends. Max 200 chars.",
             "confidenceBreakdown": "Concise confidence logic. Max 200 chars."
           },
-          "marketExpectations": {"homeWinProb": -110, "awayWinProb": 110, "margin": -2.5, "homeMarginOdds": -110, "awayMarginOdds": -110, "total": 220.5, "overOdds": -110, "underOdds": -110}
+          "marketExpectations": {"homeWinProb": -110, "awayWinProb": 110, "margin": -2.5, "homeMarginOdds": -110, "awayMarginOdds": -110, "total": 220.5, "overOdds": -110, "underOdds": -110},
+          "predictionDataQuality": "High/Medium/Low based on source availability",
+          "matchupDelta": 0.05 // difference between AI win prob and market win prob
         }`;
 
       const fullPrompt = `${systemInstruction}\n\n${prompt}`;
 
+      const localKey = typeof window !== "undefined" ? localStorage.getItem("openai_api_key") : null;
+      
       if (useOpenAI) {
-        const openai = getOpenAIClient();
-        const response = await openai.chat.completions.create({
-          model: this.getOpenAIModel(),
-          messages: [
-            { role: "system", content: systemInstruction },
-            { role: "user", content: prompt }
-          ],
-          response_format: { type: "json_object" }
-        });
+        if (localKey) {
+          const openai = getOpenAIClient();
+          const response = await openai.chat.completions.create({
+            model: this.getOpenAIModel(),
+            messages: [
+              { role: "system", content: systemInstruction },
+              { role: "user", content: prompt }
+            ],
+            response_format: { type: "json_object" }
+          });
 
-        const text = response.choices[0].message.content;
-        if (!text) throw new Error("No response from OpenAI");
+          const text = response.choices[0].message.content;
+          if (!text) throw new Error("No response from OpenAI");
 
-        const cost = this.calculateOpenAICost(response.usage);
-        return this.processAIResponse(game, text, cost, dateStr, [], existingPrediction, []);
+          const cost = this.calculateOpenAICost(response.usage);
+          return this.processAIResponse(game, text, cost, dateStr, [], existingPrediction, []);
+        } else {
+          // Use server AI proxy
+          onProgress?.("Routing analysis through server-side OpenAI engines...");
+          const serverResult = await this.callServerAI({
+            provider: "openai",
+            systemPrompt: systemInstruction,
+            messages: [{ role: "user", content: prompt }],
+            config: { response_format: { type: "json_object" } }
+          });
+          const cost = this.calculateOpenAICost(serverResult.usage);
+          return this.processAIResponse(game, serverResult.text, cost, dateStr, [], existingPrediction, []);
+        }
       }
 
       onProgress?.(`Running AI analysis for ${game.awayTeam} @ ${game.homeTeam}...`);
@@ -1287,7 +1468,7 @@ GAME ${index + 1} (ID: ${game.id}):
 `;
     }).join("\n---\n");
 
-    const systemInstruction = `You are an elite sports betting analyst. Analyze multiple ${league} games for ${dateStr}. Use search to find latest injuries, starting lineups, and market movement. Return a JSON object where keys are Game IDs.`;
+    const systemInstruction = `You are an elite sports betting analyst. Analyze multiple ${league} games for ${dateStr}. Use search to find historical head-to-head records, previous scores, latest injuries, starting lineups, and market movement. Return a JSON object where keys are Game IDs.`;
 
     const prompt = `
 ${systemInstruction}
@@ -1299,31 +1480,96 @@ Yesterday's ${league} Results: ${JSON.stringify(yesterdayResults.slice(0, 5))}
 
 For EACH game, provide a deep analysis including:
 1. Winner & Win Probability (0.00-1.00)
-2. Projected Score & Spread
-3. Key Factors & Scenario Analysis
-4. Injuries (Verified with source & timestamp)
-5. ${league === 'MLB' ? 'Pitcher Matchup (ERA, xERA, WHIP, K/9, etc.)' : 'Key Player Matchups'}
+2. scorePrediction (MUST be an object with "home" and "away" scores)
+3. projectedTotal (Sum of home and away scores)
+4. recommendedTotalLine (Apply 20% cushion: if suggesting Over, lower the line; if Under, raise the line)
+5. Key Factors & Scenario Analysis
+6. Injuries (Verified with source & timestamp)
+7. Previous Matchups (Head-to-head results with team names and scores)
+8. ${league === 'MLB' ? 'Pitcher Matchup (ERA, xERA, WHIP, K/9, etc.)' : 'Key Player Matchups'}
 
 Return ONLY a JSON object:
 {
   "game-id-1": {
     "winner": "Team Name",
     "winProbability": 0.75,
-    "projectedScore": {"home": 110, "away": 105},
+    "scorePrediction": {"home": 110, "away": 105},
+    "projectedTotal": 215,
+    "recommendedTotalLine": "Under 258",
     "confidence": 8,
     "reasoning": "Concise.",
     "scenarioAnalysis": "Bullet points.",
     "keyFactors": ["Factor 1"],
     "injuries": [{"team": "Team", "player": "Name", "status": "Status", "impact": "PSI", "source_name": "Source", "source_timestamp": "Timestamp"}],
+    "previousMatchups": [{"date": "2026-MM-DD", "homeScore": 100, "awayScore": 90, "homeTeam": "Home Team", "awayTeam": "Away Team", "lineupChanges": "Optional change notes"}],
     ${league === 'MLB' ? `"pitcherMatchup": {"homePitcher": {"name": "Name", "era": 3.45, "whip": 1.12, "xERA": 3.21, "fip": 3.50, "k9": 9.5, "barrelRate": 6.5, "recentForm": "Concise"}, "awayPitcher": {"name": "Name", "era": 4.12, "whip": 1.34, "xERA": 4.50, "fip": 4.20, "k9": 7.2, "barrelRate": 8.1, "recentForm": "Concise"}, "weatherImpact": "Concise", "parkFactor": "Concise", "umpire": {"name": "Name", "runsPerGame": 9.2, "strikeZone": "Standard"}, "summary": "Concise summary."},` : ''}
-    "matchupAnalysis": {"h2h": "Concise", "playerStats": "Concise", "trends": "Concise", "confidenceBreakdown": "Concise"}
+    "matchupAnalysis": {"h2h": "Concise", "playerStats": "Concise", "trends": "Concise", "confidenceBreakdown": "Concise"},
+    "predictionDataQuality": "High",
+    "matchupDelta": 0.05
   },
   ...
 }
 `;
 
     try {
-      const response = await this.callWithRetry(async (ai) => {
+      const useOpenAI = this.shouldUseOpenAI();
+      const localKey = typeof window !== "undefined" ? localStorage.getItem("openai_api_key") : null;
+      let text = "";
+      let response;
+
+      if (useOpenAI) {
+        if (localKey) {
+          const openai = getOpenAIClient();
+          if (!openai) throw new Error("OpenAI client not initialized");
+
+          response = await openai.chat.completions.create({
+            model: this.getOpenAIModel(),
+            messages: [
+              { role: "system", content: systemInstruction },
+              { role: "user", content: prompt }
+            ],
+            response_format: { type: "json_object" }
+          });
+          text = response.choices[0].message.content || "";
+          const cost = this.calculateOpenAICost(response.usage);
+          const perGameCost = cost / games.length;
+
+          const results: Record<string, any> = {};
+          const batchPredictions = JSON.parse(this.cleanJson(text));
+          for (const game of games) {
+            const prediction = batchPredictions[game.id];
+            if (prediction) {
+              results[game.id] = this.processAIResponse(game, JSON.stringify(prediction), perGameCost, dateStr, [], existingPredictions[game.id]);
+            }
+          }
+          onProgress?.(`Batch analysis complete for ${Object.keys(results).length} games.`);
+          return results;
+        } else {
+          // Server-side fallback for batch
+          onProgress?.("Routing batch analysis through server-side AI...");
+          const serverResult = await this.callServerAI({
+            provider: "openai",
+            systemPrompt: systemInstruction,
+            messages: [{ role: "user", content: prompt }],
+            config: { response_format: { type: "json_object" } }
+          });
+          const serverText = serverResult.text;
+          const cost = this.calculateOpenAICost(serverResult.usage);
+          const perGameCost = cost / games.length;
+          
+          const results: Record<string, any> = {};
+          const batchPredictions = JSON.parse(this.cleanJson(serverText));
+          for (const game of games) {
+            const prediction = batchPredictions[game.id];
+            if (prediction) {
+              results[game.id] = this.processAIResponse(game, JSON.stringify(prediction), perGameCost, dateStr, [], existingPredictions[game.id]);
+            }
+          }
+          return results;
+        }
+      }
+
+      response = await this.callWithRetry(async (ai) => {
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<any>((_, reject) => {
           timeoutId = setTimeout(() => reject(new Error("Gemini API timeout")), 300000); // 5 mins for batch
@@ -1345,7 +1591,7 @@ Return ONLY a JSON object:
         }
       }, 3, 20000, `batch-analysis-${league}-${dateStr}`);
 
-      const text = response.text;
+      text = response.text;
       if (!text) throw new Error("No response from AI");
 
       const cleanedText = this.cleanJson(text);
@@ -1388,6 +1634,42 @@ Return ONLY a JSON object:
       prediction.teams = [game.awayTeam, game.homeTeam];
       prediction.groundingUrls = groundingUrls;
       
+      // Defensive mapping for previousMatchups
+      if (!prediction.previousMatchups && (prediction as any).matchups) {
+        prediction.previousMatchups = (prediction as any).matchups;
+      }
+      if (!prediction.previousMatchups && (prediction as any).h2h_history) {
+        prediction.previousMatchups = (prediction as any).h2h_history;
+      }
+
+      // STRICT SEASON FILTERING: Remove any H2H data not from the current season for MLB/NBA
+      if (prediction.previousMatchups && Array.isArray(prediction.previousMatchups)) {
+        if (game.league === 'MLB' || game.league === 'NBA' || game.league === 'NHL') {
+          prediction.previousMatchups = prediction.previousMatchups.filter((m: any) => {
+            const mDate = String(m.date || '');
+            return mDate.includes('2026');
+          });
+        }
+      }
+
+      // Defensive mapping for scorePrediction
+      if (!prediction.scorePrediction && (prediction as any).projectedScore) {
+        prediction.scorePrediction = (prediction as any).projectedScore;
+      }
+      if (!prediction.scorePrediction && (prediction as any).score_prediction) {
+        prediction.scorePrediction = (prediction as any).score_prediction;
+      }
+
+      // Ensure we have home and away mapped correctly in scorePrediction
+      if (prediction.scorePrediction) {
+        if (!prediction.scorePrediction.home && (prediction.scorePrediction as any).homeScore) {
+          prediction.scorePrediction.home = (prediction.scorePrediction as any).homeScore;
+        }
+        if (!prediction.scorePrediction.away && (prediction.scorePrediction as any).awayScore) {
+          prediction.scorePrediction.away = (prediction.scorePrediction as any).awayScore;
+        }
+      }
+
       // If AI didn't find any previous matchups, use the ones from Firestore
       if (!prediction.previousMatchups || prediction.previousMatchups.length === 0) {
         prediction.previousMatchups = previousMatchups.map(p => ({
@@ -1874,20 +2156,31 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 
       try {
         const useOpenAI = this.shouldUseOpenAI();
+        const localKey = typeof window !== "undefined" ? localStorage.getItem("openai_api_key") : null;
 
         let text = "";
 
         if (useOpenAI) {
-          const openai = getOpenAIClient();
-          const response = await openai.chat.completions.create({
-            model: this.getOpenAIModel(),
-            messages: [
-              { role: "system", content: "You are a professional sports injury analyst." },
-              { role: "user", content: prompt }
-            ],
-            response_format: { type: "json_object" }
-          });
-          text = response.choices[0].message.content || "";
+          if (localKey) {
+            const openai = getOpenAIClient();
+            const response = await openai.chat.completions.create({
+              model: this.getOpenAIModel(),
+              messages: [
+                { role: "system", content: "You are a professional sports injury analyst." },
+                { role: "user", content: prompt }
+              ],
+              response_format: { type: "json_object" }
+            });
+            text = response.choices[0].message.content || "";
+          } else {
+            const serverResult = await this.callServerAI({
+              provider: "openai",
+              systemPrompt: "You are a professional sports injury analyst.",
+              messages: [{ role: "user", content: prompt }],
+              config: { response_format: { type: "json_object" } }
+            });
+            text = serverResult.text || "";
+          }
         } else {
           const response = await this.callWithRetry(async (ai) => {
             let timeoutId: NodeJS.Timeout;
@@ -1915,12 +2208,23 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
 
         if (text) {
           const cleanedText = this.cleanJson(text);
-          const parsed = JSON.parse(cleanedText);
+          console.log(`[Gemini Diagnosis] Injury Output for ${league} on ${date}:`, cleanedText.substring(0, 500));
+          
+          let parsed;
+          try {
+            parsed = JSON.parse(cleanedText);
+          } catch(e) {
+            console.error(`[Gemini Diagnosis] JSON Parse Error:`, e);
+            throw e;
+          }
+          
+          console.log(`[Gemini Diagnosis] Parsed Injury Data keys:`, Object.keys(parsed));
           
           // Post-processing validation: Ensure injuries are assigned to the correct teams in the game
           for (const gameId of Object.keys(parsed)) {
             const game = batchGames.find(g => String(g.id) === gameId);
             if (game && Array.isArray(parsed[gameId])) {
+              console.log(`[Gemini Diagnosis] Processing Game ${gameId}: Found ${parsed[gameId].length} injuries.`);
               parsed[gameId] = parsed[gameId].filter((injury: any) => {
                 const injuryTeam = (injury.team || "").toLowerCase();
                 const homeTeam = (game.homeTeam || "").toLowerCase();
@@ -1931,11 +2235,13 @@ CRITICAL: You MUST use your search tool to confirm every player's current team. 
                 const isAway = awayTeam.includes(injuryTeam) || injuryTeam.includes(awayTeam);
                 
                 if (!isHome && !isAway) {
-                  console.warn(`[Gemini] Removing hallucinated injury in checkInjuryUpdates: ${injury.player} on ${injury.team} for game ${game.awayTeam} @ ${game.homeTeam}`);
+                  console.warn(`[Gemini Diagnosis] Removed injury due to team mismatch: ${injury.player} (${injury.team}) for ${game.awayTeam} @ ${game.homeTeam}`);
                   return false;
                 }
                 return true;
               });
+            } else if (game) {
+              console.warn(`[Gemini Diagnosis] No array of injuries for game ${gameId}`);
             }
           }
           

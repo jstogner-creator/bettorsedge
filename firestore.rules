@@ -84,17 +84,19 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       
       // Only admins can create or update predictions
-      allow create, update, delete: if isAdmin();
+      allow create: if isAdmin() && isValidPrediction(request.resource.data);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
     match /app_logs/{logId} {
-      allow create: if isAuthenticated();
-      allow read: if isAdmin();
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
     }
 
     match /api_logs/{logId} {
-      allow create: if isAuthenticated();
-      allow read: if isAdmin();
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
     }
 
     match /schedules/{scheduleId} {
@@ -114,7 +116,7 @@ service cloud.firestore {
     }
 
     match /source_audits/{auditId} {
-      allow create: if isAuthenticated() && isValidSourceAudit(request.resource.data);
+      allow create: if true; // Allow system/public audits
       allow read: if isAdmin();
     }
 
@@ -145,8 +147,10 @@ service cloud.firestore {
     }
 
     match /app_config/{configId} {
-      // Allow backend to save working configurations even if admin credentials are not fully configured
-      allow read, write: if true;
+      // Allow read for all authenticated users to prevent UI breakage
+      allow read: if isAuthenticated();
+      // Restrict write access to admins only
+      allow write: if isAdmin();
     }
     
     // Default deny

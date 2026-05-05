@@ -1,4 +1,5 @@
 import axios from "axios";
+import { format } from "date-fns";
 import { getIdToken } from "../firebase";
 
 export type Bookmaker = {
@@ -104,6 +105,43 @@ class ApiSportsNhlService {
     } catch (error: any) {
       console.error("[API-Sports NHL] Error fetching odds:", error);
       throw this.formatError(error);
+    }
+  }
+
+  async getGames(date: Date): Promise<any[]> {
+    try {
+      const dateStr = format(date, "yyyy-MM-dd");
+      const headers = await this.getHeaders();
+      const response = await axios.get(`${this.baseUrl}/games`, {
+        params: { date: dateStr },
+        headers
+      });
+
+      if (response.data && response.data.response) {
+        return response.data.response;
+      }
+      return [];
+    } catch (error) {
+      console.error("[API-Sports NHL] Error fetching games:", error);
+      return [];
+    }
+  }
+
+  async getH2H(homeId: number, awayId: number): Promise<any[]> {
+    try {
+      const headers = await this.getHeaders();
+      const response = await axios.get(`${this.baseUrl}/games/h2h`, {
+        params: { h2h: `${homeId}-${awayId}` },
+        headers
+      });
+
+      if (response.data && response.data.response) {
+        return response.data.response;
+      }
+      return [];
+    } catch (error) {
+      console.error("[API-Sports NHL] Error fetching H2H:", error);
+      return [];
     }
   }
 

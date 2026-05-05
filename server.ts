@@ -6,6 +6,8 @@ import { fileURLToPath } from "url";
 import axios from "axios";
 import crypto from "crypto";
 import fs from "fs";
+import http from "http";
+import https from "https";
 import "dotenv/config";
 import { GoogleGenAI } from "@google/genai";
 import Stripe from "stripe";
@@ -58,6 +60,24 @@ if (fs.existsSync(firebaseConfigPath)) {
 
 const db = firestoreDatabaseId ? getFirestore(firestoreDatabaseId) : getFirestore();
 
+// Persistent agents for better performance and stability (fixes ECONNRESET)
+const httpAgent = new http.Agent({ 
+  keepAlive: true,
+  keepAliveMsecs: 1000,
+  maxSockets: 100,
+  maxFreeSockets: 10
+});
+const httpsAgent = new https.Agent({ 
+  keepAlive: true,
+  keepAliveMsecs: 1000,
+  maxSockets: 100,
+  maxFreeSockets: 10
+});
+
+// Set global axios defaults for consistency
+axios.defaults.httpAgent = httpAgent;
+axios.defaults.httpsAgent = httpsAgent;
+
 const firebaseProjectId = fs.existsSync(firebaseConfigPath)
   ? JSON.parse(fs.readFileSync(firebaseConfigPath, "utf8")).projectId
   : undefined;
@@ -83,6 +103,8 @@ async function proxyFirebaseHelper(req: Request, res: Response, targetUrl: strin
       responseType: "stream",
       validateStatus: () => true,
       maxRedirects: 0,
+      httpAgent,
+      httpsAgent,
     });
 
     res.status(response.status);
@@ -429,6 +451,60 @@ async function startServer() {
       });
     } catch (error) {
       res.status(500).json({ error: 'QA Health Check Failed' });
+    }
+  });
+
+  app.post("/api/ai/analyze", authenticate, async (req, res) => {
+    const { provider, model, messages, config, systemPrompt } = req.body;
+    
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: "Messages array is required" });
+    }
+
+    try {
+      if (provider === "openai") {
+        if (!process.env.OPENAI_API_KEY) {
+          return res.status(500).json({ error: "OpenAI API key not configured on server" });
+        }
+        
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const response = await openai.chat.completions.create({
+          model: model || "gpt-4o-mini",
+          messages: [
+            ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
+            ...messages
+          ],
+          response_format: config?.response_format || undefined
+        });
+        
+        return res.json({ 
+          text: response.choices[0].message.content,
+          usage: response.usage,
+          provider: "openai"
+        });
+      } else {
+        // Fallback to Gemini if requested or if default
+        if (!process.env.GEMINI_API_KEY) {
+          return res.status(500).json({ error: "Gemini API key not configured on server" });
+        }
+
+        const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const result = await genAI.models.generateContent({
+          model: model || "gemini-2.0-flash",
+          contents: [{ role: 'user', parts: [{ text: messages[messages.length - 1].content }] }]
+        });
+        
+        return res.json({ 
+          text: result.text,
+          provider: "gemini"
+        });
+      }
+    } catch (error: any) {
+      console.error(`[AI Proxy Error] ${provider}:`, error);
+      res.status(500).json({ 
+        error: error.message || "AI Analysis failed",
+        code: error.status || error.code || 500
+      });
     }
   });
 
@@ -998,7 +1074,7 @@ async function startServer() {
   const apiCache = new SimpleCache();
   // API-Sports NBA API
   const apiSportsBaseUrl = "https://v2.nba.api-sports.io";
-  const apiSportsKey = process.env.API_SPORTS_KEY || "b2795a8c744b26f971aaf15eb994212e";
+  const apiSportsKey = process.env.API_SPORTS_KEY;
 
   app.get("/api/nba/:endpoint*", authenticate, async (req, res) => {
     try {
@@ -1015,7 +1091,9 @@ async function startServer() {
         headers: {
           "x-apisports-key": apiSportsKey
         },
-        timeout: 30000
+        timeout: 30000,
+        httpAgent,
+        httpsAgent,
       });
 
       apiCache.set(cacheKey, response.data, 15 * 60 * 1000); // 15 min cache
@@ -1030,8 +1108,8 @@ async function startServer() {
   const apiSportsBasketballBaseUrl = "https://v1.basketball.api-sports.io";
   // API-Sports MLB v1 API
   const apiSportsMlbBaseUrl = "https://v1.baseball.api-sports.io";
-  // API-Sports NHL v2 API (as requested)
-  const apiSportsNhlBaseUrl = "https://v2.nba.api-sports.io";
+  // API-Sports NHL v1 API
+  const apiSportsNhlBaseUrl = "https://v1.hockey.api-sports.io";
 
   const proxyApiSports = async (req: express.Request, res: express.Response, baseUrl: string, name: string) => {
     try {
@@ -1052,7 +1130,9 @@ async function startServer() {
         headers: {
           "x-apisports-key": apiSportsKey
         },
-        timeout: 30000
+        timeout: 30000,
+        httpAgent,
+        httpsAgent,
       });
 
       apiCache.set(cacheKey, response.data, ttlMs);
@@ -1082,7 +1162,9 @@ async function startServer() {
         headers: {
           "x-apisports-key": apiSportsKey
         },
-        timeout: 10000
+        timeout: 10000,
+        httpAgent,
+        httpsAgent,
       });
       res.json({ status: "success", data: response.data });
     } catch (error: any) {
@@ -1093,7 +1175,11 @@ async function startServer() {
   // Helper for API with retry logic for rate limits and transient errors
   const fetchWithRetry = async (url: string, retries = 3, delay = 2000, timeout = 10000): Promise<any> => {
     try {
-      return await axios.get(url, { timeout });
+      return await axios.get(url, { 
+        timeout,
+        httpAgent,
+        httpsAgent,
+      });
     } catch (error: any) {
       const status = error.response?.status;
       const code = error.code;
@@ -1123,7 +1209,12 @@ const fetchKalshiWithRetry = async (
   delay = 1000
 ): Promise<any> => {
   try {
-    return await axios.get(url, { ...options, timeout: 30000 });
+    return await axios.get(url, { 
+      ...options, 
+      timeout: 30000,
+      httpAgent,
+      httpsAgent,
+    });
   } catch (error: any) {
     const status = error?.response?.status;
     const code = error?.code;

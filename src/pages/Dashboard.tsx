@@ -54,6 +54,7 @@ import { GameGrid } from "../components/Dashboard/GameGrid";
 import { DashboardHeader } from "../components/Dashboard/DashboardHeader";
 import { apiSportsService } from "../services/apiSports";
 import { apiSportsBasketballService } from "../services/apiSportsBasketball";
+import { apiSportsMlbService } from "../services/apiSportsMlb";
 import { Joyride, STATUS } from "react-joyride";
 import type { Step } from "react-joyride";
 
@@ -119,6 +120,7 @@ export function Dashboard({
   user: User;
   onOpenFAQ: () => void;
 }) {
+  const [user, setUser] = useState<User | null>(initialUser);
   const [activeTab, setActiveTab] = useState("NBA");
   const [showTopPicks, setShowTopPicks] = useState(true);
   const [apiSportsStatus, setApiSportsStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', count: number, message?: string }>({ status: 'idle', count: 0 });
@@ -132,7 +134,17 @@ export function Dashboard({
   const [allPredictions, setAllPredictions] = useState<Record<string, Prediction>>({});
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
 
-  // Persistent Logging Helper
+  useEffect(() => {
+    // Safety check for user
+    if (!user) return;
+    
+    // Safety check for stale walkthrough
+    const stored = localStorage.getItem("has_seen_walkthrough");
+    if (stored === "true") {
+      setRunWalkthrough(false);
+    }
+  }, [user]);
+
   const addDebugLog = (msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
     const fullMsg = `[${timestamp}] ${msg}`;
@@ -164,10 +176,9 @@ export function Dashboard({
     return () => window.removeEventListener('beforeunload', handleUnload);
   }, []);
 
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "error" | "success" | "warning" | "info" } | null>(null);
   const [kalshiStatus, setKalshiStatus] = useState<"connected" | "disconnected" | "error">("disconnected");
-  const [user, setUser] = useState<User | null>(initialUser);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [authReady, setAuthReady] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
@@ -1077,9 +1088,9 @@ const fetchGames = async (force: boolean = false) => {
       addDebugLog(`ESPN fetch FAILED for ${activeTab}`);
     }
 
-    // 2. Fetch API-Sports in parallel if NBA
-    const apiSportsPromise = activeTab === "NBA" 
-      ? apiSportsService.getGames(selectedDate).catch(() => [])
+    // 2. Fetch API-Sports in parallel if NBA or MLB
+    const apiSportsPromise = (activeTab === "NBA" || activeTab === "MLB")
+      ? (activeTab === "NBA" ? apiSportsService.getGames(selectedDate).catch(() => []) : apiSportsMlbService.getGames(selectedDate).catch(() => []))
       : Promise.resolve([]);
 
     // 3. ONLY fetch AI schedule if ESPN returned 0 games OR if force is true
@@ -1101,7 +1112,7 @@ const fetchGames = async (force: boolean = false) => {
     }
 
     // Map API-Sports IDs to games
-    if (activeTab === "NBA" && Array.isArray(apiSportsGames)) {
+    if ((activeTab === "NBA" || activeTab === "MLB") && Array.isArray(apiSportsGames)) {
       if (apiSportsGames.length > 0) {
         setApiSportsStatus({ status: 'success', count: apiSportsGames.length });
         
@@ -1112,16 +1123,23 @@ const fetchGames = async (force: boolean = false) => {
             .map(ag => {
             const statusStr = ag.status?.short || 'NS';
             let status: 'scheduled' | 'live' | 'finished' = 'scheduled';
-            if (['1Q', '2Q', '3Q', '4Q', 'OT', 'HT'].includes(statusStr)) status = 'live';
-            if (['FT', 'AOT'].includes(statusStr)) status = 'finished';
+            
+            if (activeTab === "NBA") {
+              if (['1Q', '2Q', '3Q', '4Q', 'OT', 'HT'].includes(statusStr)) status = 'live';
+              if (['FT', 'AOT'].includes(statusStr)) status = 'finished';
+            } else {
+              // MLB Status
+              if (['IN1', 'IN2', 'IN3', 'IN4', 'IN5', 'IN6', 'IN7', 'IN8', 'IN9', 'IN10', 'IN11', 'IN12', 'IN'].includes(statusStr)) status = 'live';
+              if (['FT'].includes(statusStr)) status = 'finished';
+            }
 
             const dateVal = ag.date ? String(ag.date) : "";
             const safeDateStr = dateVal ? dateVal.split("T")[0] : dateStrIso;
             const timeStr = ag.time || (dateVal ? dateVal.split("T")[1]?.substring(0, 5) : "00:00");
 
             return {
-              id: `nba-${ag.teams.away.name}-${ag.teams.home.name}-${safeDateStr}`.toLowerCase().replace(/[^a-z0-9]/g, "-"),
-              league: 'NBA',
+              id: `${activeTab.toLowerCase()}-${ag.teams.away.name}-${ag.teams.home.name}-${safeDateStr}`.toLowerCase().replace(/[^a-z0-9]/g, "-"),
+              league: activeTab as any,
               homeTeam: ag.teams.home.name,
               awayTeam: ag.teams.away.name,
               homeLogo: ag.teams.home.logo,
@@ -1138,7 +1156,7 @@ const fetchGames = async (force: boolean = false) => {
             };
           });
         } else {
-          console.log(`[Dashboard] fetchGames: Mapping API-Sports IDs to ${fetchedGames.length} games...`);
+          console.log(`[Dashboard] fetchGames: Mapping API-Sports IDs to ${fetchedGames.length} ${activeTab} games...`);
           fetchedGames.forEach((g) => {
             const apiGame = apiSportsGames.find((ag) => {
               if (!ag?.teams?.home?.name || !ag?.teams?.away?.name) return false;
@@ -1166,12 +1184,14 @@ const fetchGames = async (force: boolean = false) => {
           });
         }
         
-        // Fetch expectations for all NBA games
-        console.log(`[Dashboard] fetchGames: Fetching expectations for ${fetchedGames.length} NBA games...`);
+        // Fetch expectations for all NBA/MLB games
+        console.log(`[Dashboard] fetchGames: Fetching expectations for ${fetchedGames.length} ${activeTab} games...`);
         const gamesWithExpectations = await Promise.all(fetchedGames.map(async (g) => {
           if (g.apiSportsGameId) {
             try {
-              const oddsData = await apiSportsBasketballService.getOddsForGame(g.apiSportsGameId);
+              const oddsData = activeTab === "NBA" 
+                ? await apiSportsBasketballService.getOddsForGame(g.apiSportsGameId)
+                : await apiSportsMlbService.getOdds({ game: g.apiSportsGameId });
               if (oddsData && oddsData.length > 0) {
                 const gameOdds = oddsData[0];
                 
@@ -1273,7 +1293,7 @@ const fetchGames = async (force: boolean = false) => {
       } else {
         setApiSportsStatus({ status: 'idle', count: 0, message: "No games found for this date in API-Sports" });
       }
-    } else if (activeTab === "NBA") {
+    } else if (activeTab === "NBA" || activeTab === "MLB") {
       setApiSportsStatus({ status: 'error', count: 0, message: "Failed to fetch from API-Sports" });
     }
 
@@ -1443,9 +1463,12 @@ const fetchGames = async (force: boolean = false) => {
         importedTabsRef.current.add(activeTab);
         bettorsEdge.importSchedule(activeTab, selectedDate, 7, (msg) => {
           setToast({ message: msg, type: "info" });
-        }, false).then(() => {
-          fetchGames(false).catch(console.error);
-        }).catch(console.error);
+        }, false)
+        .then(() => fetchGames(false))
+        .catch((err) => {
+          console.error(`[Dashboard] Failed to auto-import ${activeTab}:`, err);
+          setToast({ message: `Failed to import schedule for ${activeTab}.`, type: "error" });
+        });
         return;
       }
       
@@ -1484,7 +1507,10 @@ const fetchGames = async (force: boolean = false) => {
       }, true);
       
       setToast({ message: "Schedule import complete!", type: "success" });
-      fetchGames(true).catch(console.error); // Refresh current view with force=true
+      fetchGames(true).catch(err => {
+        console.error("[Dashboard] Refresh failed during auto-analyze:", err);
+        setToast({ message: "Analysis complete, but failed to refresh games list.", type: "warning" });
+      });
       
     } catch (err: any) {
       console.error("Import failed:", err);
@@ -1824,7 +1850,16 @@ const fetchGames = async (force: boolean = false) => {
         const batch = writeBatch(db);
         for (const [gameId, injuries] of Object.entries(injuryUpdates)) {
           const docRef = doc(db, "predictions", gameId);
-          batch.set(docRef, { injuries }, { merge: true });
+          const existing = savedPredictions[gameId];
+          batch.set(docRef, { 
+            gameId,
+            injuries,
+            lastUpdated: new Date().toISOString(),
+            winner: existing?.winner || "TBD",
+            confidence: existing?.confidence || 5,
+            league: targetLeague,
+            date: dateStr
+          }, { merge: true });
         }
         await batch.commit();
       }
@@ -2014,8 +2049,13 @@ const fetchGames = async (force: boolean = false) => {
         const docRef = doc(db, "predictions", game.id);
         
         await setDoc(docRef, { 
+          gameId: game.id,
           injuries: gameUpdates,
-          lastUpdated: new Date().toISOString()
+          lastUpdated: new Date().toISOString(),
+          winner: savedPredictions[game.id]?.winner || "TBD",
+          confidence: savedPredictions[game.id]?.confidence || 5,
+          league: game.league || activeTab,
+          date: format(selectedDate, "yyyy-MM-dd")
         }, { merge: true });
         
         // Update local state

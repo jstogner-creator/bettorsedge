@@ -113,6 +113,24 @@ class ApiSportsService {
       return [];
     }
   }
+
+  async getH2H(homeId: number, awayId: number): Promise<any[]> {
+    try {
+      const token = await getIdToken();
+      const response = await axios.get(`${this.baseUrl}/games`, {
+        params: { h2h: `${homeId}-${awayId}` },
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+
+      if (response.data && response.data.response) {
+        return response.data.response;
+      }
+      return [];
+    } catch (error) {
+      console.error(`[API-Sports Service] Error fetching NBA H2H:`, error);
+      return [];
+    }
+  }
 }
 
 export const apiSportsService = new ApiSportsService();

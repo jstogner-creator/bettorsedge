@@ -33,17 +33,14 @@ let authInstance: Auth | null = null;
 function buildFirebaseConfig() {
   const config = { ...rawFirebaseConfig } as any;
 
-  const host = typeof window !== "undefined" ? window.location.hostname : "";
+  const host = typeof window !== 'undefined' ? window.location.hostname : '';
   const isLocalhost =
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host.endsWith(".local");
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host.endsWith('.local');
 
-  // On hosted domains, use the current hostname for Firebase Auth helper flows.
-  // This avoids redirect/popup handoff issues on custom domains like bettorsedge.net.
-  if (host && !isLocalhost) {
-    config.authDomain = host;
-  }
+  const isGoogleRunDomain = host.endsWith('.run.app');
+  const isFirebaseDomain = host.endsWith('.firebaseapp.com') || host.endsWith('.web.app');
 
   return config;
 }
@@ -137,17 +134,7 @@ export interface LoginResult {
 
 export async function loginWithGoogle(): Promise<LoginResult> {
   const auth = getAuthInstance();
-  const host = window.location.hostname;
-const isLocalhost =
-  host === "localhost" ||
-  host === "127.0.0.1" ||
-  host.endsWith(".local");
-
-const useRedirect = !isLocalhost;
-
-  console.log(
-    `[Auth] Starting Google sign-in flow (${useRedirect ? "Redirect" : "Popup"})`
-  );
+  console.log('[Auth] Starting Google sign-in flow (Popup)');
 
   try {
     try {
@@ -160,28 +147,15 @@ const useRedirect = !isLocalhost;
       }
     }
 
-    if (useRedirect) {
-      document.cookie =
-        "redirect_login_pending=true; path=/; max-age=600; SameSite=Lax";
-      await signInWithRedirect(auth, googleProvider);
-      return { success: true };
-    }
-
     await signInWithPopup(auth, googleProvider);
     return { success: true };
   } catch (error: any) {
-    console.error(
-      `[Auth] ${useRedirect ? "signInWithRedirect" : "signInWithPopup"} failed:`,
-      error.code,
-      error.message
-    );
-    await logLoginError(
-      error,
-      useRedirect ? "signInWithRedirect" : "signInWithPopup"
-    );
+    console.error('[Auth] signInWithPopup failed:', error.code, error.message);
+    await logLoginError(error, 'signInWithPopup');
     return { success: false, error: error.message, code: error.code };
   }
 }
+
 export async function handleGoogleRedirectResult(): Promise<User | null> {
   const auth = getAuthInstance();
   console.log('[Auth] Checking for redirect result...');

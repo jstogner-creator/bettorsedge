@@ -12,6 +12,7 @@ import {
   Brain,
   CheckCircle,
   CheckCircle2,
+  Database,
   Star,
   Info,
   Activity,
@@ -165,6 +166,7 @@ export const GameCard: React.FC<GameCardProps> = ({
     return aiProb - marketProb;
   }, [prediction, yesProb, game.homeTeam]);
 
+  console.log(`[GameCard] ${game.awayTeam} @ ${game.homeTeam} - Prediction:`, prediction);
   console.log(`[GameCard] ${game.awayTeam} @ ${game.homeTeam} - Has injuries: ${hasInjuries}, Edge: ${edge}`);
 
   const getImpliedProbability = (odds: number | undefined) => {
@@ -321,17 +323,23 @@ export const GameCard: React.FC<GameCardProps> = ({
               </div>
             </div>
             <div className="flex items-center space-x-3">
-              {game.status === 'finished' && (
+              {game.status === 'finished' ? (
                 <span className="text-lg font-black text-white font-mono">{game.awayScore}</span>
-              )}
-              {awayExpectation !== null && (
+              ) : prediction?.scorePrediction ? (
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] font-mono font-black text-indigo-400 bg-indigo-500/5 px-2 py-0.5 rounded border border-indigo-500/10">
+                    {prediction.scorePrediction.away}
+                  </span>
+                  <span className="text-[7px] text-slate-500 uppercase font-black tracking-tighter">PROJ</span>
+                </div>
+              ) : awayExpectation !== null ? (
                 <div className={cn(
-                  "px-1.5 py-0.5 rounded border min-w-[40px] text-center",
+                  "px-2 py-0.5 rounded border text-center",
                   isAwayFav ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-500" : "bg-slate-800/50 border-slate-700/50 text-slate-400"
                 )}>
                   <span className="text-[10px] font-mono font-bold">{(awayExpectation * 100).toFixed(0)}¢</span>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
 
@@ -375,49 +383,86 @@ export const GameCard: React.FC<GameCardProps> = ({
               </div>
             </div>
             <div className="flex items-center space-x-3">
-              {game.status === 'finished' && (
+              {game.status === 'finished' ? (
                 <span className="text-lg font-black text-white font-mono">{game.homeScore}</span>
-              )}
-              {homeExpectation !== null && (
+              ) : prediction?.scorePrediction ? (
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] font-mono font-black text-indigo-400 bg-indigo-500/5 px-2 py-0.5 rounded border border-indigo-500/10">
+                    {prediction.scorePrediction.home}
+                  </span>
+                  <span className="text-[7px] text-slate-500 uppercase font-black tracking-tighter">PROJ</span>
+                </div>
+              ) : homeExpectation !== null ? (
                 <div className={cn(
-                  "px-1.5 py-0.5 rounded border min-w-[40px] text-center",
+                  "px-2 py-0.5 rounded border text-center",
                   isHomeFav ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-500" : "bg-slate-800/50 border-slate-700/50 text-slate-400"
                 )}>
                   <span className="text-[10px] font-mono font-bold">{(homeExpectation * 100).toFixed(0)}¢</span>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
 
-        {/* Injury Summary (Collapsed) */}
-        {hasInjuries && !isExpanded && (
-          <div className="px-3 pb-2 pt-0">
-            <div className="flex flex-wrap gap-1.5">
-              {prediction?.injuries?.slice(0, 2).map((injury, idx) => {
-                const status = (injury.status || 'Unknown').toLowerCase();
-                return (
-                  <span key={idx} className="text-[9px] bg-slate-800/50 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700/30 flex items-center">
-                    <span className="font-medium mr-1 truncate max-w-[60px]">{injury.player}</span>
-                    <span className={cn(
-                      "font-bold uppercase tracking-wider",
-                      status === 'out' ? "text-rose-400" : 
-                      status === 'doubtful' ? "text-amber-400" : 
-                      status === 'probable' ? "text-indigo-400" :
-                      status === 'in' ? "text-emerald-400" :
-                      "text-slate-400"
-                    )}>
-                      {injury.status?.substring(0, 3)}
+        {/* Head-to-Head & Injury Summary (Collapsed) */}
+        {!isExpanded && (
+          <div className="px-3 pb-2 pt-0 space-y-1.5">
+            {/* H2H Mini Summary */}
+            {Array.isArray(prediction?.previousMatchups) && prediction.previousMatchups.length > 0 && (
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-500/20 text-[8px] font-black uppercase tracking-tighter">
+                  <Activity className="w-2 h-2 mr-1" />
+                  H2H: {prediction.previousMatchups.length} GMS
+                </div>
+                <div className="flex gap-1 overflow-hidden">
+                  {prediction.previousMatchups.slice(0, 3).map((match, idx) => {
+                    const homeWinner = match.homeScore > match.awayScore;
+                    const homeTeamMatch = match.homeTeam || "";
+                    const awayTeamMatch = match.awayTeam || "";
+                    const isHomeTeam = game.homeTeam.toLowerCase().includes(homeTeamMatch.toLowerCase()) || homeTeamMatch.toLowerCase().includes(game.homeTeam.toLowerCase());
+                    const winnerSymbol = (isHomeTeam && homeWinner) || (!isHomeTeam && !homeWinner) ? "W" : "L";
+                    
+                    return (
+                      <span key={idx} className={cn(
+                        "text-[8px] font-mono px-1 rounded border",
+                        winnerSymbol === "W" ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-rose-500/10 text-rose-500 border-rose-500/20"
+                      )}>
+                        {match.awayScore}-{match.homeScore}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Injury Summary */}
+            {hasInjuries && (
+              <div className="flex flex-wrap gap-1.5">
+                {prediction?.injuries?.slice(0, 2).map((injury, idx) => {
+                  const status = (injury.status || 'Unknown').toLowerCase();
+                  return (
+                    <span key={idx} className="text-[9px] bg-slate-800/50 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700/30 flex items-center">
+                      <span className="font-medium mr-1 truncate max-w-[60px]">{injury.player}</span>
+                      <span className={cn(
+                        "font-bold uppercase tracking-wider",
+                        status === 'out' ? "text-rose-400" : 
+                        status === 'doubtful' ? "text-amber-400" : 
+                        status === 'probable' ? "text-indigo-400" :
+                        status === 'in' ? "text-emerald-400" :
+                        "text-slate-400"
+                      )}>
+                        {injury.status?.substring(0, 3)}
+                      </span>
                     </span>
+                  );
+                })}
+                {(prediction?.injuries?.length || 0) > 2 && (
+                  <span className="text-[9px] text-slate-500 flex items-center ml-1">
+                    +{(prediction?.injuries?.length || 0) - 2}
                   </span>
-                );
-              })}
-              {(prediction?.injuries?.length || 0) > 2 && (
-                <span className="text-[9px] text-slate-500 flex items-center ml-1">
-                  +{(prediction?.injuries?.length || 0) - 2}
-                </span>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -717,6 +762,40 @@ export const GameCard: React.FC<GameCardProps> = ({
 
                 {/* Market Odds Section removed as it's now in the Quick Action Bar */}
 
+                {/* Data Quality & Matchup Delta Metadata */}
+                {(prediction.predictionDataQuality || prediction.matchupDelta !== undefined) && (
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {prediction.predictionDataQuality && (
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/60 rounded-full border border-slate-700/50 shadow-sm transition-all hover:bg-slate-800/80 group">
+                        <Database className="w-3.5 h-3.5 text-indigo-400 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Data Quality:</span>
+                        <span className={cn(
+                          "text-[10px] font-black uppercase tracking-tight",
+                          prediction.predictionDataQuality.toLowerCase() === 'high' ? "text-emerald-400" :
+                          prediction.predictionDataQuality.toLowerCase() === 'medium' ? "text-amber-400" :
+                          "text-rose-400"
+                        )}>
+                          {prediction.predictionDataQuality}
+                        </span>
+                      </div>
+                    )}
+                    {prediction.matchupDelta !== undefined && (
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/60 rounded-full border border-slate-700/50 shadow-sm transition-all hover:bg-slate-800/80 group">
+                        <TrendingUp className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">AI Delta:</span>
+                        <span className={cn(
+                          "text-[10px] font-black uppercase tracking-tight font-mono",
+                          prediction.matchupDelta > 0.05 ? "text-emerald-400" :
+                          prediction.matchupDelta > 0 ? "text-amber-400" :
+                          "text-slate-400"
+                        )}>
+                          {prediction.matchupDelta > 0 ? "+" : ""}{(prediction.matchupDelta * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Trends Section */}
                 {prediction.trends && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
@@ -762,28 +841,60 @@ export const GameCard: React.FC<GameCardProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                     {prediction.scorePrediction && (
                       <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 shadow-lg shadow-slate-950/20">
-                        <div className="text-[10px] uppercase text-slate-500 font-black mb-2 tracking-widest">Score Projection</div>
-                        <div className="text-lg font-mono font-bold text-white">
-                          {prediction.scorePrediction.away} - {prediction.scorePrediction.home}
-                          {prediction.actualScore && (
-                             <span className="ml-3 text-slate-500 text-sm font-normal">
-                               (Actual: {prediction.actualScore.away} - {prediction.actualScore.home})
-                             </span>
-                          )}
+                        <div className="text-[10px] uppercase text-slate-500 font-black mb-3 tracking-widest flex justify-between items-center">
+                          <span>Score Projection</span>
+                          <Brain className="w-3 h-3 text-indigo-400" />
                         </div>
+                        <div className="flex justify-between items-center bg-slate-950/50 p-4 rounded-lg border border-slate-900 ring-1 ring-white/5">
+                          <div className="text-center flex-1">
+                            <div className="text-[10px] text-slate-400 font-bold uppercase truncate mb-1">{game.awayTeam}</div>
+                            <div className="text-2xl font-mono font-black text-indigo-400 drop-shadow-[0_0_8px_rgba(129,140,248,0.3)]">{prediction.scorePrediction.away}</div>
+                          </div>
+                          <div className="px-4 text-slate-700 font-black italic text-sm">VS</div>
+                          <div className="text-center flex-1">
+                            <div className="text-[10px] text-slate-400 font-bold uppercase truncate mb-1">{game.homeTeam}</div>
+                            <div className="text-2xl font-mono font-black text-indigo-400 drop-shadow-[0_0_8px_rgba(129,140,248,0.3)]">{prediction.scorePrediction.home}</div>
+                          </div>
+                        </div>
+                        {prediction.actualScore && (
+                          <div className="mt-3 text-center p-2 bg-slate-900/50 rounded border border-slate-800">
+                             <div className="text-[8px] text-slate-500 font-bold uppercase mb-0.5 tracking-widest">Actual Score</div>
+                             <span className="text-white text-xs font-mono font-bold tracking-widest">
+                               {prediction.actualScore.away} - {prediction.actualScore.home}
+                             </span>
+                          </div>
+                        )}
                       </div>
                     )}
                     {prediction.projectedTotal && (
-                      <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 shadow-lg shadow-slate-950/20">
-                        <div className="text-[10px] uppercase text-slate-500 font-black mb-2 tracking-widest">Total Runs / Points</div>
-                        <div className="text-lg font-mono font-bold text-indigo-400">
-                          {prediction.projectedTotal}
-                          {prediction.recommendedTotalLine && (
-                            <span className="ml-2 text-[10px] text-emerald-400 font-bold uppercase tracking-tighter bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                              {prediction.recommendedTotalLine}
-                            </span>
-                          )}
+                      <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 shadow-lg shadow-slate-950/20 flex flex-col justify-between">
+                        <div>
+                          <div className="text-[10px] uppercase text-slate-500 font-black mb-3 tracking-widest flex justify-between items-center">
+                            <span>Predicted Total</span>
+                            <Zap className="w-3 h-3 text-amber-400" />
+                          </div>
+                          <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-900 flex flex-col items-center justify-center">
+                            <div className="text-3xl font-mono font-black text-amber-400 tracking-tighter mb-1 drop-shadow-[0_0_10px_rgba(251,191,36,0.2)]">
+                              {prediction.projectedTotal}
+                            </div>
+                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Total Game Points</div>
+                          </div>
                         </div>
+                        
+                        {prediction.recommendedTotalLine && (
+                          <div className="mt-3 p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg shadow-inner">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <ShieldCheck className="w-3 h-3 text-indigo-400" />
+                              <span className="text-[10px] text-indigo-400 font-black uppercase tracking-widest">20% Safety Cushion</span>
+                            </div>
+                            <div className="text-sm font-black text-white flex items-center justify-between">
+                              <span className="text-slate-400 font-bold text-xs">Target Line:</span>
+                              <span className="bg-white/10 px-2 py-0.5 rounded text-indigo-300 ring-1 ring-white/10 ring-inset">
+                                {prediction.recommendedTotalLine}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

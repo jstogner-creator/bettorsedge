@@ -2,8 +2,8 @@ export interface TeamStats {
   last5: string;
   winPercentage: string;
   record: string;
-  vsExp?: string;
-  total?: string;
+  vsExp?: string; // Performance against expectations (e.g., "4-1 vs Exp")
+  total?: string;  // Total performance trend (e.g., "3-2 Total")
 }
 
 export interface Game {
@@ -23,7 +23,7 @@ export interface Game {
   awayScore?: number;
   kalshiTicker?: string;
   kalshiMarketTitle?: string;
-  kalshiExpectations?: any;
+  kalshiExpectations?: any; // Added
   apiSportsGameId?: number;
   apiSportsHomeTeamId?: number;
   apiSportsAwayTeamId?: number;
@@ -55,18 +55,18 @@ export interface Game {
 
 export interface Prediction {
   gameId: string;
-  league?: string;
-  date?: string;
-  homeTeam?: string;
-  awayTeam?: string;
+  league?: string; // Add league for filtering
+  date?: string;   // Add date for filtering (YYYY-MM-DD)
+  homeTeam?: string; // Added to support displaying without Game object
+  awayTeam?: string; // Added to support displaying without Game object
   winner: string;
-  confidence: number;
+  confidence: number; // 1-10
   reasoning: string;
   devilsAdvocate?: string;
   marketSentiment?: string;
   situationalFactors?: string;
   scenarioAnalysis: string;
-  hedgingAdvice?: any;
+  hedgingAdvice?: any; // Added
   keyFactors: string[];
   appliedLessons?: string[];
   injuries: {
@@ -76,8 +76,6 @@ export interface Prediction {
     impact?: string;
     source_name?: string;
     source_timestamp?: string;
-    source_priority?: number;
-    update?: string;
   }[];
   scorePrediction?: {
     home: number;
@@ -93,12 +91,12 @@ export interface Prediction {
     homeDefenseRank: number | string;
     awayDefenseRank: number | string;
   };
-  kalshiPrice: number;
-  winProbability?: number;
+  kalshiPrice: number; // 0.01 - 0.99
+  winProbability?: number; // Added to match AI output and Dashboard usage
   analysisCost?: number;
   lastUpdated: string;
   groundingUrls?: { title: string; uri: string }[];
-  teams?: string[];
+  teams?: string[]; // Added teams field
   previousMatchups?: {
     date: string;
     homeScore: number;
@@ -106,15 +104,12 @@ export interface Prediction {
     homeTeam: string;
     awayTeam: string;
     lineupChanges?: string;
-    significantChanges?: string[];
-    injuryContext?: string;
-    venue?: string;
-    winner?: string;
-    margin?: number;
   }[];
-
+  
+  // Simulation Data
   simulationCount?: number;
-
+  
+  // MLB Specific
   pitcherMatchup?: {
     homePitcher: {
       name: string;
@@ -147,7 +142,8 @@ export interface Prediction {
     };
     summary?: string;
   };
-
+  
+  // Resolution & Learning
   actualWinner?: string;
   actualScore?: {
     home: number;
@@ -161,9 +157,15 @@ export interface Prediction {
     analyzedAt: string;
   };
 
+  // Quality Assurance
   qaStatus?: 'verified' | 'adjusted' | 'flagged' | 'corrected';
   qaNotes?: string;
 
+  // Quality & Delta
+  predictionDataQuality?: string;
+  matchupDelta?: number;
+
+  // Trends
   trends?: {
     homeVsExp?: string;
     awayVsExp?: string;
@@ -171,6 +173,7 @@ export interface Prediction {
     awayTotal?: string;
   };
 
+  // Detailed Matchup Data
   matchupAnalysis?: {
     h2h: string;
     playerStats: string;
@@ -191,6 +194,7 @@ export interface Prediction {
     advantage: 'home' | 'away' | 'neutral';
   }[];
 
+  // Market Expectations
   marketExpectations?: {
     homeWinProb?: number;
     awayWinProb?: number;
@@ -203,23 +207,12 @@ export interface Prediction {
     source?: string;
   };
 
+  // Source Auditing
   sourceAudit?: {
     googleDriveAccessed: boolean;
     nbaOfficialAccessed: boolean;
     lastAuditTime: string;
     auditNotes?: string;
-  };
-
-  dataQuality?: {
-    injuryFreshnessOk?: boolean;
-    injuryFreshestTimestamp?: string;
-    staleInjuryCount?: number;
-    unresolvedInjuryCount?: number;
-    availabilityConfidencePenalty?: number;
-    analysisMode?: 'expected' | 'confirmed' | 'mixed';
-    matchupHistoryCount?: number;
-    sameSeasonMatchupsFound?: boolean;
-    freshnessCheckedAt?: string;
   };
 }
 
@@ -275,3 +268,5 @@ export interface UserProfile {
   acceptedTerms?: boolean;
   termsAcceptedAt?: string;
 }
+
+

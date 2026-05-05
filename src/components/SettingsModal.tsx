@@ -23,12 +23,12 @@ export function SettingsModal({
   
   const [openaiKey, setOpenaiKey] = useState("");
   const [isOpenAIConnected, setIsOpenAIConnected] = useState(false);
-  const [openaiModel, setOpenaiModel] = useState("gpt-5-mini");
+  const [openaiModel, setOpenaiModel] = useState("gpt-4o-mini");
   const [useOpenAI, setUseOpenAI] = useState(false);
 
   const [geminiKey, setGeminiKey] = useState("");
   const [isGeminiConnected, setIsGeminiConnected] = useState(false);
-  const [geminiModel, setGeminiModel] = useState("gemini-3.1-pro-preview");
+  const [geminiModel, setGeminiModel] = useState("gemini-2.0-flash");
 
   const [isCancelling, setIsCancelling] = useState(false);
 
@@ -88,6 +88,7 @@ export function SettingsModal({
       setIsOpenAIConnected(true);
       localStorage.setItem("openai_api_key", openaiKey);
       localStorage.setItem("openai_model", openaiModel);
+      localStorage.setItem("use_openai", "true"); // Enable by default on connect
       // Reload to re-initialize the AI client
       window.location.reload();
     }
@@ -238,9 +239,9 @@ export function SettingsModal({
                           onChange={(e) => setGeminiModel(e.target.value)}
                           className="flex-1 bg-emerald-500/5 border border-emerald-500/20 rounded-md px-2 py-1 text-xs text-emerald-400 focus:outline-none"
                         >
-                          <option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option>
-                          <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash Lite</option>
-                          <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+                          <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                          <option value="gemini-2.0-flash-lite-preview">Gemini 2.0 Flash Lite</option>
+                          <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
                         </select>
                         <button 
                           onClick={() => {
@@ -280,9 +281,9 @@ export function SettingsModal({
                       onChange={(e) => setGeminiModel(e.target.value)}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500 transition-colors"
                     >
-                      <option value="gemini-3-flash-preview">Gemini 3 Flash Preview (Fast)</option>
-                      <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash Lite</option>
-                      <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Powerful)</option>
+                      <option value="gemini-2.0-flash">Gemini 2.0 Flash (Fast)</option>
+                      <option value="gemini-2.0-flash-lite-preview">Gemini 2.0 Flash Lite</option>
+                      <option value="gemini-1.5-pro">Gemini 1.5 Pro (Powerful)</option>
                     </select>
                   </div>
                   <button
@@ -319,10 +320,10 @@ export function SettingsModal({
                           onChange={(e) => setOpenaiModel(e.target.value)}
                           className="flex-1 bg-emerald-500/5 border border-emerald-500/20 rounded-md px-2 py-1 text-xs text-emerald-400 focus:outline-none"
                         >
-                          <option value="gpt-5-mini">GPT-5 Mini</option>
                           <option value="gpt-4o-mini">GPT-4o Mini</option>
-                          <option value="gpt-5">GPT-5</option>
                           <option value="gpt-4o">GPT-4o</option>
+                          <option value="o1-mini">o1-mini</option>
+                          <option value="o1">o1</option>
                         </select>
                         <button 
                           onClick={() => {
@@ -381,10 +382,9 @@ export function SettingsModal({
                       onChange={(e) => setOpenaiModel(e.target.value)}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500 transition-colors"
                     >
-                      <option value="gpt-5-mini">GPT-5 Mini (Newest & Fast)</option>
                       <option value="gpt-4o-mini">GPT-4o Mini (Fastest)</option>
-                      <option value="gpt-5">GPT-5 (Ultimate Reasoning)</option>
                       <option value="gpt-4o">GPT-4o (Powerful)</option>
+                      <option value="o1-mini">o1-mini (Reasoning)</option>
                     </select>
                   </div>
                   <button

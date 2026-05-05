@@ -4,9 +4,16 @@ import App from './App.tsx';
 import './index.css';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 
+import { logError } from './services/logger';
+
 // Global error handling for early detection
 window.onerror = (message, source, lineno, colno, error) => {
   console.error('[Global Error]', { message, source, lineno, colno, error });
+  
+  // Also log to Firestore
+  logError(error || new Error(String(message)), 'GlobalError')
+    .catch(err => console.error('[Logger Failure] Could not log global error:', err));
+
   const root = document.getElementById('root');
   if (root && root.innerHTML === '') {
     root.innerHTML = `
@@ -21,16 +28,29 @@ window.onerror = (message, source, lineno, colno, error) => {
 };
 
 window.onunhandledrejection = (event) => {
-  console.error('[Unhandled Promise Rejection]', event.reason);
-  // Log to Firestore if possible
-  try {
-    const error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
-    import('./services/logger').then(({ logError }) => {
-      logError(error, 'UnhandledPromiseRejection').catch(console.error);
-    }).catch(console.error);
-  } catch (e) {
-    console.error('Failed to log unhandled rejection:', e);
+  const error = event.reason;
+  const reasonStr = error instanceof Error ? error.message : String(error);
+  const stack = error instanceof Error ? error.stack : 'N/A';
+  
+  console.error('[CRITICAL] Unhandled Promise Rejection:', {
+    reason: reasonStr,
+    stack,
+    event
+  });
+
+  // Ensure we pass an Error object with the original reason and stack info preserved if possible
+  let loggerError: Error;
+  if (error instanceof Error) {
+    loggerError = error;
+  } else {
+    loggerError = new Error(String(error));
+    loggerError.name = 'UnhandledRejection';
   }
+  
+  logError(loggerError, 'UnhandledPromiseRejection')
+    .catch(err => {
+      console.warn('[Logger] Failed to log unhandled rejection to Firestore:', err);
+    });
 };
 
 const rootElement = document.getElementById('root');
