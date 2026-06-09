@@ -1901,7 +1901,7 @@ const fetchGames = async (force: boolean = false) => {
           shouldAnalyze = !isVeryFresh; // Force all unless literally just analyzed
         } else {
           // Smart analysis
-          shouldAnalyze = !existingPrediction || !isRecentEnough || injuriesChanged || bettorsEdge.needsReanalysis(game, existingPrediction);
+          shouldAnalyze = !existingPrediction || isPartialPrediction || !isRecentEnough || injuriesChanged || bettorsEdge.needsReanalysis(game, existingPrediction);
         }
         
         if (isSelected || force) {
@@ -2121,9 +2121,9 @@ const fetchGames = async (force: boolean = false) => {
           lastUpdated: new Date().toISOString(),
           winner: savedPredictions[game.id]?.winner || "TBD",
           confidence: savedPredictions[game.id]?.confidence || 5,
-          reasoning: savedPredictions[game.id]?.reasoning || "Injury report updated. Full analysis pending.",
-          scenarioAnalysis: savedPredictions[game.id]?.scenarioAnalysis || "Pending analysis.",
-          hedgingAdvice: savedPredictions[game.id]?.hedgingAdvice || "Pending analysis.",
+          reasoning: savedPredictions[game.id]?.reasoning,
+          scenarioAnalysis: savedPredictions[game.id]?.scenarioAnalysis,
+          hedgingAdvice: savedPredictions[game.id]?.hedgingAdvice,
           keyFactors: savedPredictions[game.id]?.keyFactors || [],
           kalshiPrice: savedPredictions[game.id]?.kalshiPrice || 0.5,
           qaStatus: savedPredictions[game.id]?.qaStatus || "verified"
