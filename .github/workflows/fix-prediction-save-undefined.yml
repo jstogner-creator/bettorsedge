@@ -1,0 +1,36 @@
+name: Fix prediction save undefined values
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/scripts/fix_prediction_save_undefined.py"
+      - ".github/workflows/fix-prediction-save-undefined.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply prediction save fix
+        run: python3 .github/scripts/fix_prediction_save_undefined.py
+
+      - name: Commit app fix
+        run: |
+          git config user.name "jstogner-creator"
+          git config user.email "jstogner@risenetworkcabling.com"
+          git add src/services/gemini.ts
+          if git diff --cached --quiet; then
+            echo "No app changes to commit."
+          else
+            git commit -m "Sanitize prediction writes before Firestore save"
+            git push
+          fi
