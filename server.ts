@@ -139,9 +139,19 @@ async function startServer() {
   // Trust proxy for rate limiting (Cloud Run/Nginx)
   app.set('trust proxy', 1);
 
-  // 1. Standard Middlewares (MUST be before proxy to handle POST bodies)
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  // 1. Standard Middlewares. Stripe webhooks must keep the raw body for signature verification.
+  const jsonParser = express.json({ limit: '50mb' });
+  const urlencodedParser = express.urlencoded({ limit: '50mb', extended: true });
+
+  app.use((req, res, next) => {
+    if (req.originalUrl === "/api/webhook") return next();
+    return jsonParser(req, res, next);
+  });
+
+  app.use((req, res, next) => {
+    if (req.originalUrl === "/api/webhook") return next();
+    return urlencodedParser(req, res, next);
+  });
 
   // 2. Firebase Auth Proxy (MUST be before other routes)
   if (firebaseAuthProxyBase) {

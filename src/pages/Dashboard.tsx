@@ -521,14 +521,12 @@ export function Dashboard({
     // 1. They are an admin
     // 2. Their email is in the bypass list
     // 3. Their email is in the paywall-only bypass list
-    // 4. Their subscription status is active
-    // 5. The sport is explicitly in their subscribedSports list
+    // 4. Their subscription status is active AND the sport is explicitly in their subscribedSports list
     const isSubscribed = 
       isAdminUser || 
       isBypassEmail || 
       isPaywallBypassOnly || 
-      userProfile?.subscriptionStatus === 'active' ||
-      (userProfile?.subscribedSports?.includes(sport));
+      (userProfile?.subscriptionStatus === 'active' && userProfile?.subscribedSports?.includes(sport));
     
     if (isBypassEmail || isPaywallBypassOnly) {
       console.log(`[Dashboard] BYPASS ACTIVE for ${userEmail} on ${sport}`);
