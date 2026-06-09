@@ -1,6 +1,7 @@
 import axios from "axios";
 import { format } from "date-fns";
 import { getIdToken } from "../firebase";
+import type { Game } from "../types";
 
 export type Bookmaker = {
   id: number;
@@ -86,9 +87,94 @@ class ApiSportsMlbService {
   private gameContextCache: Map<string, { data: MlbGameContext, timestamp: number }> = new Map();
   private readonly GAME_CONTEXT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
+  private gamesCache: Map<string, { data: Game[], timestamp: number }> = new Map();
+  private readonly GAMES_CACHE_TTL = 24 * 60 * 60 * 1000; // daily static schedule cache
+
   private async getHeaders() {
     const token = await getIdToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  private getLocalGamesCache(dateStr: string): Game[] | null {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = localStorage.getItem(`bettorsedge-mlb-games-${dateStr}`);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { timestamp: number; data: Game[] };
+      if (!parsed?.timestamp || !Array.isArray(parsed.data)) return null;
+      if (Date.now() - parsed.timestamp > this.GAMES_CACHE_TTL) return null;
+      return parsed.data.map((g) => this.normalizeStoredGame(g, dateStr)).filter(Boolean) as Game[];
+    } catch (error) {
+      console.warn("[API-Sports MLB] Failed to read local game cache:", error);
+      return null;
+    }
+  }
+
+  private setLocalGamesCache(dateStr: string, games: Game[]) {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(`bettorsedge-mlb-games-${dateStr}`, JSON.stringify({
+        timestamp: Date.now(),
+        data: games,
+      }));
+    } catch (error) {
+      console.warn("[API-Sports MLB] Failed to write local game cache:", error);
+    }
+  }
+
+  private normalizeStoredGame(raw: any, dateStr: string): Game | null {
+    if (!raw) return null;
+    if (raw.homeTeam && raw.awayTeam) {
+      const safeDate = String(raw.date || dateStr).split("T")[0] || dateStr;
+      return {
+        ...raw,
+        id: String(raw.id || `mlb-${raw.awayTeam}-${raw.homeTeam}-${safeDate}`).toLowerCase().replace(/[^a-z0-9]/g, "-"),
+        league: "MLB",
+        homeTeam: String(raw.homeTeam),
+        awayTeam: String(raw.awayTeam),
+        date: safeDate,
+        time: String(raw.time || "00:00"),
+        location: raw.location || raw.venue?.name || raw.venue || "Unknown",
+        status: raw.status === "live" || raw.status === "finished" ? raw.status : "scheduled",
+      } as Game;
+    }
+    return this.normalizeApiSportsGame(raw, dateStr);
+  }
+
+  private normalizeApiSportsGame(raw: any, dateStr: string): Game | null {
+    if (!raw?.teams?.home?.name || !raw?.teams?.away?.name) return null;
+
+    const statusStr = raw.status?.short || raw.status?.long || "NS";
+    let status: Game["status"] = "scheduled";
+    if (["IN1", "IN2", "IN3", "IN4", "IN5", "IN6", "IN7", "IN8", "IN9", "IN10", "IN11", "IN12", "IN", "LIVE"].includes(statusStr)) {
+      status = "live";
+    }
+    if (["FT", "AOT", "FINAL"].includes(statusStr)) {
+      status = "finished";
+    }
+
+    const dateVal = raw.date ? String(raw.date) : dateStr;
+    const safeDateStr = dateVal.split("T")[0] || dateStr;
+    const timeStr = raw.time || (dateVal.includes("T") ? dateVal.split("T")[1]?.substring(0, 5) : "00:00") || "00:00";
+    const venue = raw.venue?.name || raw.venue || raw.game?.venue?.name || "Unknown";
+
+    return {
+      id: `mlb-${raw.teams.away.name}-${raw.teams.home.name}-${safeDateStr}`.toLowerCase().replace(/[^a-z0-9]/g, "-"),
+      league: "MLB",
+      homeTeam: String(raw.teams.home.name),
+      awayTeam: String(raw.teams.away.name),
+      homeLogo: raw.teams.home.logo,
+      awayLogo: raw.teams.away.logo,
+      date: safeDateStr,
+      time: timeStr,
+      location: venue,
+      status,
+      homeScore: raw.scores?.home?.total,
+      awayScore: raw.scores?.away?.total,
+      apiSportsGameId: raw.id,
+      apiSportsHomeTeamId: raw.teams.home.id,
+      apiSportsAwayTeamId: raw.teams.away.id,
+    };
   }
 
   async getBookmakers(): Promise<Bookmaker[]> {
@@ -151,17 +237,34 @@ class ApiSportsMlbService {
     }
   }
 
-  async getGames(date: Date): Promise<any[]> {
+  async getGames(date: Date): Promise<Game[]> {
     try {
       const dateStr = format(date, "yyyy-MM-dd");
+      const memoryCached = this.gamesCache.get(dateStr);
+      if (memoryCached && Date.now() - memoryCached.timestamp < this.GAMES_CACHE_TTL) {
+        return memoryCached.data;
+      }
+
+      const localCached = this.getLocalGamesCache(dateStr);
+      if (localCached && localCached.length > 0) {
+        this.gamesCache.set(dateStr, { data: localCached, timestamp: Date.now() });
+        console.log(`[API-Sports MLB] Using static local cache for ${dateStr}: ${localCached.length} games`);
+        return localCached;
+      }
+
       const headers = await this.getHeaders();
       const response = await axios.get(`${this.baseUrl}/games`, {
         params: { date: dateStr },
         headers
       });
 
-      if (response.data && response.data.response) {
-        return response.data.response;
+      if (response.data && Array.isArray(response.data.response)) {
+        const games = response.data.response
+          .map((raw: any) => this.normalizeApiSportsGame(raw, dateStr))
+          .filter(Boolean) as Game[];
+        this.gamesCache.set(dateStr, { data: games, timestamp: Date.now() });
+        this.setLocalGamesCache(dateStr, games);
+        return games;
       }
       return [];
     } catch (error) {
