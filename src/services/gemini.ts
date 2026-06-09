@@ -10,14 +10,14 @@ import { apiSportsMlbService } from "./apiSportsMlb";
 import { apiSportsNhlService } from "./apiSportsNhl";
 import { logApiCall, logError } from "./logger";
 
-const MODEL_VERSION = "openai-edge-v1.0.0";
-const PROMPT_VERSION = "openai-sports-analysis-v1.0.0";
+const MODEL_VERSION = "openai-edge-v1.1.0";
+const PROMPT_VERSION = "openai-sports-analysis-v1.1.0";
 const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 const MIN_EDGE_TO_PLAY = 0.035;
 
 type DataQuality = "A" | "B" | "C" | "D";
 
-interface EdgeModelResult {
+type EdgeModelResult = {
   modelProbability: number;
   marketProbability?: number;
   edge?: number;
@@ -25,9 +25,9 @@ interface EdgeModelResult {
   dataQualityReasons: string[];
   recommendation: "PLAY" | "LEAN" | "NO_PLAY";
   fairOdds: number;
-}
+};
 
-interface AiPredictionPayload {
+type AiPredictionPayload = {
   winner?: string;
   confidence?: number;
   reasoning?: string;
@@ -43,7 +43,7 @@ interface AiPredictionPayload {
   matchupAnalysis?: Prediction["matchupAnalysis"];
   playerMatchups?: Prediction["playerMatchups"];
   teamStatsComparison?: Prediction["teamStatsComparison"];
-}
+};
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -71,12 +71,8 @@ function parseWinPercentage(value?: string) {
   if (!value) return undefined;
   const pctMatch = value.match(/([0-9]+(?:\.[0-9]+)?)\s*%/);
   if (pctMatch) return clamp(parseFloat(pctMatch[1]) / 100, 0, 1);
-
   const decimal = parseFloat(value);
-  if (!Number.isNaN(decimal)) {
-    return decimal > 1 ? clamp(decimal / 100, 0, 1) : clamp(decimal, 0, 1);
-  }
-
+  if (!Number.isNaN(decimal)) return decimal > 1 ? clamp(decimal / 100, 0, 1) : clamp(decimal, 0, 1);
   return undefined;
 }
 
@@ -87,8 +83,7 @@ function parseLastFive(value?: string) {
   const wins = parseInt(match[1], 10);
   const losses = parseInt(match[2], 10);
   const total = wins + losses;
-  if (!total) return undefined;
-  return wins / total;
+  return total ? wins / total : undefined;
 }
 
 function cleanJson(text: string) {
@@ -96,7 +91,6 @@ function cleanJson(text: string) {
   let cleaned = jsonMatch ? jsonMatch[1] : text;
   cleaned = cleaned.replace(/:\s*\+([0-9.]+)/g, ": $1");
   cleaned = cleaned.replace(/,\s*([}\]])/g, "$1");
-
   const firstObject = cleaned.indexOf("{");
   const firstArray = cleaned.indexOf("[");
   const lastObject = cleaned.lastIndexOf("}");
@@ -104,10 +98,7 @@ function cleanJson(text: string) {
   const starts = [firstObject, firstArray].filter((n) => n >= 0);
   const ends = [lastObject, lastArray].filter((n) => n >= 0);
   if (!starts.length || !ends.length) return cleaned.trim();
-
-  const start = Math.min(...starts);
-  const end = Math.max(...ends);
-  return cleaned.substring(start, end + 1).trim();
+  return cleaned.substring(Math.min(...starts), Math.max(...ends) + 1).trim();
 }
 
 function safeJsonParse<T>(text: string, fallback: T): T {
@@ -133,7 +124,6 @@ export class BettorsEdge {
   }): Promise<{ text: string; usage?: any; provider: "openai" }> {
     const token = await getIdToken();
     if (!token) throw new Error("Authentication token is required for OpenAI analysis.");
-
     const started = Date.now();
     const response = await axios.post(
       "/api/ai/analyze",
@@ -144,18 +134,34 @@ export class BettorsEdge {
         systemPrompt: params.systemPrompt,
         config: params.responseFormat === "json" ? { response_format: { type: "json_object" } } : undefined,
       },
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
+      { headers: { Authorization: `Bearer ${token}` } }
     );
-
     const text = response.data?.text || response.data?.content || "";
     const usage = response.data?.usage;
     await logApiCall("OpenAI", params.model || this.getOpenAIModel(), params.messages.at(-1)?.content || "", text, Date.now() - started, usage);
     return { text, usage, provider: "openai" };
   }
 
+  private async enrichMlbGame(game: Game, date: string): Promise<Game> {
+    const g = game as any;
+    if (game.league !== "MLB" || !g.apiSportsGameId || !g.apiSportsHomeTeamId || !g.apiSportsAwayTeamId) return game;
+    try {
+      const season = new Date(date || game.date || new Date().toISOString()).getFullYear();
+      const mlbContext = await apiSportsMlbService.getGameContext({
+        gameId: g.apiSportsGameId,
+        season,
+        homeTeamId: g.apiSportsHomeTeamId,
+        awayTeamId: g.apiSportsAwayTeamId,
+      });
+      return { ...game, mlbContext } as Game & { mlbContext: any };
+    } catch (error) {
+      console.warn("[MLB Context] Failed to enrich MLB game:", error);
+      return game;
+    }
+  }
+
   private calculateEdgeModel(game: Game): EdgeModelResult {
+    const mlbContext = (game as any).mlbContext;
     const homeSeason = parseWinPercentage(game.homeTeamStats?.winPercentage);
     const awaySeason = parseWinPercentage(game.awayTeamStats?.winPercentage);
     const homeRecent = parseLastFive(game.homeTeamStats?.last5);
@@ -164,7 +170,7 @@ export class BettorsEdge {
     let homeProbability = 0.5;
     const dataQualityReasons: string[] = [];
 
-    homeProbability += 0.025; // home-field/home-court baseline
+    homeProbability += 0.025;
 
     if (homeSeason !== undefined && awaySeason !== undefined) {
       homeProbability += (homeSeason - awaySeason) * 0.18;
@@ -174,6 +180,19 @@ export class BettorsEdge {
     if (homeRecent !== undefined && awayRecent !== undefined) {
       homeProbability += (homeRecent - awayRecent) * 0.08;
       dataQualityReasons.push("recent form available");
+    }
+
+    if (game.league === "MLB" && mlbContext?.dataQuality) {
+      dataQualityReasons.push(...(mlbContext.dataQuality.notes || []).slice(0, 6));
+      if (mlbContext.pitching?.startersConfirmed) {
+        dataQualityReasons.push("probable starting pitcher context available");
+        homeProbability += 0.004;
+      } else {
+        dataQualityReasons.push("probable starting pitchers missing; MLB confidence capped");
+        homeProbability = homeProbability * 0.9 + 0.5 * 0.1;
+      }
+      if (mlbContext.dataQuality.grade === "A") homeProbability += 0.005;
+      if (mlbContext.dataQuality.grade === "D") homeProbability = homeProbability * 0.85 + 0.5 * 0.15;
     }
 
     if (game.marketExpectations?.homeWinProb !== undefined && game.marketExpectations?.awayWinProb !== undefined) {
@@ -192,14 +211,8 @@ export class BettorsEdge {
 
     homeProbability = clamp(homeProbability, 0.05, 0.95);
 
-    const homeMarketProbability =
-      americanOddsToProbability(game.marketExpectations?.homeWinProb) ??
-      normalizeProbability(game.kalshiExpectations?.yes ?? game.kalshiOdds?.yes);
-
-    const awayMarketProbability =
-      americanOddsToProbability(game.marketExpectations?.awayWinProb) ??
-      normalizeProbability(game.kalshiExpectations?.no ?? game.kalshiOdds?.no);
-
+    const homeMarketProbability = americanOddsToProbability(game.marketExpectations?.homeWinProb) ?? normalizeProbability(game.kalshiExpectations?.yes ?? game.kalshiOdds?.yes);
+    const awayMarketProbability = americanOddsToProbability(game.marketExpectations?.awayWinProb) ?? normalizeProbability(game.kalshiExpectations?.no ?? game.kalshiOdds?.no);
     const predictedHome = homeProbability >= 0.5;
     const modelProbability = predictedHome ? homeProbability : 1 - homeProbability;
     const marketProbability = predictedHome ? homeMarketProbability : awayMarketProbability;
@@ -213,9 +226,11 @@ export class BettorsEdge {
       homeRecent !== undefined && awayRecent !== undefined,
       marketProbability !== undefined,
       !!game.allSources?.length,
+      game.league === "MLB" && mlbContext?.dataQuality?.grade && mlbContext.dataQuality.grade !== "D",
+      game.league === "MLB" && !!mlbContext?.pitching?.startersConfirmed,
     ].filter(Boolean).length;
 
-    const dataQuality: DataQuality = qualityPoints >= 6 ? "A" : qualityPoints >= 4 ? "B" : qualityPoints >= 2 ? "C" : "D";
+    const dataQuality: DataQuality = qualityPoints >= 7 ? "A" : qualityPoints >= 5 ? "B" : qualityPoints >= 3 ? "C" : "D";
     if (marketProbability === undefined) dataQualityReasons.push("market probability missing");
     if (!game.allSources?.length) dataQualityReasons.push("multi-book source data missing");
 
@@ -237,16 +252,10 @@ export class BettorsEdge {
   needsReanalysis(game: Game, existingPrediction?: Prediction) {
     if (!existingPrediction) return true;
     const lastUpdated = existingPrediction.lastUpdated ? new Date(existingPrediction.lastUpdated).getTime() : 0;
-    const ageMs = Date.now() - lastUpdated;
-    if (ageMs > 12 * 60 * 60 * 1000) return true;
-
+    if (Date.now() - lastUpdated > 12 * 60 * 60 * 1000) return true;
     const currentMarket = this.calculateEdgeModel(game);
     const previousEdge = existingPrediction.matchupDelta;
-    if (typeof previousEdge === "number" && typeof currentMarket.edge === "number") {
-      return Math.abs(previousEdge - currentMarket.edge) >= 0.025;
-    }
-
-    return false;
+    return typeof previousEdge === "number" && typeof currentMarket.edge === "number" ? Math.abs(previousEdge - currentMarket.edge) >= 0.025 : false;
   }
 
   async analyzeMatchup(
@@ -258,17 +267,18 @@ export class BettorsEdge {
   ): Promise<Prediction> {
     if (shouldCancel?.()) throw new Error("Analysis cancelled.");
 
-    const edgeModel = this.calculateEdgeModel(game);
+    const analysisGame = await this.enrichMlbGame(game, date);
+    const edgeModel = this.calculateEdgeModel(analysisGame);
     const predictedHome = edgeModel.modelProbability >= 0.5;
-    const predictedWinner = predictedHome ? game.homeTeam : game.awayTeam;
+    const predictedWinner = predictedHome ? analysisGame.homeTeam : analysisGame.awayTeam;
     const winner = edgeModel.recommendation === "NO_PLAY" ? "PASS" : predictedWinner;
 
-    const systemPrompt = "You are Bettors Edge, a disciplined sports analytics engine. You explain deterministic model output. Never invent injuries, odds, rosters, or news. If data is missing, say so. Return only JSON.";
+    const systemPrompt = "You are Bettors Edge, a disciplined sports analytics engine. You explain deterministic model output. Never invent injuries, odds, rosters, pitcher names, or news. If data is missing, say so. Return only JSON.";
     const userPrompt = `
 Analyze this matchup using the provided deterministic model output. Do not override the edge/no-play rule.
 
-Game:
-${JSON.stringify(game, null, 2)}
+Game with MLB context when available:
+${JSON.stringify(analysisGame, null, 2)}
 
 Deterministic model:
 ${JSON.stringify(edgeModel, null, 2)}
@@ -310,22 +320,20 @@ Return JSON with this shape:
       await logError(error, "OpenAI matchup analysis failed");
     }
 
-    const confidenceFromEdge = edgeModel.edge === undefined
-      ? 5
-      : clamp(5 + Math.abs(edgeModel.edge) * 45, 1, 10);
+    const confidenceFromEdge = edgeModel.edge === undefined ? 5 : clamp(5 + Math.abs(edgeModel.edge) * 45, 1, 10);
 
     const prediction: Prediction = {
-      gameId: game.id,
-      league: game.league,
+      gameId: analysisGame.id,
+      league: analysisGame.league,
       date,
-      homeTeam: game.homeTeam,
-      awayTeam: game.awayTeam,
+      homeTeam: analysisGame.homeTeam,
+      awayTeam: analysisGame.awayTeam,
       winner,
       confidence: winner === "PASS" ? Math.min(6, confidenceFromEdge) : confidenceFromEdge,
       reasoning: aiPayload.reasoning || `${edgeModel.recommendation}: model probability ${Math.round(edgeModel.modelProbability * 100)}%${edgeModel.edge !== undefined ? ` vs market ${Math.round((edgeModel.marketProbability || 0) * 100)}%` : " with no reliable market probability"}.`,
-      devilsAdvocate: aiPayload.devilsAdvocate || "Primary risk: limited or stale market/injury data can distort the edge calculation.",
+      devilsAdvocate: aiPayload.devilsAdvocate || "Primary risk: limited or stale market, injury, or pitcher data can distort the edge calculation.",
       marketSentiment: aiPayload.marketSentiment || (edgeModel.edge !== undefined ? `Estimated edge: ${(edgeModel.edge * 100).toFixed(1)}%.` : "No reliable market edge available."),
-      situationalFactors: aiPayload.situationalFactors || "Situational data limited to available schedule, venue, recent form, and market context.",
+      situationalFactors: aiPayload.situationalFactors || "Situational data limited to available schedule, venue, recent form, market context, and MLB context when present.",
       scenarioAnalysis: aiPayload.scenarioAnalysis || "No-play if edge is below threshold or data quality is weak. Lean/play only when market gap is measurable.",
       keyFactors: aiPayload.keyFactors?.length ? aiPayload.keyFactors : edgeModel.dataQualityReasons,
       injuries: aiPayload.injuries || existingPrediction?.injuries || [],
@@ -335,7 +343,7 @@ Return JSON with this shape:
       matchupAnalysis: aiPayload.matchupAnalysis,
       playerMatchups: aiPayload.playerMatchups,
       teamStatsComparison: aiPayload.teamStatsComparison,
-      kalshiPrice: game.kalshiExpectations?.yes ?? game.kalshiOdds?.yes ?? edgeModel.marketProbability ?? 0.5,
+      kalshiPrice: analysisGame.kalshiExpectations?.yes ?? analysisGame.kalshiOdds?.yes ?? edgeModel.marketProbability ?? 0.5,
       winProbability: edgeModel.modelProbability,
       lastUpdated: new Date().toISOString(),
       simulationCount: 0,
@@ -343,10 +351,10 @@ Return JSON with this shape:
       matchupDelta: edgeModel.edge,
       qaStatus: edgeModel.recommendation === "NO_PLAY" ? "flagged" : "verified",
       qaNotes: `OpenAI-only analysis. Model=${MODEL_VERSION}; prompt=${PROMPT_VERSION}; recommendation=${edgeModel.recommendation}; fairOdds=${edgeModel.fairOdds}; dataQuality=${edgeModel.dataQuality}.`,
-      marketExpectations: game.marketExpectations,
+      marketExpectations: analysisGame.marketExpectations,
       sourceAudit: {
         googleDriveAccessed: false,
-        nbaOfficialAccessed: !!game.apiSportsGameId,
+        nbaOfficialAccessed: !!(analysisGame as any).apiSportsGameId,
         lastAuditTime: new Date().toISOString(),
         auditNotes: edgeModel.dataQualityReasons.join("; "),
       },
@@ -383,26 +391,13 @@ Return JSON with this shape:
 
   async analyzeLoss(game: Game, prediction: Prediction, actualScore: { home: number; away: number }) {
     const actualWinner = actualScore.home > actualScore.away ? game.homeTeam : game.awayTeam;
-    const prompt = `
-Review this failed prediction and return JSON:
-{
-  "analysis": "what happened",
-  "keyMissedFactor": "main miss",
-  "lessonLearned": "model adjustment"
-}
-
-Game: ${JSON.stringify(game)}
-Prediction: ${JSON.stringify(prediction)}
-Actual score: ${JSON.stringify(actualScore)}
-Actual winner: ${actualWinner}`;
-
+    const prompt = `Review this failed prediction and return JSON:\n{\n  "analysis": "what happened",\n  "keyMissedFactor": "main miss",\n  "lessonLearned": "model adjustment"\n}\n\nGame: ${JSON.stringify(game)}\nPrediction: ${JSON.stringify(prediction)}\nActual score: ${JSON.stringify(actualScore)}\nActual winner: ${actualWinner}`;
     let postMortem = {
-      analysis: "Prediction missed. Review market movement, injury status, and matchup assumptions.",
+      analysis: "Prediction missed. Review market movement, injury status, pitcher status, and matchup assumptions.",
       keyMissedFactor: "Unknown",
       lessonLearned: "Require stronger data quality and edge threshold before play labels.",
       analyzedAt: new Date().toISOString(),
     };
-
     try {
       const result = await this.callOpenAI({
         messages: [{ role: "user", content: prompt }],
@@ -413,7 +408,6 @@ Actual winner: ${actualWinner}`;
     } catch (error) {
       await logError(error, "OpenAI loss analysis failed");
     }
-
     await this.savePrediction(game.id, {
       ...prediction,
       actualWinner,
@@ -421,14 +415,12 @@ Actual winner: ${actualWinner}`;
       outcome: prediction.winner === actualWinner ? "correct" : "incorrect",
       postMortem,
     });
-
     return postMortem;
   }
 
   async analyzeRecentPerformance(predictions: Prediction[]): Promise<string> {
     const recentLosses = predictions.filter((p) => p.outcome === "incorrect").slice(0, 10);
     if (recentLosses.length === 0) return "No recent losses to analyze. Performance has been stable.";
-
     const result = await this.callOpenAI({
       messages: [{ role: "user", content: `Analyze these recent failed predictions for patterns and model adjustments. Keep it concise.\n${JSON.stringify(recentLosses, null, 2)}` }],
       systemPrompt: "You are a head sports data analyst focused on calibration, edge quality, and betting model discipline.",
@@ -445,7 +437,7 @@ Actual winner: ${actualWinner}`;
   }
 
   async generateDailyBriefing(league: string, date: string, games: Game[]) {
-    const prompt = `Generate a concise ${league} daily briefing for ${date}. Focus on true edges, no-play discipline, injury/data gaps, market expectations, and top risks.\n${JSON.stringify(games, null, 2)}`;
+    const prompt = `Generate a concise ${league} daily briefing for ${date}. Focus on true edges, no-play discipline, injury/data gaps, market expectations, pitcher context for MLB, and top risks.\n${JSON.stringify(games, null, 2)}`;
     const result = await this.callOpenAI({
       messages: [{ role: "user", content: prompt }],
       systemPrompt: "You are Bettors Edge, a disciplined sports analytics briefing engine. Do not invent facts. Use markdown.",
@@ -458,8 +450,7 @@ Actual winner: ${actualWinner}`;
     for (let i = 0; i < games.length; i++) {
       if (shouldCancel?.()) break;
       onProgress?.(i + 1, games.length);
-      const game = games[i];
-      updates[game.id] = [];
+      updates[games[i].id] = [];
     }
     return updates;
   }
@@ -467,7 +458,7 @@ Actual winner: ${actualWinner}`;
   async checkSourceHealth() {
     return {
       status: "degraded",
-      details: "OpenAI engine is active. External injury source verification should be connected through a deterministic sports data provider, not AI-generated injury claims.",
+      details: "OpenAI engine is active. External injury and pitcher verification should be connected through deterministic sports data providers, not AI-generated claims.",
       latestDate: format(getNYDate(), "yyyy-MM-dd"),
     };
   }
@@ -476,7 +467,6 @@ Actual winner: ${actualWinner}`;
     const db = getDb();
     const docId = `${league}-${date}`;
     const scheduleRef = doc(db, "schedules", docId);
-
     if (!force) {
       try {
         const cached = await getDoc(scheduleRef);
@@ -488,10 +478,8 @@ Actual winner: ${actualWinner}`;
         console.warn("[Schedule] Cache read failed:", error);
       }
     }
-
     const dateObj = new Date(`${date}T12:00:00`);
     let games: Game[] = [];
-
     try {
       if (league === "NBA") games = await apiSportsService.getGames(dateObj) as any;
       else if (league === "MLB") games = await apiSportsMlbService.getGames(dateObj) as any;
@@ -499,7 +487,6 @@ Actual winner: ${actualWinner}`;
     } catch (error) {
       console.warn(`[Schedule] API-Sports ${league} fetch failed:`, error);
     }
-
     if (!games.length) {
       try {
         games = await espnService.getSchedule(league, dateObj);
@@ -507,13 +494,11 @@ Actual winner: ${actualWinner}`;
         console.warn(`[Schedule] ESPN ${league} fetch failed:`, error);
       }
     }
-
     try {
       await setDoc(scheduleRef, { league, date, games, lastUpdated: new Date().toISOString(), source: "deterministic-api" }, { merge: true });
     } catch (error) {
       console.warn("[Schedule] Cache write failed:", error);
     }
-
     return games;
   }
 
@@ -536,17 +521,13 @@ Actual winner: ${actualWinner}`;
     } catch (error) {
       console.warn("[Bracket] Cache read failed:", error);
     }
-
     const result = await this.callOpenAI({
       messages: [{ role: "user", content: `Provide the ${year} ${league} tournament bracket as JSON matching the app TournamentBracket type. If unknown, return {"league":"${league}","year":${year},"rounds":[],"lastUpdated":"${new Date().toISOString()}"}.` }],
       systemPrompt: "You are a sports data assistant. Return only JSON. Do not invent unknown games.",
       responseFormat: "json",
     });
-
     const bracket = safeJsonParse<TournamentBracket | null>(result.text, null);
-    if (bracket) {
-      await setDoc(docRef, { ...bracket, lastUpdated: new Date().toISOString() }, { merge: true });
-    }
+    if (bracket) await setDoc(docRef, { ...bracket, lastUpdated: new Date().toISOString() }, { merge: true });
     return bracket;
   }
 
