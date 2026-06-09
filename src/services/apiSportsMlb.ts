@@ -34,6 +34,46 @@ export type ApiError = {
   details?: unknown;
 };
 
+export type MlbDataQualityGrade = "A" | "B" | "C" | "D";
+
+export type MlbGameContext = {
+  gameId: number | string;
+  season: string;
+  homeTeamId: number | string;
+  awayTeamId: number | string;
+  fetchedAt: string;
+  game: any | null;
+  odds: NormalizedOddsResponse[];
+  teams: {
+    home: {
+      id: number | string;
+      statistics: any | null;
+      injuries: any[];
+    };
+    away: {
+      id: number | string;
+      statistics: any | null;
+      injuries: any[];
+    };
+  };
+  pitching: {
+    probableStarters: {
+      home: any | null;
+      away: any | null;
+    };
+    startersConfirmed: boolean;
+    notes: string[];
+  };
+  h2h: any[];
+  dataQuality: {
+    grade: MlbDataQualityGrade;
+    score: number;
+    maxScore: number;
+    present: Record<string, boolean>;
+    notes: string[];
+  };
+};
+
 class ApiSportsMlbService {
   private baseUrl = "/api/mlb";
   private bookmakersCache: Bookmaker[] | null = null;
@@ -42,6 +82,9 @@ class ApiSportsMlbService {
   
   private oddsCache: Map<string, { data: NormalizedOddsResponse[], timestamp: number }> = new Map();
   private readonly ODDS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+  private gameContextCache: Map<string, { data: MlbGameContext, timestamp: number }> = new Map();
+  private readonly GAME_CONTEXT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
   private async getHeaders() {
     const token = await getIdToken();
@@ -125,6 +168,141 @@ class ApiSportsMlbService {
       console.error("[API-Sports MLB] Error fetching games:", error);
       return [];
     }
+  }
+
+  async getGameById(gameId: number | string): Promise<any | null> {
+    try {
+      const headers = await this.getHeaders();
+      const response = await axios.get(`${this.baseUrl}/games`, {
+        params: { id: gameId },
+        headers
+      });
+
+      if (response.data && Array.isArray(response.data.response)) {
+        return response.data.response[0] || null;
+      }
+      return null;
+    } catch (error) {
+      console.error("[API-Sports MLB] Error fetching game by id:", error);
+      return null;
+    }
+  }
+
+  async getGameContext(filters: {
+    gameId: number | string;
+    season: number | string;
+    homeTeamId: number | string;
+    awayTeamId: number | string;
+  }): Promise<MlbGameContext> {
+    const season = String(filters.season);
+    const cacheKey = JSON.stringify(filters);
+    const cached = this.gameContextCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.GAME_CONTEXT_CACHE_TTL) {
+      return cached.data;
+    }
+
+    const safe = async <T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> => {
+      try {
+        return await fn();
+      } catch (error) {
+        console.warn(`[API-Sports MLB] ${label} context fetch failed:`, error);
+        return fallback;
+      }
+    };
+
+    const [game, odds, homeStats, awayStats, homeInjuries, awayInjuries, h2h] = await Promise.all([
+      safe("game", () => this.getGameById(filters.gameId), null),
+      safe("odds", () => this.getOdds({ game: filters.gameId }), [] as NormalizedOddsResponse[]),
+      safe("home team statistics", () => this.getTeamStatistics(Number(filters.homeTeamId), season), null),
+      safe("away team statistics", () => this.getTeamStatistics(Number(filters.awayTeamId), season), null),
+      safe("home injuries", () => this.getInjuries(Number(filters.homeTeamId), season), [] as any[]),
+      safe("away injuries", () => this.getInjuries(Number(filters.awayTeamId), season), [] as any[]),
+      safe("head-to-head", () => this.getH2H(Number(filters.homeTeamId), Number(filters.awayTeamId)), [] as any[]),
+    ]);
+
+    const homePitcher = this.extractProbablePitcher(game, "home");
+    const awayPitcher = this.extractProbablePitcher(game, "away");
+
+    const pitching = {
+      probableStarters: {
+        home: homePitcher,
+        away: awayPitcher,
+      },
+      startersConfirmed: Boolean(homePitcher && awayPitcher),
+      notes: [
+        homePitcher ? "home probable starter available" : "home probable starter missing",
+        awayPitcher ? "away probable starter available" : "away probable starter missing",
+        "starting pitcher availability is treated as a major MLB confidence factor",
+      ],
+    };
+
+    const present: Record<string, boolean> = {
+      game: Boolean(game),
+      odds: odds.length > 0,
+      homeStats: Boolean(homeStats),
+      awayStats: Boolean(awayStats),
+      homeInjuries: Array.isArray(homeInjuries),
+      awayInjuries: Array.isArray(awayInjuries),
+      h2h: h2h.length > 0,
+      pitcherContext: pitching.startersConfirmed,
+    };
+
+    const score = Object.values(present).filter(Boolean).length;
+    const grade: MlbDataQualityGrade = score >= 7 ? "A" : score >= 5 ? "B" : score >= 3 ? "C" : "D";
+
+    const context: MlbGameContext = {
+      gameId: filters.gameId,
+      season,
+      homeTeamId: filters.homeTeamId,
+      awayTeamId: filters.awayTeamId,
+      fetchedAt: new Date().toISOString(),
+      game,
+      odds,
+      teams: {
+        home: {
+          id: filters.homeTeamId,
+          statistics: homeStats,
+          injuries: homeInjuries,
+        },
+        away: {
+          id: filters.awayTeamId,
+          statistics: awayStats,
+          injuries: awayInjuries,
+        },
+      },
+      pitching,
+      h2h,
+      dataQuality: {
+        grade,
+        score,
+        maxScore: Object.keys(present).length,
+        present,
+        notes: [
+          present.game ? "game detail available" : "game detail missing",
+          present.odds ? "market odds available" : "market odds missing",
+          present.homeStats && present.awayStats ? "both team stat profiles available" : "one or both team stat profiles missing",
+          present.homeInjuries && present.awayInjuries ? "injury feeds checked" : "injury feed missing",
+          present.h2h ? "head-to-head context available" : "head-to-head context missing",
+          present.pitcherContext ? "probable starting pitchers available" : "probable starting pitchers missing; downgrade MLB confidence",
+        ],
+      },
+    };
+
+    this.gameContextCache.set(cacheKey, { data: context, timestamp: Date.now() });
+    return context;
+  }
+
+  private extractProbablePitcher(game: any, side: "home" | "away") {
+    if (!game) return null;
+
+    return (
+      game?.pitchers?.[side] ||
+      game?.pitcher?.[side] ||
+      game?.teams?.[side]?.pitcher ||
+      game?.lineups?.[side]?.pitcher ||
+      game?.probablePitchers?.[side] ||
+      null
+    );
   }
 
   async getStandings(season: string): Promise<any[]> {
