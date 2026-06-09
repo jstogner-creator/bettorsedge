@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
 interface Props {
@@ -11,10 +11,12 @@ interface State {
   error: Error | null;
 }
 
+const isProduction = import.meta.env.PROD;
+
 export class ErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
-    error: null
+    error: null,
   };
 
   public static getDerivedStateFromError(error: Error): State {
@@ -44,13 +46,15 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
             <h2 className="text-2xl font-bold text-white mb-2">Something went wrong</h2>
             <p className="text-slate-400 mb-8 leading-relaxed">
-              An unexpected error occurred. We've been notified and are looking into it.
+              An unexpected error occurred. Please reload the application and try again.
             </p>
-            <div className="bg-slate-950 rounded-lg p-4 mb-8 text-left overflow-hidden">
-              <p className="text-xs font-mono text-rose-400 break-all">
-                {this.state.error?.message || 'Unknown error'}
-              </p>
-            </div>
+            {!isProduction && (
+              <div className="bg-slate-950 rounded-lg p-4 mb-8 text-left overflow-hidden">
+                <p className="text-xs font-mono text-rose-400 break-all">
+                  {this.state.error?.message || 'Unknown error'}
+                </p>
+              </div>
+            )}
             <button
               onClick={this.handleReset}
               className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center transition-all shadow-lg shadow-indigo-500/20"
