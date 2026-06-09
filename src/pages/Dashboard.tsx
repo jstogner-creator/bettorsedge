@@ -1877,6 +1877,10 @@ const fetchGames = async (force: boolean = false) => {
         }
 
         const existingPrediction = savedPredictions[game.id];
+        const isPartialPrediction =
+          existingPrediction?.winner === "TBD" ||
+          existingPrediction?.reasoning === "Injury report updated. Full analysis pending." ||
+          existingPrediction?.scenarioAnalysis === "Pending analysis.";
         
         // Check if injuries changed
         const newInjuries = injuryUpdates[game.id];
