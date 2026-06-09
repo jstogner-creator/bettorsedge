@@ -1,14 +1,15 @@
 {
-  "name": "react-example",
+  "name": "bettorsedge",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && cp -r dist build || true",
-    "start": "tsx server.ts",
+    "build": "vite build && rm -rf build && cp -R dist build",
+    "start": "NODE_ENV=production tsx server.ts",
     "preview": "vite preview",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "audit": "npm audit"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
