@@ -1,0 +1,130 @@
+name: Wire MLB context into analysis
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/wire-mlb-context-analysis.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Patch analysis service
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('src/services/gemini.ts')
+          text = path.read_text()
+
+          def replace_once(before, after, label):
+              global text
+              if before in text:
+                  text = text.replace(before, after, 1)
+                  print(f'patched: {label}')
+              elif after in text:
+                  print(f'already applied: {label}')
+              else:
+                  raise SystemExit(f'missing expected block: {label}')
+
+          enrich_method = '''  private async enrichMlbGame(game: Game, date: string): Promise<Game> {
+    if (game.league !== "MLB" || !game.apiSportsGameId || !game.apiSportsHomeTeamId || !game.apiSportsAwayTeamId) {
+      return game;
+    }
+
+    const season = new Date(date || game.date || new Date().toISOString()).getFullYear();
+    const mlbContext = await apiSportsMlbService.getGameContext({
+      gameId: game.apiSportsGameId,
+      season,
+      homeTeamId: game.apiSportsHomeTeamId,
+      awayTeamId: game.apiSportsAwayTeamId,
+    });
+
+    return {
+      ...game,
+      mlbContext,
+    } as Game & { mlbContext: any };
+  }
+
+'''
+
+          if 'private async enrichMlbGame' not in text:
+              replace_once('  private calculateEdgeModel(game: Game): EdgeModelResult {', enrich_method + '  private calculateEdgeModel(game: Game): EdgeModelResult {', 'insert MLB enrichment helper')
+
+          replace_once(
+              '    let homeProbability = 0.5;\n    const dataQualityReasons: string[] = [];',
+              '    let homeProbability = 0.5;\n    const dataQualityReasons: string[] = [];\n    const mlbContext = (game as any).mlbContext;',
+              'add mlbContext inside edge model'
+          )
+
+          replace_once(
+              '    if (game.marketExpectations?.homeWinProb !== undefined && game.marketExpectations?.awayWinProb !== undefined) {',
+              '    if (game.league === "MLB" && mlbContext?.dataQuality) {\n      dataQualityReasons.push(...(mlbContext.dataQuality.notes || []).slice(0, 6));\n\n      if (mlbContext.pitching?.startersConfirmed) {\n        dataQualityReasons.push("probable starting pitcher context available");\n        homeProbability += 0.004;\n      } else {\n        dataQualityReasons.push("probable starting pitchers missing; MLB confidence capped");\n        homeProbability = homeProbability * 0.9 + 0.5 * 0.1;\n      }\n\n      if (mlbContext.dataQuality.grade === "A") homeProbability += 0.005;\n      if (mlbContext.dataQuality.grade === "D") homeProbability = homeProbability * 0.85 + 0.5 * 0.15;\n    }\n\n    if (game.marketExpectations?.homeWinProb !== undefined && game.marketExpectations?.awayWinProb !== undefined) {',
+              'apply MLB context and pitcher availability to edge model'
+          )
+
+          replace_once(
+              '      !!game.allSources?.length,\n    ].filter(Boolean).length;',
+              '      !!game.allSources?.length,\n      game.league === "MLB" && mlbContext?.dataQuality?.grade && mlbContext.dataQuality.grade !== "D",\n      game.league === "MLB" && !!mlbContext?.pitching?.startersConfirmed,\n    ].filter(Boolean).length;',
+              'add MLB context to quality score'
+          )
+
+          replace_once(
+              '    const edgeModel = this.calculateEdgeModel(game);\n    const predictedHome = edgeModel.modelProbability >= 0.5;\n    const predictedWinner = predictedHome ? game.homeTeam : game.awayTeam;',
+              '    const analysisGame = await this.enrichMlbGame(game, date);\n    const edgeModel = this.calculateEdgeModel(analysisGame);\n    const predictedHome = edgeModel.modelProbability >= 0.5;\n    const predictedWinner = predictedHome ? analysisGame.homeTeam : analysisGame.awayTeam;',
+              'enrich MLB game before analysis'
+          )
+
+          start = text.index('  async analyzeMatchup(')
+          end = text.index('  async batchAnalyzeMatchups(', start)
+          prefix = text[:start]
+          fn = text[start:end]
+          suffix = text[end:]
+
+          replacements = [
+              ('JSON.stringify(game, null, 2)', 'JSON.stringify(analysisGame, null, 2)'),
+              ('game.id', 'analysisGame.id'),
+              ('game.league', 'analysisGame.league'),
+              ('game.homeTeam', 'analysisGame.homeTeam'),
+              ('game.awayTeam', 'analysisGame.awayTeam'),
+              ('game.kalshiExpectations', 'analysisGame.kalshiExpectations'),
+              ('game.kalshiOdds', 'analysisGame.kalshiOdds'),
+              ('game.marketExpectations', 'analysisGame.marketExpectations'),
+              ('game.apiSportsGameId', 'analysisGame.apiSportsGameId'),
+          ]
+          for old, new in replacements:
+              fn = fn.replace(old, new)
+
+          fn = fn.replace('Game:', 'Game with MLB context when available:', 1)
+          text = prefix + fn + suffix
+
+          path.write_text(text)
+          PY
+
+      - name: Validate patch
+        run: |
+          grep -q "private async enrichMlbGame" src/services/gemini.ts
+          grep -q "mlbContext.pitching" src/services/gemini.ts
+          grep -q "const analysisGame = await this.enrichMlbGame" src/services/gemini.ts
+          git diff --check
+
+      - name: Commit patch
+        run: |
+          git config user.name "jstogner-creator"
+          git config user.email "jstogner@risenetworkcabling.com"
+          git add src/services/gemini.ts
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Wire MLB context into prediction analysis"
+            git push
+          fi
