@@ -90,6 +90,59 @@ class ApiSportsMlbService {
   private gamesCache: Map<string, { data: Game[], timestamp: number }> = new Map();
   private readonly GAMES_CACHE_TTL = 24 * 60 * 60 * 1000; // daily static schedule cache
 
+  private readonly MLB_TEAM_NAMES = new Set([
+    "arizona diamondbacks",
+    "atlanta braves",
+    "baltimore orioles",
+    "boston red sox",
+    "chicago cubs",
+    "chicago white sox",
+    "cincinnati reds",
+    "cleveland guardians",
+    "colorado rockies",
+    "detroit tigers",
+    "houston astros",
+    "kansas city royals",
+    "los angeles angels",
+    "los angeles dodgers",
+    "miami marlins",
+    "milwaukee brewers",
+    "minnesota twins",
+    "new york mets",
+    "new york yankees",
+    "athletics",
+    "oakland athletics",
+    "philadelphia phillies",
+    "pittsburgh pirates",
+    "san diego padres",
+    "san francisco giants",
+    "seattle mariners",
+    "st. louis cardinals",
+    "st louis cardinals",
+    "tampa bay rays",
+    "texas rangers",
+    "toronto blue jays",
+    "washington nationals",
+  ]);
+
+  private normalizeTeamName(name: unknown) {
+    return String(name || "")
+      .toLowerCase()
+      .replace(/\./g, "")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  private isKnownMlbTeam(name: unknown) {
+    const normalized = this.normalizeTeamName(name);
+    return this.MLB_TEAM_NAMES.has(normalized);
+  }
+
+  private isRealMlbMatchup(homeTeam: unknown, awayTeam: unknown) {
+    return this.isKnownMlbTeam(homeTeam) && this.isKnownMlbTeam(awayTeam);
+  }
+
   private async getHeaders() {
     const token = await getIdToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
@@ -103,7 +156,12 @@ class ApiSportsMlbService {
       const parsed = JSON.parse(raw) as { timestamp: number; data: Game[] };
       if (!parsed?.timestamp || !Array.isArray(parsed.data)) return null;
       if (Date.now() - parsed.timestamp > this.GAMES_CACHE_TTL) return null;
-      return parsed.data.map((g) => this.normalizeStoredGame(g, dateStr)).filter(Boolean) as Game[];
+      const normalized = parsed.data.map((g) => this.normalizeStoredGame(g, dateStr)).filter(Boolean) as Game[];
+      if (normalized.length === 0) {
+        localStorage.removeItem(`bettorsedge-mlb-games-${dateStr}`);
+        return null;
+      }
+      return normalized;
     } catch (error) {
       console.warn("[API-Sports MLB] Failed to read local game cache:", error);
       return null;
@@ -113,9 +171,10 @@ class ApiSportsMlbService {
   private setLocalGamesCache(dateStr: string, games: Game[]) {
     if (typeof window === "undefined") return;
     try {
+      const mlbOnly = games.filter((g) => this.isRealMlbMatchup(g.homeTeam, g.awayTeam));
       localStorage.setItem(`bettorsedge-mlb-games-${dateStr}`, JSON.stringify({
         timestamp: Date.now(),
-        data: games,
+        data: mlbOnly,
       }));
     } catch (error) {
       console.warn("[API-Sports MLB] Failed to write local game cache:", error);
@@ -125,6 +184,7 @@ class ApiSportsMlbService {
   private normalizeStoredGame(raw: any, dateStr: string): Game | null {
     if (!raw) return null;
     if (raw.homeTeam && raw.awayTeam) {
+      if (!this.isRealMlbMatchup(raw.homeTeam, raw.awayTeam)) return null;
       const safeDate = String(raw.date || dateStr).split("T")[0] || dateStr;
       return {
         ...raw,
@@ -144,6 +204,13 @@ class ApiSportsMlbService {
   private normalizeApiSportsGame(raw: any, dateStr: string): Game | null {
     if (!raw?.teams?.home?.name || !raw?.teams?.away?.name) return null;
 
+    const homeName = String(raw.teams.home.name);
+    const awayName = String(raw.teams.away.name);
+    if (!this.isRealMlbMatchup(homeName, awayName)) {
+      console.log(`[API-Sports MLB] Filtering non-MLB baseball matchup: ${awayName} @ ${homeName}`);
+      return null;
+    }
+
     const statusStr = raw.status?.short || raw.status?.long || "NS";
     let status: Game["status"] = "scheduled";
     if (["IN1", "IN2", "IN3", "IN4", "IN5", "IN6", "IN7", "IN8", "IN9", "IN10", "IN11", "IN12", "IN", "LIVE"].includes(statusStr)) {
@@ -159,10 +226,10 @@ class ApiSportsMlbService {
     const venue = raw.venue?.name || raw.venue || raw.game?.venue?.name || "Unknown";
 
     return {
-      id: `mlb-${raw.teams.away.name}-${raw.teams.home.name}-${safeDateStr}`.toLowerCase().replace(/[^a-z0-9]/g, "-"),
+      id: `mlb-${awayName}-${homeName}-${safeDateStr}`.toLowerCase().replace(/[^a-z0-9]/g, "-"),
       league: "MLB",
-      homeTeam: String(raw.teams.home.name),
-      awayTeam: String(raw.teams.away.name),
+      homeTeam: homeName,
+      awayTeam: awayName,
       homeLogo: raw.teams.home.logo,
       awayLogo: raw.teams.away.logo,
       date: safeDateStr,
