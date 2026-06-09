@@ -110,6 +110,22 @@ function safeJsonParse<T>(text: string, fallback: T): T {
   }
 }
 
+function stripUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => stripUndefined(item)) as T;
+  }
+  if (value && typeof value === "object") {
+    const cleaned: Record<string, any> = {};
+    Object.entries(value as Record<string, any>).forEach(([key, item]) => {
+      if (item !== undefined) cleaned[key] = stripUndefined(item);
+    });
+    return cleaned as T;
+  }
+  return value;
+}
+
 export class BettorsEdge {
   private getOpenAIModel() {
     if (typeof window === "undefined") return DEFAULT_OPENAI_MODEL;
@@ -380,13 +396,14 @@ Return JSON with this shape:
 
   async savePrediction(gameId: string, prediction: Prediction) {
     const db = getDb();
-    await setDoc(doc(db, "predictions", gameId), {
+    const payload = stripUndefined({
       ...prediction,
       gameId,
       modelVersion: MODEL_VERSION,
       promptVersion: PROMPT_VERSION,
       lastUpdated: new Date().toISOString(),
-    }, { merge: true });
+    });
+    await setDoc(doc(db, "predictions", gameId), payload, { merge: true });
   }
 
   async analyzeLoss(game: Game, prediction: Prediction, actualScore: { home: number; away: number }) {
