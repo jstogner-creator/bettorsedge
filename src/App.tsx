@@ -36,12 +36,23 @@ export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [redirectError, setRedirectError] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<"main" | "faq">("main");
+  const [currentPath, setCurrentPath] = useState(() => window.location.pathname);
   const isOnline = useOnlineStatus();
   const authReadyRef = useRef(false);
 
   useEffect(() => {
     authReadyRef.current = isAuthReady;
   }, [isAuthReady]);
+
+  useEffect(() => {
+    const syncPath = () => setCurrentPath(window.location.pathname);
+    window.addEventListener("popstate", syncPath);
+    window.addEventListener("bettorsedge:navigation", syncPath as EventListener);
+    return () => {
+      window.removeEventListener("popstate", syncPath);
+      window.removeEventListener("bettorsedge:navigation", syncPath as EventListener);
+    };
+  }, []);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -52,8 +63,7 @@ export default function App() {
     const init = () => {
       console.log("[App] Initialization started");
       
-      // Safety timeout: if auth doesn't ready in 10 seconds, force it
-      // This ensures the app renders even if Firebase is slow or hangs
+      // Safety timeout: if auth doesn't ready in 10 seconds, force it.
       authTimeout = setTimeout(() => {
         if (isMounted && !authReadyRef.current) {
           console.warn("[App] Auth initialization timed out. Forcing ready state.");
@@ -64,7 +74,6 @@ export default function App() {
       console.log("[App] Attaching onAuthStateChanged listener");
       const auth = getAuthInstance();
       
-      // 1. Attach listener synchronously
       unsubscribe = onAuthStateChanged(auth, (currentUser) => {
         console.log(
           "[App] Auth State Changed:",
@@ -74,7 +83,6 @@ export default function App() {
         if (!isMounted) return;
         clearTimeout(authTimeout);
         
-        // Only update if it's a real change to avoid overwriting redirect result
         setUser((prevUser) => {
           console.log(`[App] setUser callback: prevUser=${prevUser?.email}, currentUser=${currentUser?.email}, redirectUserSet=${redirectUserSet}`);
           if (prevUser && !currentUser) {
@@ -94,7 +102,6 @@ export default function App() {
         setIsAuthReady(true);
       });
 
-      // 2. Process redirect asynchronously without blocking the listener
       handleGoogleRedirectResult().then((redirectUser) => {
         if (isMounted && redirectUser) {
           console.log("[App] Redirect result returned user, setting state explicitly");
@@ -111,7 +118,6 @@ export default function App() {
         if (isMounted && e.code !== 'auth/redirect-cancelled-by-user') {
           setRedirectError(e.message || "Failed to complete sign in. Please try again.");
         }
-        // Ensure auth is marked ready even on error to prevent infinite loading
         if (isMounted) setIsAuthReady(true);
       });
     };
@@ -125,9 +131,19 @@ export default function App() {
     };
   }, []);
 
-  if (!isAuthReady) {
-    return <LoadingScreen />;
-  }
+  const isAppRoute = currentPath.startsWith("/app");
+
+  const navigateToApp = () => {
+    window.history.pushState({}, "", "/app");
+    setCurrentPath("/app");
+    window.dispatchEvent(new Event("bettorsedge:navigation"));
+  };
+
+  const navigateHome = () => {
+    window.history.pushState({}, "", "/");
+    setCurrentPath("/");
+    window.dispatchEvent(new Event("bettorsedge:navigation"));
+  };
 
   return (
     <ErrorBoundary>
@@ -137,14 +153,18 @@ export default function App() {
         </div>
       )}
       <Suspense fallback={<LoadingScreen message="Loading View..." />}>
-        {user ? (
+        {!isAppRoute ? (
+          <LandingPage initialError={redirectError} onEnter={navigateToApp} />
+        ) : !isAuthReady ? (
+          <LoadingScreen />
+        ) : user ? (
           currentView === "faq" ? (
             <FAQ onBack={() => setCurrentView("main")} />
           ) : (
             <Dashboard user={user} onOpenFAQ={() => setCurrentView("faq")} />
           )
         ) : (
-          <LandingPage initialError={redirectError} />
+          <LandingPage initialError={redirectError} onEnter={navigateToApp} appMode onBackHome={navigateHome} />
         )}
       </Suspense>
     </ErrorBoundary>
