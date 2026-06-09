@@ -1,22 +1,12 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <script>
-      window.onerror = function(message, source, lineno, colno, error) {
-        var errDiv = document.createElement('div');
-        errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;background:red;color:white;padding:20px;z-index:9999;font-family:monospace;white-space:pre-wrap;';
-        errDiv.innerHTML = '<b>Startup Error:</b><br>' + message + '<br>' + source + ':' + lineno + ':' + colno + '<br>' + (error ? error.stack : '');
-        document.body.appendChild(errDiv);
-      };
-      window.onunhandledrejection = function(event) {
-        var errDiv = document.createElement('div');
-        errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;background:orange;color:white;padding:20px;z-index:9998;font-family:monospace;white-space:pre-wrap;';
-        errDiv.innerHTML = '<b>Unhandled Promise Rejection:</b><br>' + (event.reason ? (event.reason.stack || event.reason) : 'Unknown reason');
-        document.body.appendChild(errDiv);
-      };
-    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Bettors Edge provides AI-assisted sports statistics and analysis to help bettors make more informed decisions."
+    />
     <title>Bettors Edge – Find the edge before you bet.</title>
   </head>
   <body>
@@ -24,4 +14,3 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
