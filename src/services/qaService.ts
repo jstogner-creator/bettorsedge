@@ -16,19 +16,10 @@ export class QAService {
   async runFullAudit(): Promise<QAResult[]> {
     const results: QAResult[] = [];
 
-    // 1. Firebase Connectivity
     results.push(await this.checkFirebase());
-
-    // 2. Server Health & Secrets
     results.push(await this.checkServerHealth());
-
-    // 3. Gemini API Connectivity
-    results.push(await this.checkGemini());
-
-    // 4. API-Sports Connectivity (NBA)
+    results.push(await this.checkOpenAI());
     results.push(await this.checkApiSports());
-
-    // 5. ESPN Connectivity
     results.push(await this.checkEspn());
 
     return results;
@@ -65,7 +56,6 @@ export class QAService {
       if (!data.stripe.configured) missing.push("Stripe");
       if (!data.kalshi.configured) missing.push("Kalshi");
       if (!data.openai.configured) missing.push("OpenAI");
-      if (!data.gemini.configured) missing.push("Gemini (Server)");
 
       if (missing.length > 0) {
         return {
@@ -91,28 +81,26 @@ export class QAService {
     }
   }
 
-  private async checkGemini(): Promise<QAResult> {
+  private async checkOpenAI(): Promise<QAResult> {
     try {
-      // Simple test to see if we can get a model response
-      // We use a very cheap prompt
       const result = await this.bettorsEdge.analyzeRecentPerformance([]);
       if (result && !result.includes("Error")) {
         return {
-          name: "Gemini AI Engine",
+          name: "OpenAI Analysis Engine",
           status: 'pass',
-          message: "Gemini API is responsive and generating analysis."
+          message: "OpenAI API is responsive and generating analysis."
         };
       }
       return {
-        name: "Gemini AI Engine",
+        name: "OpenAI Analysis Engine",
         status: 'fail',
-        message: "Gemini returned an unexpected or empty response."
+        message: "OpenAI returned an unexpected or empty response."
       };
     } catch (error: any) {
       return {
-        name: "Gemini AI Engine",
+        name: "OpenAI Analysis Engine",
         status: 'fail',
-        message: `Gemini API call failed: ${error.message}`
+        message: `OpenAI API call failed: ${error.message}`
       };
     }
   }
