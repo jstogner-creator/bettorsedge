@@ -19,41 +19,39 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Patch MLB API context aggregation and analysis enrichment
+      - name: Patch MLB API context aggregation, pitcher context, and analysis enrichment
         run: |
-          node <<'NODE'
-          const fs = require('fs');
+          python3 <<'PY'
+          from pathlib import Path
 
-          function write(file, content) {
-            fs.writeFileSync(file, content);
-            console.log(`updated ${file}`);
-          }
+          def read(path):
+              return Path(path).read_text()
 
-          function insertBefore(file, marker, insertion, label) {
-            const original = fs.readFileSync(file, 'utf8');
-            if (original.includes(insertion.trim().slice(0, 80))) {
-              console.log(`${label}: already applied`);
-              return;
-            }
-            if (!original.includes(marker)) throw new Error(`${label}: marker not found in ${file}`);
-            write(file, original.replace(marker, `${insertion}\n\n${marker}`));
-            console.log(`${label}: patched`);
-          }
+          def write(path, content):
+              Path(path).write_text(content)
+              print(f"updated {path}")
 
-          function replaceOnce(file, before, after, label) {
-            const original = fs.readFileSync(file, 'utf8');
-            if (!original.includes(before)) {
-              if (original.includes(after)) {
-                console.log(`${label}: already applied`);
-                return;
-              }
-              throw new Error(`${label}: expected block not found in ${file}`);
-            }
-            write(file, original.replace(before, after));
-            console.log(`${label}: patched`);
-          }
+          def insert_before(path, marker, insertion, label):
+              original = read(path)
+              if insertion.strip()[:80] in original:
+                  print(f"{label}: already applied")
+                  return
+              if marker not in original:
+                  raise SystemExit(f"{label}: marker not found in {path}")
+              write(path, original.replace(marker, insertion + "\n\n" + marker))
+              print(f"{label}: patched")
 
-          const mlbContextRoute = `  app.get("/api/mlb/game-context", authenticate, async (req, res) => {
+          def replace_once(path, before, after, label):
+              original = read(path)
+              if before not in original:
+                  if after in original:
+                      print(f"{label}: already applied")
+                      return
+                  raise SystemExit(f"{label}: expected block not found in {path}")
+              write(path, original.replace(before, after, 1))
+              print(f"{label}: patched")
+
+          mlb_context_route = r'''  app.get("/api/mlb/game-context", authenticate, async (req, res) => {
     try {
       const gameId = String(req.query.gameId || "");
       const season = String(req.query.season || new Date().getFullYear());
@@ -102,18 +100,47 @@ jobs:
         call("h2h", "games/h2h", { h2h: `${homeTeamId}-${awayTeamId}` }, 24 * 60 * 60 * 1000),
       ]);
 
+      const gameResponse = game.ok && Array.isArray(game.data?.response) ? game.data.response : [];
+      const primaryGame = gameResponse[0] || null;
+      const homePitcher =
+        primaryGame?.pitchers?.home ||
+        primaryGame?.pitcher?.home ||
+        primaryGame?.teams?.home?.pitcher ||
+        primaryGame?.lineups?.home?.pitcher ||
+        null;
+      const awayPitcher =
+        primaryGame?.pitchers?.away ||
+        primaryGame?.pitcher?.away ||
+        primaryGame?.teams?.away?.pitcher ||
+        primaryGame?.lineups?.away?.pitcher ||
+        null;
+
+      const pitching = {
+        probableStarters: {
+          home: homePitcher,
+          away: awayPitcher,
+        },
+        startersConfirmed: Boolean(homePitcher && awayPitcher),
+        notes: [
+          homePitcher ? "home probable starter available from game payload" : "home probable starter not available from API-Sports game payload",
+          awayPitcher ? "away probable starter available from game payload" : "away probable starter not available from API-Sports game payload",
+          "individual pitcher-stat endpoint not called until confirmed available and quota-safe",
+        ],
+      };
+
       const present = {
-        game: game.ok && Array.isArray(game.data?.response) && game.data.response.length > 0,
+        game: game.ok && gameResponse.length > 0,
         odds: odds.ok && Array.isArray(odds.data?.response) && odds.data.response.length > 0,
         homeStats: homeStats.ok && !!homeStats.data?.response,
         awayStats: awayStats.ok && !!awayStats.data?.response,
         homeInjuries: homeInjuries.ok && Array.isArray(homeInjuries.data?.response),
         awayInjuries: awayInjuries.ok && Array.isArray(awayInjuries.data?.response),
         h2h: h2h.ok && Array.isArray(h2h.data?.response),
+        pitcherContext: pitching.startersConfirmed,
       };
 
       const score = Object.values(present).filter(Boolean).length;
-      const grade = score >= 6 ? "A" : score >= 4 ? "B" : score >= 2 ? "C" : "D";
+      const grade = score >= 7 ? "A" : score >= 5 ? "B" : score >= 3 ? "C" : "D";
 
       res.json({
         gameId,
@@ -132,9 +159,10 @@ jobs:
             present.homeStats && present.awayStats ? "both team stat profiles available" : "one or both team stat profiles missing",
             present.homeInjuries && present.awayInjuries ? "injury feeds checked" : "injury feed missing",
             present.h2h ? "head-to-head context available" : "head-to-head context missing",
+            present.pitcherContext ? "probable starting pitchers available" : "probable starting pitchers missing; downgrade MLB confidence",
           ],
         },
-        game: game.ok ? game.data?.response || [] : [],
+        game: gameResponse,
         odds: odds.ok ? odds.data?.response || [] : [],
         teams: {
           home: {
@@ -148,6 +176,7 @@ jobs:
             injuries: awayInjuries.ok ? awayInjuries.data?.response || [] : [],
           },
         },
+        pitching,
         h2h: h2h.ok ? h2h.data?.response || [] : [],
         sourceStatus: { game, odds, homeStats, awayStats, homeInjuries, awayInjuries, h2h },
       });
@@ -155,94 +184,95 @@ jobs:
       console.error("[API-Sports MLB Context] Error:", error.response?.data || error.message);
       res.status(error.response?.status || 500).json(error.response?.data || { error: error.message });
     }
-  });`;
+  });'''
 
-          insertBefore(
-            'server.ts',
-            '  app.get("/api/mlb/:endpoint*", authenticate, async (req, res) => {',
-            mlbContextRoute,
-            'MLB game-context backend route'
-          );
+          insert_before(
+              'server.ts',
+              '  app.get("/api/mlb/:endpoint*", authenticate, async (req, res) => {',
+              mlb_context_route,
+              'MLB game-context backend route with pitcher context'
+          )
 
-          const apiSportsMlbPath = 'src/services/apiSportsMlb.ts';
-          let apiSportsMlb = fs.readFileSync(apiSportsMlbPath, 'utf8');
-          if (!apiSportsMlb.includes('export type MlbGameContext')) {
-            apiSportsMlb = apiSportsMlb.replace(
-              `export type ApiError = {\n  message: string;\n  status?: number;\n  details?: unknown;\n};`,
-              `export type ApiError = {\n  message: string;\n  status?: number;\n  details?: unknown;\n};\n\nexport type MlbGameContext = {\n  gameId: string;\n  season: string;\n  homeTeamId: string;\n  awayTeamId: string;\n  fetchedAt: string;\n  dataQuality: {\n    grade: \"A\" | \"B\" | \"C\" | \"D\";\n    score: number;\n    maxScore: number;\n    present: Record<string, boolean>;\n    notes: string[];\n  };\n  game: any[];\n  odds: any[];\n  teams: {\n    home: { id: string; statistics: any; injuries: any[] };\n    away: { id: string; statistics: any; injuries: any[] };\n  };\n  h2h: any[];\n  sourceStatus: Record<string, any>;\n};`
-            );
-          }
+          api_path = 'src/services/apiSportsMlb.ts'
+          api = read(api_path)
+          if 'export type MlbGameContext' not in api:
+              api = api.replace(
+                  "export type ApiError = {\n  message: string;\n  status?: number;\n  details?: unknown;\n};",
+                  "export type ApiError = {\n  message: string;\n  status?: number;\n  details?: unknown;\n};\n\nexport type MlbGameContext = {\n  gameId: string;\n  season: string;\n  homeTeamId: string;\n  awayTeamId: string;\n  fetchedAt: string;\n  dataQuality: {\n    grade: \"A\" | \"B\" | \"C\" | \"D\";\n    score: number;\n    maxScore: number;\n    present: Record<string, boolean>;\n    notes: string[];\n  };\n  game: any[];\n  odds: any[];\n  teams: {\n    home: { id: string; statistics: any; injuries: any[] };\n    away: { id: string; statistics: any; injuries: any[] };\n  };\n  pitching: {\n    probableStarters: { home: any; away: any };\n    startersConfirmed: boolean;\n    notes: string[];\n  };\n  h2h: any[];\n  sourceStatus: Record<string, any>;\n};"
+              )
 
-          if (!apiSportsMlb.includes('async getGameContext(filters')) {
-            apiSportsMlb = apiSportsMlb.replace(
-              `  async getStandings(season: string): Promise<any[]> {`,
-              `  async getGameContext(filters: {\n    gameId: number | string;\n    season: number | string;\n    homeTeamId: number | string;\n    awayTeamId: number | string;\n  }): Promise<MlbGameContext | null> {\n    try {\n      const headers = await this.getHeaders();\n      const response = await axios.get(`${this.baseUrl}/game-context`, {\n        params: filters,\n        headers,\n      });\n\n      return response.data || null;\n    } catch (error) {\n      console.error(\"[API-Sports MLB] Error fetching game context:\", error);\n      return null;\n    }\n  }\n\n  async getStandings(season: string): Promise<any[]> {`
-            );
-          }
-          write(apiSportsMlbPath, apiSportsMlb);
+          if 'async getGameContext(filters' not in api:
+              api = api.replace(
+                  "  async getStandings(season: string): Promise<any[]> {",
+                  "  async getGameContext(filters: {\n    gameId: number | string;\n    season: number | string;\n    homeTeamId: number | string;\n    awayTeamId: number | string;\n  }): Promise<MlbGameContext | null> {\n    try {\n      const headers = await this.getHeaders();\n      const response = await axios.get(`${this.baseUrl}/game-context`, {\n        params: filters,\n        headers,\n      });\n\n      return response.data || null;\n    } catch (error) {\n      console.error(\"[API-Sports MLB] Error fetching game context:\", error);\n      return null;\n    }\n  }\n\n  async getStandings(season: string): Promise<any[]> {"
+              )
+          write(api_path, api)
 
-          replaceOnce(
-            'src/services/gemini.ts',
-            `  private calculateEdgeModel(game: Game): EdgeModelResult {`,
-            `  private async enrichMlbGame(game: Game, date: string): Promise<Game> {\n    if (game.league !== \"MLB\" || !game.apiSportsGameId || !game.apiSportsHomeTeamId || !game.apiSportsAwayTeamId) {\n      return game;\n    }\n\n    const season = new Date(date || game.date || new Date().toISOString()).getFullYear();\n    const context = await apiSportsMlbService.getGameContext({\n      gameId: game.apiSportsGameId,\n      season,\n      homeTeamId: game.apiSportsHomeTeamId,\n      awayTeamId: game.apiSportsAwayTeamId,\n    });\n\n    if (!context) return game;\n\n    return {\n      ...game,\n      mlbContext: context,\n    } as Game & { mlbContext: any };\n  }\n\n  private calculateEdgeModel(game: Game): EdgeModelResult {`,
-            'Add MLB game enrichment helper'
-          );
+          replace_once(
+              'src/services/gemini.ts',
+              "  private calculateEdgeModel(game: Game): EdgeModelResult {",
+              "  private async enrichMlbGame(game: Game, date: string): Promise<Game> {\n    if (game.league !== \"MLB\" || !game.apiSportsGameId || !game.apiSportsHomeTeamId || !game.apiSportsAwayTeamId) {\n      return game;\n    }\n\n    const season = new Date(date || game.date || new Date().toISOString()).getFullYear();\n    const context = await apiSportsMlbService.getGameContext({\n      gameId: game.apiSportsGameId,\n      season,\n      homeTeamId: game.apiSportsHomeTeamId,\n      awayTeamId: game.apiSportsAwayTeamId,\n    });\n\n    if (!context) return game;\n\n    return {\n      ...game,\n      mlbContext: context,\n    } as Game & { mlbContext: any };\n  }\n\n  private calculateEdgeModel(game: Game): EdgeModelResult {",
+              'Add MLB game enrichment helper'
+          )
 
-          replaceOnce(
-            'src/services/gemini.ts',
-            `    let homeProbability = 0.5;\n    const dataQualityReasons: string[] = [];`,
-            `    let homeProbability = 0.5;\n    const dataQualityReasons: string[] = [];\n    const mlbContext = (game as any).mlbContext;`,
-            'Expose MLB context to edge model'
-          );
+          replace_once(
+              'src/services/gemini.ts',
+              "    let homeProbability = 0.5;\n    const dataQualityReasons: string[] = [];",
+              "    let homeProbability = 0.5;\n    const dataQualityReasons: string[] = [];\n    const mlbContext = (game as any).mlbContext;",
+              'Expose MLB context to edge model'
+          )
 
-          replaceOnce(
-            'src/services/gemini.ts',
-            `    if (game.marketExpectations?.homeWinProb !== undefined && game.marketExpectations?.awayWinProb !== undefined) {`,
-            `    if (game.league === \"MLB\" && mlbContext?.dataQuality) {\n      dataQualityReasons.push(...(mlbContext.dataQuality.notes || []).slice(0, 5));\n      if (mlbContext.dataQuality.grade === \"A\") homeProbability += 0.005;\n      if (mlbContext.dataQuality.grade === \"D\") homeProbability = homeProbability * 0.85 + 0.5 * 0.15;\n    }\n\n    if (game.marketExpectations?.homeWinProb !== undefined && game.marketExpectations?.awayWinProb !== undefined) {`,
-            'Apply MLB context to model quality'
-          );
+          replace_once(
+              'src/services/gemini.ts',
+              "    if (game.marketExpectations?.homeWinProb !== undefined && game.marketExpectations?.awayWinProb !== undefined) {",
+              "    if (game.league === \"MLB\" && mlbContext?.dataQuality) {\n      dataQualityReasons.push(...(mlbContext.dataQuality.notes || []).slice(0, 6));\n      if (mlbContext.pitching?.startersConfirmed) {\n        dataQualityReasons.push(\"probable starting pitcher context available\");\n        homeProbability += 0.004;\n      } else {\n        dataQualityReasons.push(\"probable starting pitchers missing; confidence capped\");\n        homeProbability = homeProbability * 0.9 + 0.5 * 0.1;\n      }\n      if (mlbContext.dataQuality.grade === \"A\") homeProbability += 0.005;\n      if (mlbContext.dataQuality.grade === \"D\") homeProbability = homeProbability * 0.85 + 0.5 * 0.15;\n    }\n\n    if (game.marketExpectations?.homeWinProb !== undefined && game.marketExpectations?.awayWinProb !== undefined) {",
+              'Apply MLB context and pitcher availability to model quality'
+          )
 
-          replaceOnce(
-            'src/services/gemini.ts',
-            `      !!game.allSources?.length,\n    ].filter(Boolean).length;`,
-            `      !!game.allSources?.length,\n      game.league === \"MLB\" && mlbContext?.dataQuality?.grade && mlbContext.dataQuality.grade !== \"D\",\n    ].filter(Boolean).length;`,
-            'Count MLB context in data quality'
-          );
+          replace_once(
+              'src/services/gemini.ts',
+              "      !!game.allSources?.length,\n    ].filter(Boolean).length;",
+              "      !!game.allSources?.length,\n      game.league === \"MLB\" && mlbContext?.dataQuality?.grade && mlbContext.dataQuality.grade !== \"D\",\n      game.league === \"MLB\" && !!mlbContext?.pitching?.startersConfirmed,\n    ].filter(Boolean).length;",
+              'Count MLB context and pitcher availability in data quality'
+          )
 
-          replaceOnce(
-            'src/services/gemini.ts',
-            `    const edgeModel = this.calculateEdgeModel(game);\n    const predictedHome = edgeModel.modelProbability >= 0.5;\n    const predictedWinner = predictedHome ? game.homeTeam : game.awayTeam;`,
-            `    const analysisGame = await this.enrichMlbGame(game, date);\n    const edgeModel = this.calculateEdgeModel(analysisGame);\n    const predictedHome = edgeModel.modelProbability >= 0.5;\n    const predictedWinner = predictedHome ? analysisGame.homeTeam : analysisGame.awayTeam;`,
-            'Use enriched MLB game before edge model'
-          );
+          replace_once(
+              'src/services/gemini.ts',
+              "    const edgeModel = this.calculateEdgeModel(game);\n    const predictedHome = edgeModel.modelProbability >= 0.5;\n    const predictedWinner = predictedHome ? game.homeTeam : game.awayTeam;",
+              "    const analysisGame = await this.enrichMlbGame(game, date);\n    const edgeModel = this.calculateEdgeModel(analysisGame);\n    const predictedHome = edgeModel.modelProbability >= 0.5;\n    const predictedWinner = predictedHome ? analysisGame.homeTeam : analysisGame.awayTeam;",
+              'Use enriched MLB game before edge model'
+          )
 
-          replaceOnce(
-            'src/services/gemini.ts',
-            `${JSON.stringify(game, null, 2)}`,
-            `${JSON.stringify(analysisGame, null, 2)}`,
-            'Send enriched game to OpenAI prompt'
-          );
+          replace_once(
+              'src/services/gemini.ts',
+              "${JSON.stringify(game, null, 2)}",
+              "${JSON.stringify(analysisGame, null, 2)}",
+              'Send enriched game to OpenAI prompt'
+          )
 
-          const replacements = [
-            ['game.id', 'analysisGame.id'],
-            ['game.league', 'analysisGame.league'],
-            ['game.homeTeam', 'analysisGame.homeTeam'],
-            ['game.awayTeam', 'analysisGame.awayTeam'],
-            ['game.kalshiExpectations', 'analysisGame.kalshiExpectations'],
-            ['game.kalshiOdds', 'analysisGame.kalshiOdds'],
-            ['game.marketExpectations', 'analysisGame.marketExpectations'],
-            ['game.apiSportsGameId', 'analysisGame.apiSportsGameId'],
-          ];
-          let gemini = fs.readFileSync('src/services/gemini.ts', 'utf8');
-          const fnStart = gemini.indexOf('  async analyzeMatchup(');
-          const fnEnd = gemini.indexOf('  async batchAnalyzeMatchups(', fnStart);
-          let before = gemini.slice(0, fnStart);
-          let fn = gemini.slice(fnStart, fnEnd);
-          let after = gemini.slice(fnEnd);
-          for (const [from, to] of replacements) fn = fn.replaceAll(from, to);
-          fn = fn.replaceAll('Game:\n${JSON.stringify(analysisGame, null, 2)}', 'Game with MLB context when available:\n${JSON.stringify(analysisGame, null, 2)}');
-          write('src/services/gemini.ts', before + fn + after);
-          NODE
+          gemini_path = 'src/services/gemini.ts'
+          gemini = read(gemini_path)
+          fn_start = gemini.index('  async analyzeMatchup(')
+          fn_end = gemini.index('  async batchAnalyzeMatchups(', fn_start)
+          if fn_start == -1 or fn_end == -1:
+              raise SystemExit('analyzeMatchup function boundaries not found')
+          before = gemini[:fn_start]
+          fn = gemini[fn_start:fn_end]
+          after = gemini[fn_end:]
+          for old, new in [
+              ('game.id', 'analysisGame.id'),
+              ('game.league', 'analysisGame.league'),
+              ('game.homeTeam', 'analysisGame.homeTeam'),
+              ('game.awayTeam', 'analysisGame.awayTeam'),
+              ('game.kalshiExpectations', 'analysisGame.kalshiExpectations'),
+              ('game.kalshiOdds', 'analysisGame.kalshiOdds'),
+              ('game.marketExpectations', 'analysisGame.marketExpectations'),
+              ('game.apiSportsGameId', 'analysisGame.apiSportsGameId'),
+          ]:
+              fn = fn.replace(old, new)
+          fn = fn.replace('Game:\n${JSON.stringify(analysisGame, null, 2)}', 'Game with MLB context and pitcher context when available:\n${JSON.stringify(analysisGame, null, 2)}')
+          write(gemini_path, before + fn + after)
+          PY
 
       - name: Validate patch
         run: |
@@ -250,6 +280,7 @@ jobs:
           test -f src/services/apiSportsMlb.ts
           test -f src/services/gemini.ts
           grep -q "/api/mlb/game-context" server.ts
+          grep -q "pitching" server.ts
           grep -q "getGameContext" src/services/apiSportsMlb.ts
           grep -q "enrichMlbGame" src/services/gemini.ts
           git diff --check
@@ -262,6 +293,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Improve MLB API context aggregation"
+            git commit -m "Improve MLB API context aggregation with pitcher focus"
             git push
           fi
