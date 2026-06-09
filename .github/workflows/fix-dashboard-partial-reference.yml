@@ -1,0 +1,36 @@
+name: Fix dashboard partial reference
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/scripts/fix_dashboard_partial_reference.py"
+      - ".github/workflows/fix-dashboard-partial-reference.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply fix
+        run: python3 .github/scripts/fix_dashboard_partial_reference.py
+
+      - name: Commit app fix
+        run: |
+          git config user.name "jstogner-creator"
+          git config user.email "jstogner@risenetworkcabling.com"
+          git add src/pages/Dashboard.tsx
+          if git diff --cached --quiet; then
+            echo "No app changes to commit."
+          else
+            git commit -m "Fix dashboard partial analysis reference"
+            git push
+          fi
