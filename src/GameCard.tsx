@@ -675,7 +675,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                          "AI Analysis Engine"}
                       </span>
                       <div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">
-                        Confidence Score: {prediction.confidence}/10
+                        Confidence Score: {Number(prediction.confidence || 0).toFixed(1)}/10
                       </div>
                     </div>
                   </div>
@@ -877,7 +877,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                             <div className="text-3xl font-mono font-black text-amber-400 tracking-tighter mb-1 drop-shadow-[0_0_10px_rgba(251,191,36,0.2)]">
                               {prediction.projectedTotal}
                             </div>
-                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Total Game Points</div>
+                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{game.league === 'MLB' ? 'Total Runs' : 'Total Game Points'}</div>
                           </div>
                         </div>
                         
@@ -1013,8 +1013,8 @@ export const GameCard: React.FC<GameCardProps> = ({
                       <div className="p-1 bg-indigo-500/20 rounded">
                         <Zap className="w-3.5 h-3.5 fill-current" />
                       </div>
-                      Key Advantages
-                      <span title="Key factors identified by the AI that may influence the game outcome.">
+                      Decision Drivers
+                      <span title="Primary factors behind the model decision. Missing data and risks are shown separately in QA/risk notes.">
                         <Info className="w-3 h-3 text-indigo-500/50 cursor-help" />
                       </span>
                     </h4>
@@ -1371,7 +1371,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                       prediction.qaStatus === 'adjusted' ? "text-amber-400" : "text-red-400"
                     )}>
                       <AlertTriangle className="w-3.5 h-3.5 mr-2" />
-                      QA {prediction.qaStatus === 'adjusted' ? 'Adjusted' : 'Flagged'}
+                      Model QA {prediction.qaStatus === 'adjusted' ? 'Adjusted' : 'Flagged'}
                     </h4>
                     <p className="text-xs text-slate-300 leading-relaxed">
                       {prediction.qaNotes}
@@ -1381,7 +1381,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                 {prediction.qaStatus === 'verified' && (
                   <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-4 flex items-center mb-4">
                     <CheckCircle className="w-4 h-4 text-emerald-500 mr-2" />
-                    <span className="text-xs text-emerald-400 font-black uppercase tracking-widest">Injuries & Lineups Verified</span>
+                    <span className="text-xs text-emerald-400 font-black uppercase tracking-widest">Model Inputs Verified</span>
                   </div>
                 )}
 

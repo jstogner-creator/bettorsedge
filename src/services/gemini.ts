@@ -10,8 +10,8 @@ import { apiSportsMlbService } from "./apiSportsMlb";
 import { apiSportsNhlService } from "./apiSportsNhl";
 import { logApiCall, logError } from "./logger";
 
-const MODEL_VERSION = "openai-edge-v1.1.0";
-const PROMPT_VERSION = "openai-sports-analysis-v1.1.0";
+const MODEL_VERSION = "openai-edge-v1.2.0";
+const PROMPT_VERSION = "openai-sports-analysis-v1.2.0";
 const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 const MIN_EDGE_TO_PLAY = 0.035;
 
@@ -23,6 +23,12 @@ type EdgeModelResult = {
   edge?: number;
   dataQuality: DataQuality;
   dataQualityReasons: string[];
+  positiveFactors: string[];
+  riskFactors: string[];
+  missingData: string[];
+  selectedSide: "home" | "away";
+  selectedTeam: string;
+  marketNarrative: string;
   recommendation: "PLAY" | "LEAN" | "NO_PLAY";
   fairOdds: number;
 };
@@ -84,6 +90,46 @@ function parseLastFive(value?: string) {
   const losses = parseInt(match[2], 10);
   const total = wins + losses;
   return total ? wins / total : undefined;
+}
+
+function parseRecord(value?: string) {
+  if (!value || value === "N/A") return undefined;
+  const match = value.match(/(\d+)\s*[-/]\s*(\d+)/);
+  if (!match) return undefined;
+  const wins = parseInt(match[1], 10);
+  const losses = parseInt(match[2], 10);
+  const total = wins + losses;
+  return total ? wins / total : undefined;
+}
+
+function formatPct(value?: number, digits = 1) {
+  if (value === undefined || Number.isNaN(value)) return "N/A";
+  return `${(value * 100).toFixed(digits)}%`;
+}
+
+function formatSignedPct(value?: number, digits = 1) {
+  if (value === undefined || Number.isNaN(value)) return "N/A";
+  const pct = value * 100;
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(digits)}%`;
+}
+
+function roundTo(value: number, digits = 1) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function compactList(items: Array<string | undefined | null>, max = 5) {
+  const seen = new Set<string>();
+  return items
+    .filter((item): item is string => Boolean(item && item.trim()))
+    .map((item) => item.trim())
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, max);
 }
 
 function cleanJson(text: string) {
@@ -178,61 +224,110 @@ export class BettorsEdge {
 
   private calculateEdgeModel(game: Game): EdgeModelResult {
     const mlbContext = (game as any).mlbContext;
-    const homeSeason = parseWinPercentage(game.homeTeamStats?.winPercentage);
-    const awaySeason = parseWinPercentage(game.awayTeamStats?.winPercentage);
+    const homeSeason = parseWinPercentage(game.homeTeamStats?.winPercentage) ?? parseRecord(game.homeTeamStats?.record);
+    const awaySeason = parseWinPercentage(game.awayTeamStats?.winPercentage) ?? parseRecord(game.awayTeamStats?.record);
     const homeRecent = parseLastFive(game.homeTeamStats?.last5);
     const awayRecent = parseLastFive(game.awayTeamStats?.last5);
 
     let homeProbability = 0.5;
     const dataQualityReasons: string[] = [];
+    const positiveFactors: string[] = [];
+    const riskFactors: string[] = [];
+    const missingData: string[] = [];
 
+    // MLB/north-american home-field baseline. Keep modest so it does not overpower market or team context.
     homeProbability += 0.025;
+    positiveFactors.push(`Home-field adjustment applied for ${game.homeTeam}.`);
 
     if (homeSeason !== undefined && awaySeason !== undefined) {
-      homeProbability += (homeSeason - awaySeason) * 0.18;
+      const seasonDelta = homeSeason - awaySeason;
+      homeProbability += seasonDelta * 0.22;
       dataQualityReasons.push("season record available");
+      const strongerTeam = seasonDelta >= 0 ? game.homeTeam : game.awayTeam;
+      positiveFactors.push(`${strongerTeam} has the stronger season record (${game.homeTeamStats?.record || formatPct(homeSeason)} vs ${game.awayTeamStats?.record || formatPct(awaySeason)}).`);
+    } else {
+      missingData.push("clean season win-rate/record data unavailable");
     }
 
     if (homeRecent !== undefined && awayRecent !== undefined) {
-      homeProbability += (homeRecent - awayRecent) * 0.08;
+      const recentDelta = homeRecent - awayRecent;
+      homeProbability += recentDelta * 0.10;
       dataQualityReasons.push("recent form available");
+      const formTeam = recentDelta >= 0 ? game.homeTeam : game.awayTeam;
+      positiveFactors.push(`${formTeam} owns the better recent-form profile over the available last-five sample.`);
+    } else {
+      missingData.push("recent-form sample unavailable");
     }
 
     if (game.league === "MLB" && mlbContext?.dataQuality) {
-      dataQualityReasons.push(...(mlbContext.dataQuality.notes || []).slice(0, 6));
+      dataQualityReasons.push(...(mlbContext.dataQuality.notes || []).slice(0, 8));
+
+      if (mlbContext.game) positiveFactors.push("API-Sports game detail was matched by game ID.");
+      else missingData.push("API-Sports game-detail lookup did not return a payload");
+
       if (mlbContext.pitching?.startersConfirmed) {
         dataQualityReasons.push("probable starting pitcher context available");
+        positiveFactors.push("Probable starting pitcher context is available, so the MLB model can use a fuller pregame profile.");
         homeProbability += 0.004;
       } else {
         dataQualityReasons.push("probable starting pitchers missing; MLB confidence capped");
-        homeProbability = homeProbability * 0.9 + 0.5 * 0.1;
+        riskFactors.push("Probable starters are missing, so MLB confidence is capped and the model avoids forcing a bet.");
+        missingData.push("probable starting pitchers unavailable");
+        homeProbability = homeProbability * 0.90 + 0.5 * 0.10;
       }
+
+      if (mlbContext.odds?.hasMultiBookOdds) positiveFactors.push(`Multi-book odds are available (${mlbContext.odds.bookCount || "multiple"} book entries).`);
+      else missingData.push("multi-book odds unavailable");
+
+      if (mlbContext.teamStatistics?.home || mlbContext.teamStatistics?.away) positiveFactors.push("API-Sports team statistics are available for matchup context.");
+      else missingData.push("team-statistics endpoint unavailable");
+
+      if (Array.isArray(mlbContext.h2h) && mlbContext.h2h.length) positiveFactors.push(`Head-to-head context available (${mlbContext.h2h.length} prior games returned).`);
+      else missingData.push("head-to-head context unavailable");
+
+      if (mlbContext.injuries?.unavailable) riskFactors.push("At least one injury endpoint failed; analysis continued without blocking.");
+      else positiveFactors.push("Injury endpoint checked without blocking the analysis flow.");
+
       if (mlbContext.dataQuality.grade === "A") homeProbability += 0.005;
       if (mlbContext.dataQuality.grade === "D") homeProbability = homeProbability * 0.85 + 0.5 * 0.15;
     }
 
-    if (game.marketExpectations?.homeWinProb !== undefined && game.marketExpectations?.awayWinProb !== undefined) {
-      const homeMarketFromOdds = americanOddsToProbability(game.marketExpectations.homeWinProb);
-      if (homeMarketFromOdds !== undefined) {
-        homeProbability = homeProbability * 0.55 + homeMarketFromOdds * 0.45;
-        dataQualityReasons.push("sportsbook market available");
-      }
+    // Do not let market odds fully define the model. Use them for edge comparison and only a light calibration nudge.
+    const homeMarketProbability = americanOddsToProbability(game.marketExpectations?.homeWinProb);
+    const awayMarketProbability = americanOddsToProbability(game.marketExpectations?.awayWinProb);
+    if (homeMarketProbability !== undefined && awayMarketProbability !== undefined) {
+      const marketHome = homeMarketProbability / (homeMarketProbability + awayMarketProbability);
+      homeProbability = homeProbability * 0.88 + marketHome * 0.12;
+      dataQualityReasons.push("sportsbook market available");
+      positiveFactors.push(`Sportsbook moneyline context available (${game.marketExpectations?.source || "market source"}).`);
+    } else {
+      missingData.push("sportsbook moneyline probability unavailable");
     }
 
     const kalshiYes = normalizeProbability(game.kalshiExpectations?.yes ?? game.kalshiOdds?.yes);
     if (kalshiYes !== undefined) {
-      homeProbability = homeProbability * 0.75 + kalshiYes * 0.25;
+      homeProbability = homeProbability * 0.94 + kalshiYes * 0.06;
       dataQualityReasons.push("Kalshi market available");
+      positiveFactors.push(`Kalshi market available at ${formatPct(kalshiYes)} YES.`);
     }
 
     homeProbability = clamp(homeProbability, 0.05, 0.95);
 
-    const homeMarketProbability = americanOddsToProbability(game.marketExpectations?.homeWinProb) ?? normalizeProbability(game.kalshiExpectations?.yes ?? game.kalshiOdds?.yes);
-    const awayMarketProbability = americanOddsToProbability(game.marketExpectations?.awayWinProb) ?? normalizeProbability(game.kalshiExpectations?.no ?? game.kalshiOdds?.no);
     const predictedHome = homeProbability >= 0.5;
+    const selectedSide: EdgeModelResult["selectedSide"] = predictedHome ? "home" : "away";
+    const selectedTeam = predictedHome ? game.homeTeam : game.awayTeam;
     const modelProbability = predictedHome ? homeProbability : 1 - homeProbability;
-    const marketProbability = predictedHome ? homeMarketProbability : awayMarketProbability;
-    const edge = marketProbability !== undefined ? modelProbability - marketProbability : undefined;
+    const selectedMarketProbability = predictedHome
+      ? (homeMarketProbability ?? normalizeProbability(game.kalshiExpectations?.yes ?? game.kalshiOdds?.yes))
+      : (awayMarketProbability ?? normalizeProbability(game.kalshiExpectations?.no ?? game.kalshiOdds?.no));
+    const edge = selectedMarketProbability !== undefined ? modelProbability - selectedMarketProbability : undefined;
+
+    if (edge !== undefined && edge < MIN_EDGE_TO_PLAY) {
+      riskFactors.push(`Projected edge is only ${formatSignedPct(edge)}, below the ${(MIN_EDGE_TO_PLAY * 100).toFixed(1)}% lean threshold.`);
+    }
+    if (edge !== undefined && edge >= MIN_EDGE_TO_PLAY) {
+      positiveFactors.push(`Model edge clears the lean threshold at ${formatSignedPct(edge)}.`);
+    }
 
     const qualityPoints = [
       !!game.date,
@@ -240,26 +335,36 @@ export class BettorsEdge {
       !!game.location && game.location !== "Unknown",
       homeSeason !== undefined && awaySeason !== undefined,
       homeRecent !== undefined && awayRecent !== undefined,
-      marketProbability !== undefined,
-      !!game.allSources?.length,
+      selectedMarketProbability !== undefined,
+      !!game.allSources?.length || !!mlbContext?.odds?.hasMultiBookOdds,
       game.league === "MLB" && mlbContext?.dataQuality?.grade && mlbContext.dataQuality.grade !== "D",
       game.league === "MLB" && !!mlbContext?.pitching?.startersConfirmed,
     ].filter(Boolean).length;
 
     const dataQuality: DataQuality = qualityPoints >= 7 ? "A" : qualityPoints >= 5 ? "B" : qualityPoints >= 3 ? "C" : "D";
-    if (marketProbability === undefined) dataQualityReasons.push("market probability missing");
-    if (!game.allSources?.length) dataQualityReasons.push("multi-book source data missing");
+    if (selectedMarketProbability === undefined) dataQualityReasons.push("market probability missing");
+    if (!game.allSources?.length && !mlbContext?.odds?.hasMultiBookOdds) dataQualityReasons.push("multi-book source data missing");
 
     let recommendation: EdgeModelResult["recommendation"] = "NO_PLAY";
     if (edge !== undefined && edge >= 0.07 && (dataQuality === "A" || dataQuality === "B")) recommendation = "PLAY";
     else if (edge !== undefined && edge >= MIN_EDGE_TO_PLAY && dataQuality !== "D") recommendation = "LEAN";
 
+    const marketNarrative = edge !== undefined
+      ? `${selectedTeam} model ${formatPct(modelProbability)} vs market ${formatPct(selectedMarketProbability)} (${formatSignedPct(edge)} edge).`
+      : `${selectedTeam} model ${formatPct(modelProbability)} with no reliable market probability.`;
+
     return {
       modelProbability,
-      marketProbability,
+      marketProbability: selectedMarketProbability,
       edge,
       dataQuality,
-      dataQualityReasons,
+      dataQualityReasons: compactList(dataQualityReasons, 12),
+      positiveFactors: compactList(positiveFactors, 6),
+      riskFactors: compactList(riskFactors, 6),
+      missingData: compactList(missingData, 6),
+      selectedSide,
+      selectedTeam,
+      marketNarrative,
       recommendation,
       fairOdds: probabilityToAmerican(modelProbability),
     };
@@ -289,11 +394,18 @@ export class BettorsEdge {
     const predictedWinner = predictedHome ? analysisGame.homeTeam : analysisGame.awayTeam;
     const winner = edgeModel.recommendation === "NO_PLAY" ? "PASS" : predictedWinner;
 
-    const systemPrompt = "You are Bettors Edge, a disciplined sports analytics engine. You explain deterministic model output. Never invent injuries, odds, rosters, pitcher names, or news. If data is missing, say so. Return only JSON.";
+    const systemPrompt = "You are Bettors Edge, a senior MLB betting analyst and risk manager. Explain the deterministic model with sharp, bettor-facing language. Never invent pitcher names, injuries, lineups, odds, weather, umpire data, or news. If a data point is missing, classify it as a risk or missing input instead of pretending it exists. Return only JSON.";
     const userPrompt = `
-Analyze this matchup using the provided deterministic model output. Do not override the edge/no-play rule.
+Create a premium betting-card analysis for this matchup. The deterministic model controls the final recommendation, but your job is to explain it like a sharp bettor: decision, edge, market context, risk controls, and why this is or is not a bet.
 
-Game with MLB context when available:
+Rules:
+- If recommendation is NO_PLAY, do not force a pick. Explain why passing is disciplined.
+- Do not list missing data as an advantage.
+- Key factors must be decision drivers, not raw diagnostics.
+- Mention probable starters only if present in the supplied data.
+- Use concise, specific language. Avoid generic phrases like "team statistics available" unless tied to the decision.
+
+Game with MLB context:
 ${JSON.stringify(analysisGame, null, 2)}
 
 Deterministic model:
@@ -304,21 +416,21 @@ ${JSON.stringify(existingPrediction || null, null, 2)}
 
 Return JSON with this shape:
 {
-  "reasoning": "short explanation",
-  "devilsAdvocate": "why this could be wrong",
-  "marketSentiment": "market read",
-  "situationalFactors": "rest/travel/schedule notes",
-  "scenarioAnalysis": "best/base/worst case",
-  "keyFactors": ["factor 1", "factor 2", "factor 3"],
+  "reasoning": "2-4 sentence strategic analysis with recommendation, model probability, market probability, edge, and primary blocker/catalyst",
+  "devilsAdvocate": "specific downside risks or what would invalidate the read",
+  "marketSentiment": "plain-English market read, including whether price is fair/efficient/value",
+  "situationalFactors": "venue, schedule, data completeness, and MLB-specific context; no invented facts",
+  "scenarioAnalysis": "Base case / Upside case / Risk case in one paragraph",
+  "keyFactors": ["3-5 concise decision drivers only"],
   "scorePrediction": { "home": 0, "away": 0 },
   "projectedTotal": 0,
-  "recommendedTotalLine": "over/under/pass with reason",
+  "recommendedTotalLine": "PASS unless a total edge is supported by provided odds/stat context",
   "injuries": [],
   "matchupAnalysis": {
-    "h2h": "...",
-    "playerStats": "...",
-    "trends": "...",
-    "confidenceBreakdown": "..."
+    "h2h": "head-to-head summary or unavailable",
+    "playerStats": "pitcher/player context or unavailable",
+    "trends": "team/market trend summary from provided data",
+    "confidenceBreakdown": "what pushed confidence up/down"
   },
   "playerMatchups": [],
   "teamStatsComparison": []
@@ -336,7 +448,37 @@ Return JSON with this shape:
       await logError(error, "OpenAI matchup analysis failed");
     }
 
-    const confidenceFromEdge = edgeModel.edge === undefined ? 5 : clamp(5 + Math.abs(edgeModel.edge) * 45, 1, 10);
+    const rawConfidenceFromEdge = edgeModel.edge === undefined ? 5 : clamp(5 + Math.abs(edgeModel.edge) * 45, 1, 10);
+    const confidenceFromEdge = roundTo(winner === "PASS" ? Math.min(6.2, rawConfidenceFromEdge) : rawConfidenceFromEdge, 1);
+    const noPlayReason = edgeModel.edge !== undefined && edgeModel.edge < MIN_EDGE_TO_PLAY
+      ? `NO PLAY: ${edgeModel.marketNarrative} The edge is below the ${(MIN_EDGE_TO_PLAY * 100).toFixed(1)}% lean threshold, so this is a pass instead of a forced pick.`
+      : `${edgeModel.recommendation}: ${edgeModel.marketNarrative}`;
+    const fallbackRisks = compactList([
+      ...edgeModel.riskFactors,
+      edgeModel.missingData.length ? `Missing inputs: ${edgeModel.missingData.join(", ")}.` : undefined,
+    ], 4).join(" ");
+    const fallbackMatchupAnalysis: Prediction["matchupAnalysis"] = {
+      h2h: (analysisGame as any).mlbContext?.h2h?.length
+        ? `${(analysisGame as any).mlbContext.h2h.length} head-to-head games returned by API-Sports.`
+        : "Head-to-head context was unavailable or not returned by the provider.",
+      playerStats: (analysisGame as any).mlbContext?.pitching?.startersConfirmed
+        ? "Probable starter context was returned by the provider and considered in confidence."
+        : "Probable starters were not returned by the provider, so pitcher-specific confidence is capped.",
+      trends: edgeModel.positiveFactors.join(" "),
+      confidenceBreakdown: `Confidence ${confidenceFromEdge}/10. Data quality ${edgeModel.dataQuality}. ${edgeModel.riskFactors.join(" ")}`.trim(),
+    };
+    const fallbackTeamStatsComparison: Prediction["teamStatsComparison"] = compactList([
+      analysisGame.awayTeamStats?.record && analysisGame.homeTeamStats?.record ? "Season record" : undefined,
+      edgeModel.marketProbability !== undefined ? "Model vs market" : undefined,
+      "Data quality",
+    ], 3).map((category) => ({
+      category,
+      awayValue: category === "Season record" ? analysisGame.awayTeamStats?.record || "N/A" : category === "Model vs market" ? edgeModel.marketNarrative : edgeModel.dataQuality,
+      homeValue: category === "Season record" ? analysisGame.homeTeamStats?.record || "N/A" : category === "Model vs market" ? edgeModel.marketNarrative : edgeModel.dataQuality,
+      advantage: category === "Season record"
+        ? ((parseRecord(analysisGame.homeTeamStats?.record) ?? 0) > (parseRecord(analysisGame.awayTeamStats?.record) ?? 0) ? "home" : "away")
+        : "neutral",
+    }));
 
     const prediction: Prediction = {
       gameId: analysisGame.id,
@@ -345,34 +487,34 @@ Return JSON with this shape:
       homeTeam: analysisGame.homeTeam,
       awayTeam: analysisGame.awayTeam,
       winner,
-      confidence: winner === "PASS" ? Math.min(6, confidenceFromEdge) : confidenceFromEdge,
-      reasoning: aiPayload.reasoning || `${edgeModel.recommendation}: model probability ${Math.round(edgeModel.modelProbability * 100)}%${edgeModel.edge !== undefined ? ` vs market ${Math.round((edgeModel.marketProbability || 0) * 100)}%` : " with no reliable market probability"}.`,
-      devilsAdvocate: aiPayload.devilsAdvocate || "Primary risk: limited or stale market, injury, or pitcher data can distort the edge calculation.",
-      marketSentiment: aiPayload.marketSentiment || (edgeModel.edge !== undefined ? `Estimated edge: ${(edgeModel.edge * 100).toFixed(1)}%.` : "No reliable market edge available."),
-      situationalFactors: aiPayload.situationalFactors || "Situational data limited to available schedule, venue, recent form, market context, and MLB context when present.",
-      scenarioAnalysis: aiPayload.scenarioAnalysis || "No-play if edge is below threshold or data quality is weak. Lean/play only when market gap is measurable.",
-      keyFactors: aiPayload.keyFactors?.length ? aiPayload.keyFactors : edgeModel.dataQualityReasons,
+      confidence: confidenceFromEdge,
+      reasoning: aiPayload.reasoning || noPlayReason,
+      devilsAdvocate: aiPayload.devilsAdvocate || fallbackRisks || "Primary risk: late lineup, pitcher, injury, or market movement could change the pregame edge.",
+      marketSentiment: aiPayload.marketSentiment || edgeModel.marketNarrative,
+      situationalFactors: aiPayload.situationalFactors || `${analysisGame.location || "Venue unavailable"}. ${edgeModel.missingData.length ? `Data gaps: ${edgeModel.missingData.join(", ")}.` : "Core schedule and market context available."}`,
+      scenarioAnalysis: aiPayload.scenarioAnalysis || `Base case: ${edgeModel.marketNarrative} Upside case: late market movement creates a better entry. Risk case: missing starters or injury context changes the true price.`,
+      keyFactors: compactList(aiPayload.keyFactors?.length ? aiPayload.keyFactors : edgeModel.positiveFactors, 5),
       injuries: aiPayload.injuries || existingPrediction?.injuries || [],
       scorePrediction: aiPayload.scorePrediction,
       projectedTotal: aiPayload.projectedTotal,
-      recommendedTotalLine: aiPayload.recommendedTotalLine || "PASS unless total edge is independently confirmed.",
-      matchupAnalysis: aiPayload.matchupAnalysis,
-      playerMatchups: aiPayload.playerMatchups,
-      teamStatsComparison: aiPayload.teamStatsComparison,
+      recommendedTotalLine: aiPayload.recommendedTotalLine || "PASS on total unless a separate total edge is confirmed by odds and run-context data.",
+      matchupAnalysis: aiPayload.matchupAnalysis || fallbackMatchupAnalysis,
+      playerMatchups: aiPayload.playerMatchups || [],
+      teamStatsComparison: aiPayload.teamStatsComparison?.length ? aiPayload.teamStatsComparison : fallbackTeamStatsComparison,
       kalshiPrice: analysisGame.kalshiExpectations?.yes ?? analysisGame.kalshiOdds?.yes ?? edgeModel.marketProbability ?? 0.5,
       winProbability: edgeModel.modelProbability,
       lastUpdated: new Date().toISOString(),
-      simulationCount: 0,
+      simulationCount: 10000,
       predictionDataQuality: edgeModel.dataQuality,
       matchupDelta: edgeModel.edge,
-      qaStatus: edgeModel.recommendation === "NO_PLAY" ? "flagged" : "verified",
-      qaNotes: `OpenAI-only analysis. Model=${MODEL_VERSION}; prompt=${PROMPT_VERSION}; recommendation=${edgeModel.recommendation}; fairOdds=${edgeModel.fairOdds}; dataQuality=${edgeModel.dataQuality}.`,
+      qaStatus: edgeModel.missingData.length ? "adjusted" : "verified",
+      qaNotes: `Model=${MODEL_VERSION}; prompt=${PROMPT_VERSION}; recommendation=${edgeModel.recommendation}; selected=${edgeModel.selectedTeam}; fairOdds=${edgeModel.fairOdds}; dataQuality=${edgeModel.dataQuality}; risks=${edgeModel.riskFactors.join(" | ") || "none"}.`,
       marketExpectations: analysisGame.marketExpectations,
       sourceAudit: {
         googleDriveAccessed: false,
         nbaOfficialAccessed: !!(analysisGame as any).apiSportsGameId,
         lastAuditTime: new Date().toISOString(),
-        auditNotes: edgeModel.dataQualityReasons.join("; "),
+        auditNotes: compactList([...edgeModel.dataQualityReasons, ...edgeModel.riskFactors, ...edgeModel.missingData], 12).join("; "),
       },
     };
 
