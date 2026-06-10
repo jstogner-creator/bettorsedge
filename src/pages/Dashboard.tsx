@@ -94,6 +94,17 @@ const PAYWALL_ONLY_BYPASS_EMAILS = [
   'nousiharatl82@gmail.com' // Also add here for redundancy
 ];
 
+const normalizeLeagueKey = (value: unknown, fallback = "") => {
+  if (typeof value === "string") return value.toUpperCase();
+  if (value && typeof value === "object") {
+    const leagueObj = value as { name?: unknown; code?: unknown; id?: unknown; sport?: unknown };
+    const candidate = leagueObj.code ?? leagueObj.name ?? leagueObj.sport ?? leagueObj.id;
+    if (candidate !== undefined && candidate !== null) return String(candidate).toUpperCase();
+  }
+  if (value !== undefined && value !== null) return String(value).toUpperCase();
+  return fallback.toUpperCase();
+};
+
 
 
 
@@ -1299,8 +1310,8 @@ const fetchGames = async (force: boolean = false) => {
       const filteredAiGames = aiGames.filter((g) => {
         if (!g.league) return true;
 
-        const gLeague = g.league.toUpperCase();
-        const currentTab = activeTab.toUpperCase();
+        const gLeague = normalizeLeagueKey(g.league, activeTab);
+        const currentTab = normalizeLeagueKey(activeTab);
 
         const isMatch =
           gLeague === currentTab ||
@@ -1616,8 +1627,8 @@ const fetchGames = async (force: boolean = false) => {
     console.log(`[Dashboard] getFilteredGames: Filtering ${games.length} games for ${activeTab}`);
     let filtered = games.filter(game => {
       if (!game.league) return true;
-      const gLeague = game.league.toUpperCase();
-      const currentTab = activeTab.toUpperCase();
+      const gLeague = normalizeLeagueKey(game.league, activeTab);
+      const currentTab = normalizeLeagueKey(activeTab);
       const isMatch = gLeague === currentTab || gLeague.includes(currentTab) || currentTab.includes(gLeague);
       
       if (!isMatch && Math.random() < 0.05) {
@@ -1785,8 +1796,8 @@ const fetchGames = async (force: boolean = false) => {
       ? filteredGames.filter(g => selectedGameIds.has(g.id))
       : games.filter(g => {
           if (!g.league) return false;
-          const gLeague = g.league.toUpperCase();
-          const tLeague = targetLeague.toUpperCase();
+          const gLeague = normalizeLeagueKey(g.league, targetLeague);
+          const tLeague = normalizeLeagueKey(targetLeague);
           return gLeague === tLeague || gLeague.includes(tLeague) || tLeague.includes(gLeague);
         });
 
@@ -1810,24 +1821,32 @@ const fetchGames = async (force: boolean = false) => {
       const dateStr = format(selectedDate, "yyyy-MM-dd");
       if (!silent) setToast({ message: `Checking for injury updates for ${targetLeague}...`, type: "info" });
       
-      const injuryUpdates = await bettorsEdge.checkInjuryUpdates(
-        targetLeague, 
-        dateStr, 
-        gamesToConsider.filter(g => g.league === targetLeague), 
-        () => cancelAnalysisRef.current[targetLeague],
-        (current, total) => {
-          setAnalysisProgressMap(prev => {
-            const leagueProgress = prev[targetLeague];
-            return {
-              ...prev,
-              [targetLeague]: leagueProgress ? {
-                ...leagueProgress,
-                message: `Checking ${targetLeague} injuries: ${current} of ${total} games...`
-              } : null
-            };
-          });
+      let injuryUpdates: Record<string, Prediction["injuries"]> = {};
+      try {
+        injuryUpdates = await bettorsEdge.checkInjuryUpdates(
+          targetLeague, 
+          dateStr, 
+          gamesToConsider.filter(g => g.league === targetLeague), 
+          () => cancelAnalysisRef.current[targetLeague],
+          (current, total) => {
+            setAnalysisProgressMap(prev => {
+              const leagueProgress = prev[targetLeague];
+              return {
+                ...prev,
+                [targetLeague]: leagueProgress ? {
+                  ...leagueProgress,
+                  message: `Checking ${targetLeague} injuries: ${current} of ${total} games...`
+                } : null
+              };
+            });
+          }
+        );
+      } catch (injuryError) {
+        console.warn(`[Dashboard] Injury check failed for ${targetLeague}; continuing analysis with remaining data.`, injuryError);
+        if (!silent) {
+          setToast({ message: `Injury check failed for ${targetLeague}; continuing analysis.`, type: "warning" });
         }
-      );
+      }
       
       // Update local state with injury updates
       setSavedPredictions(prev => {
@@ -2107,8 +2126,14 @@ const fetchGames = async (force: boolean = false) => {
         }
       }));
 
-      // 1. Check for injury updates first
-      const updates = await bettorsEdge.checkInjuryUpdates(targetLeague, dateStr, [game], () => cancelAnalysisRef.current[targetLeague]);
+      // 1. Check for injury updates first. Do not block re-analysis if this optional enrichment fails.
+      let updates: Record<string, Prediction["injuries"]> = {};
+      try {
+        updates = await bettorsEdge.checkInjuryUpdates(targetLeague, dateStr, [game], () => cancelAnalysisRef.current[targetLeague]);
+      } catch (injuryError) {
+        console.warn(`[Dashboard] Injury check failed for ${game.id}; continuing re-analysis.`, injuryError);
+        setToast({ message: `Injury check failed for ${game.awayTeam} vs ${game.homeTeam}; continuing re-analysis.`, type: "warning" });
+      }
       const db = getDb();
       
       // Case-insensitive lookup for game ID
@@ -2161,7 +2186,7 @@ const fetchGames = async (force: boolean = false) => {
 
       const docRef = doc(db, "predictions", game.id);
       const docSnap = await getDoc(docRef);
-      const existingPrediction = docSnap.exists() ? docSnap.data() : savedPredictions[game.id];
+      const existingPrediction = (docSnap.exists() ? docSnap.data() : savedPredictions[game.id]) as Prediction | undefined;
 
       let prediction = await bettorsEdge.analyzeMatchup(game, dateStr, existingPrediction, [], () => cancelAnalysisRef.current[targetLeague]);
       
@@ -2225,7 +2250,13 @@ const fetchGames = async (force: boolean = false) => {
         }
       }));
 
-      const updates = await bettorsEdge.checkInjuryUpdates(targetLeague, dateStr, last3Games, () => cancelAnalysisRef.current[targetLeague]);
+      let updates: Record<string, Prediction["injuries"]> = {};
+      try {
+        updates = await bettorsEdge.checkInjuryUpdates(targetLeague, dateStr, last3Games, () => cancelAnalysisRef.current[targetLeague]);
+      } catch (injuryError) {
+        console.warn(`[Dashboard] Injury check failed for last ${last3Games.length} games; continuing re-analysis.`, injuryError);
+        setToast({ message: `Injury check failed; continuing re-analysis for last ${last3Games.length} games.`, type: "warning" });
+      }
       const db = getDb();
       const batch = writeBatch(db);
       let updateCount = 0;
@@ -2286,7 +2317,7 @@ const fetchGames = async (force: boolean = false) => {
 
           const docRef = doc(db, "predictions", game.id);
           const docSnap = await getDoc(docRef);
-          const existingPrediction = docSnap.exists() ? docSnap.data() : savedPredictions[game.id];
+          const existingPrediction = (docSnap.exists() ? docSnap.data() : savedPredictions[game.id]) as Prediction | undefined;
 
           let prediction = await bettorsEdge.analyzeMatchup(game, dateStr, existingPrediction, [], () => cancelAnalysisRef.current[targetLeague]);
           

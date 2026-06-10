@@ -204,6 +204,74 @@ export class BettorsEdge {
     return { text, usage, provider: "openai" };
   }
 
+
+  private normalizeLeagueValue(value: unknown, fallback = "NBA"): Game["league"] {
+    const raw = (() => {
+      if (typeof value === "string") return value;
+      if (value && typeof value === "object") {
+        const obj = value as { name?: unknown; code?: unknown; sport?: unknown; id?: unknown };
+        return obj.code ?? obj.name ?? obj.sport ?? obj.id ?? fallback;
+      }
+      return value ?? fallback;
+    })();
+
+    const key = String(raw).toUpperCase();
+    if (key.includes("MLB") || key.includes("BASEBALL") || key === "1") return "MLB";
+    if (key.includes("NBA") || key.includes("BASKETBALL") || key === "12") return "NBA";
+    if (key.includes("NHL") || key.includes("HOCKEY") || key === "57") return "NHL";
+    if (key.includes("NFL") || key.includes("FOOTBALL")) return "NFL";
+    if (key.includes("NCAA")) return "NCAA";
+    return fallback.toUpperCase() as Game["league"];
+  }
+
+  private normalizeScheduleGame(raw: any, fallbackLeague: string, fallbackDate: string): Game | null {
+    if (!raw) return null;
+    const league = this.normalizeLeagueValue(raw.league, fallbackLeague);
+
+    const homeTeam = raw.homeTeam ?? raw.teams?.home?.name;
+    const awayTeam = raw.awayTeam ?? raw.teams?.away?.name;
+    if (!homeTeam || !awayTeam) return null;
+
+    const rawDate = raw.date ? String(raw.date) : fallbackDate;
+    const dateOnly = rawDate.includes("T") ? rawDate.split("T")[0] : rawDate;
+    const time = raw.time || (rawDate.includes("T") ? rawDate.split("T")[1]?.substring(0, 5) : undefined) || "TBD";
+    const statusCode = String(raw.status?.short ?? raw.status ?? "NS").toUpperCase();
+    const status: Game["status"] =
+      ["FT", "AOT", "FINAL", "FINISHED"].includes(statusCode) ? "finished" :
+      statusCode.startsWith("IN") || ["LIVE", "1Q", "2Q", "3Q", "4Q", "OT", "HT"].includes(statusCode) ? "live" :
+      "scheduled";
+
+    const venue = raw.location ?? raw.venue?.name ?? raw.venue;
+    const id = raw.id && raw.homeTeam && raw.awayTeam
+      ? String(raw.id)
+      : `${league}-${awayTeam}-${homeTeam}-${dateOnly}`.toLowerCase().replace(/[^a-z0-9]/g, "-");
+
+    return stripUndefined({
+      ...raw,
+      id,
+      league,
+      homeTeam,
+      awayTeam,
+      homeLogo: raw.homeLogo ?? raw.teams?.home?.logo,
+      awayLogo: raw.awayLogo ?? raw.teams?.away?.logo,
+      date: dateOnly,
+      time,
+      location: typeof venue === "string" ? venue : venue?.name ?? "Unknown",
+      status,
+      homeScore: raw.homeScore ?? raw.scores?.home?.total,
+      awayScore: raw.awayScore ?? raw.scores?.away?.total,
+      apiSportsGameId: raw.apiSportsGameId ?? raw.id,
+      apiSportsHomeTeamId: raw.apiSportsHomeTeamId ?? raw.teams?.home?.id,
+      apiSportsAwayTeamId: raw.apiSportsAwayTeamId ?? raw.teams?.away?.id,
+    }) as Game;
+  }
+
+  private normalizeScheduleGames(rawGames: any[], fallbackLeague: string, fallbackDate: string): Game[] {
+    return rawGames
+      .map((game) => this.normalizeScheduleGame(game, fallbackLeague, fallbackDate))
+      .filter((game): game is Game => Boolean(game));
+  }
+
   private async enrichMlbGame(game: Game, date: string): Promise<Game> {
     const g = game as any;
     if (game.league !== "MLB" || !g.apiSportsGameId || !g.apiSportsHomeTeamId || !g.apiSportsAwayTeamId) return game;
@@ -624,37 +692,64 @@ Return JSON with this shape:
 
   async getDailySchedule(league: string, date: string, force = false): Promise<Game[]> {
     const db = getDb();
-    const docId = `${league}-${date}`;
+    const normalizedLeague = this.normalizeLeagueValue(league, league);
+    const docId = `${normalizedLeague}-${date}`;
     const scheduleRef = doc(db, "schedules", docId);
+
     if (!force) {
       try {
         const cached = await getDoc(scheduleRef);
         if (cached.exists()) {
           const data = cached.data();
-          if (Array.isArray(data.games) && data.games.length) return data.games as Game[];
+          if (Array.isArray(data.games) && data.games.length) {
+            const normalizedCachedGames = this.normalizeScheduleGames(data.games, normalizedLeague, date);
+            if (normalizedCachedGames.length) {
+              // Self-heal old cached schedules where API-Sports stored league as an object.
+              await setDoc(scheduleRef, {
+                league: normalizedLeague,
+                date,
+                games: normalizedCachedGames,
+                lastUpdated: data.lastUpdated || new Date().toISOString(),
+                normalizedAt: new Date().toISOString(),
+                source: data.source || "cache-normalized",
+              }, { merge: true });
+              return normalizedCachedGames;
+            }
+          }
         }
       } catch (error) {
         console.warn("[Schedule] Cache read failed:", error);
       }
     }
+
     const dateObj = new Date(`${date}T12:00:00`);
-    let games: Game[] = [];
+    let rawGames: any[] = [];
     try {
-      if (league === "NBA") games = await apiSportsService.getGames(dateObj) as any;
-      else if (league === "MLB") games = await apiSportsMlbService.getGames(dateObj) as any;
-      else if (league === "NHL") games = await apiSportsNhlService.getGames(dateObj) as any;
+      if (normalizedLeague === "NBA") rawGames = await apiSportsService.getGames(dateObj) as any;
+      else if (normalizedLeague === "MLB") rawGames = await apiSportsMlbService.getGames(dateObj) as any;
+      else if (normalizedLeague === "NHL") rawGames = await apiSportsNhlService.getGames(dateObj) as any;
     } catch (error) {
-      console.warn(`[Schedule] API-Sports ${league} fetch failed:`, error);
+      console.warn(`[Schedule] API-Sports ${normalizedLeague} fetch failed:`, error);
     }
+
+    let games = this.normalizeScheduleGames(rawGames, normalizedLeague, date);
+
     if (!games.length) {
       try {
-        games = await espnService.getSchedule(league, dateObj);
+        games = this.normalizeScheduleGames(await espnService.getSchedule(normalizedLeague, dateObj), normalizedLeague, date);
       } catch (error) {
-        console.warn(`[Schedule] ESPN ${league} fetch failed:`, error);
+        console.warn(`[Schedule] ESPN ${normalizedLeague} fetch failed:`, error);
       }
     }
+
     try {
-      await setDoc(scheduleRef, { league, date, games, lastUpdated: new Date().toISOString(), source: "deterministic-api" }, { merge: true });
+      await setDoc(scheduleRef, {
+        league: normalizedLeague,
+        date,
+        games,
+        lastUpdated: new Date().toISOString(),
+        source: "deterministic-api-normalized",
+      }, { merge: true });
     } catch (error) {
       console.warn("[Schedule] Cache write failed:", error);
     }
