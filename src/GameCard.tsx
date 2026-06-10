@@ -202,6 +202,77 @@ export const GameCard: React.FC<GameCardProps> = ({
   const homeValue = prediction && homeImplied && isAIPredictedHome && (prediction.winProbability * 100) > homeImplied;
 
   const isTopPick = prediction && prediction.winner && prediction.winner.toUpperCase() !== "PASS" && (prediction.confidence || 0) >= 7;
+  const isMlb = String(game.league || "").toUpperCase() === "MLB";
+
+  const displayDecisionDrivers = React.useMemo(() => {
+    if (!prediction) return [];
+
+    const bannedPhrases = [
+      "api-sports",
+      "game detail",
+      "game id",
+      "provider payload",
+      "provider",
+      "book entries",
+      "team statistics are available",
+      "multi-book odds are available",
+      "openai",
+      "model=",
+      "prompt=",
+    ];
+
+    const rawFactors = Array.isArray(prediction.keyFactors) ? prediction.keyFactors : [];
+    const cleanedFactors = rawFactors
+      .filter((factor) => typeof factor === "string" && factor.trim())
+      .filter((factor) => {
+        const lower = factor.toLowerCase();
+        return !bannedPhrases.some((phrase) => lower.includes(phrase));
+      })
+      .map((factor) => factor.replace(/\s+/g, " " ).trim());
+
+    const generated: string[] = [];
+    const pick = prediction.winner && prediction.winner !== "PASS" ? prediction.winner : null;
+    const edgePct = typeof prediction.matchupDelta === "number" ? `${prediction.matchupDelta >= 0 ? "+" : ""}${(prediction.matchupDelta * 100).toFixed(1)}%` : null;
+    const winPct = typeof prediction.winProbability === "number" ? `${(prediction.winProbability * 100).toFixed(1)}%` : null;
+
+    if (pick && winPct) {
+      generated.push(`${pick} is the model side at ${winPct}${edgePct ? ` with a ${edgePct} edge against market price.` : "."}`);
+    } else if (prediction.winner === "PASS") {
+      generated.push("No play is preferred because the current edge does not clear the betting threshold.");
+    }
+
+    if (game.homeTeamStats?.record && game.awayTeamStats?.record) {
+      generated.push(`${game.awayTeam} enters ${game.awayTeamStats.record}; ${game.homeTeam} enters ${game.homeTeamStats.record}.`);
+    }
+
+    const pitcherMatchup = (prediction as any).pitcherMatchup;
+    const homePitcher = pitcherMatchup?.homePitcher?.name;
+    const awayPitcher = pitcherMatchup?.awayPitcher?.name;
+    if (homePitcher && awayPitcher && homePitcher !== "TBD" && awayPitcher !== "TBD") {
+      generated.push(`Probable pitcher matchup: ${awayPitcher} vs ${homePitcher}.`);
+    } else if (isMlb) {
+      generated.push("Probable starters are not confirmed yet, so MLB confidence should stay capped.");
+    }
+
+    if (Array.isArray(prediction.previousMatchups) && prediction.previousMatchups.length > 0) {
+      generated.push(`Previous matchup sample includes ${prediction.previousMatchups.length} recent meeting${prediction.previousMatchups.length === 1 ? "" : "s"}.`);
+    }
+
+    if (Array.isArray(game.allSources) && game.allSources.length > 0) {
+      generated.push(`Market check is based on ${game.allSources.length} sportsbook source${game.allSources.length === 1 ? "" : "s"}.`);
+    }
+
+    const seen = new Set<string>();
+    return [...generated, ...cleanedFactors]
+      .filter(Boolean)
+      .filter((factor) => {
+        const key = factor.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 5);
+  }, [prediction, game, isMlb]);
 
   return (
     <div 
@@ -1012,7 +1083,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                 )}
 
                 {/* Key Factors Section */}
-                {Array.isArray(prediction.keyFactors) && prediction.keyFactors.length > 0 && (
+                {displayDecisionDrivers.length > 0 && (
                   <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-5 shadow-sm mb-4">
                     <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                       <div className="p-1 bg-indigo-500/20 rounded">
@@ -1024,7 +1095,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                       </span>
                     </h4>
                     <div className="space-y-2.5">
-                      {prediction.keyFactors.map((factor, idx) => (
+                      {displayDecisionDrivers.map((factor, idx) => (
                         <div key={idx} className="flex items-start gap-3 p-3 bg-slate-950/40 rounded-lg border border-slate-800/50 hover:border-indigo-500/20 transition-colors group/factor">
                           <div className="mt-1 shrink-0">
                             <CheckCircle className="w-4 h-4 text-emerald-500/70 group-hover:text-emerald-400 transition-colors" />
@@ -1249,7 +1320,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                 )}
 
                 {/* Team Stats Comparison Section */}
-                {Array.isArray(prediction.teamStatsComparison) && prediction.teamStatsComparison.length > 0 && (
+                {!isMlb && Array.isArray(prediction.teamStatsComparison) && prediction.teamStatsComparison.length > 0 && (
                   <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 shadow-inner mb-4">
                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-5 flex items-center gap-2">
                       <div className="p-1 bg-slate-900 rounded border border-slate-800">
