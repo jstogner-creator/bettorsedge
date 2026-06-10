@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, TrendingUp, AlertTriangle, ShieldCheck, BrainCircuit, Coins, Flag, Scale, Zap, Activity, ExternalLink, Info } from "lucide-react";
+import { X, TrendingUp, BrainCircuit, Coins, Flag, Scale, Zap, Activity, ExternalLink, Info } from "lucide-react";
 import { Prediction, Game } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import ReactMarkdown from "react-markdown";
@@ -68,26 +68,6 @@ export function PredictionModal({ game, prediction, onClose }: PredictionModalPr
           </div>
 
           <div className="p-6 space-y-8">
-            {/* QA Status Banner */}
-            {prediction.qaNotes && (
-              <div className={cn(
-                "p-4 rounded-xl border flex items-start space-x-3",
-                prediction.qaStatus === 'flagged' ? "bg-rose-500/10 border-rose-500/20 text-rose-400" :
-                prediction.qaStatus === 'corrected' ? "bg-indigo-500/10 border-indigo-500/20 text-indigo-400" :
-                "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-              )}>
-                {prediction.qaStatus === 'flagged' ? <AlertTriangle className="w-5 h-5 mt-0.5 flex-shrink-0" /> : <ShieldCheck className="w-5 h-5 mt-0.5 flex-shrink-0" />}
-                <div>
-                  <h4 className="text-sm font-bold uppercase tracking-wider mb-1">
-                    QA Verification: {prediction.qaStatus}
-                  </h4>
-                  <p className="text-sm opacity-90 leading-relaxed">
-                    {prediction.qaNotes}
-                  </p>
-                </div>
-              </div>
-            )}
-
             {/* Winner & Confidence */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">

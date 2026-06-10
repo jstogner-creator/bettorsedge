@@ -172,6 +172,124 @@ function stripUndefined<T>(value: T): T {
   return value;
 }
 
+
+function valueFromPaths(source: any, paths: string[]) {
+  for (const path of paths) {
+    const value = path.split(".").reduce((obj, key) => (obj == null ? undefined : obj[key]), source);
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return undefined;
+}
+
+function numericValue(value: any) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = Number(String(value).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function formatStat(value: any, fallback = "N/A") {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  return String(value);
+}
+
+function normalizePitcher(raw: any) {
+  if (!raw) return undefined;
+  const name = valueFromPaths(raw, ["name", "player.name", "athlete.name", "fullName", "player", "pitcher.name"]);
+  if (!name) return undefined;
+  return {
+    name: String(name),
+    era: formatStat(valueFromPaths(raw, ["era", "statistics.era", "stats.era"])),
+    whip: formatStat(valueFromPaths(raw, ["whip", "statistics.whip", "stats.whip"])),
+    k9: formatStat(valueFromPaths(raw, ["k9", "statistics.k9", "stats.k9", "strikeoutsPerNine"])),
+    recentForm: String(valueFromPaths(raw, ["recentForm", "form", "last5", "status", "record"]) || "Starter returned by provider feed"),
+  };
+}
+
+function normalizeMlbH2H(rawGames: any[] | undefined, max = 6): Prediction["previousMatchups"] {
+  if (!Array.isArray(rawGames)) return [];
+  return rawGames
+    .map((item: any) => {
+      const homeTeam = valueFromPaths(item, ["teams.home.name", "home.name", "homeTeam", "teams.home.team.name"]);
+      const awayTeam = valueFromPaths(item, ["teams.away.name", "away.name", "awayTeam", "teams.away.team.name"]);
+      const homeScore = numericValue(valueFromPaths(item, ["scores.home.total", "scores.home", "homeScore", "score.home"]));
+      const awayScore = numericValue(valueFromPaths(item, ["scores.away.total", "scores.away", "awayScore", "score.away"]));
+      const date = String(valueFromPaths(item, ["date", "game.date", "fixture.date"]) || "").split("T")[0];
+      if (!homeTeam || !awayTeam || homeScore === undefined || awayScore === undefined) return null;
+      return {
+        date: date || "Date unavailable",
+        homeTeam: String(homeTeam),
+        awayTeam: String(awayTeam),
+        homeScore,
+        awayScore,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, max) as Prediction["previousMatchups"];
+}
+
+function summarizeMlbH2H(matchups: Prediction["previousMatchups"], homeTeam: string, awayTeam: string) {
+  if (!matchups?.length) return "Previous matchup history was not returned for this pair yet.";
+  const homeWins = matchups.filter((m) => m.homeTeam === homeTeam ? m.homeScore > m.awayScore : m.awayTeam === homeTeam ? m.awayScore > m.homeScore : false).length;
+  const awayWins = matchups.filter((m) => m.homeTeam === awayTeam ? m.homeScore > m.awayScore : m.awayTeam === awayTeam ? m.awayScore > m.homeScore : false).length;
+  const totals = matchups.map((m) => Number(m.homeScore) + Number(m.awayScore)).filter((n) => Number.isFinite(n));
+  const avgTotal = totals.length ? totals.reduce((sum, n) => sum + n, 0) / totals.length : undefined;
+  return `${homeTeam} is ${homeWins}-${awayWins} against ${awayTeam} in the returned sample${avgTotal !== undefined ? `; average combined runs ${avgTotal.toFixed(1)}.` : "."}`;
+}
+
+function buildMlbTeamStatRows(game: Game, mlbContext: any, edgeModel: EdgeModelResult): Prediction["teamStatsComparison"] {
+  const rows: Prediction["teamStatsComparison"] = [];
+  const homeRecord = game.homeTeamStats?.record;
+  const awayRecord = game.awayTeamStats?.record;
+  if (homeRecord || awayRecord) {
+    rows.push({
+      category: "Season Record",
+      homeValue: homeRecord || "N/A",
+      awayValue: awayRecord || "N/A",
+      advantage: (parseRecord(homeRecord) ?? 0) > (parseRecord(awayRecord) ?? 0) ? "home" : "away",
+    });
+  }
+  if (game.homeTeamStats?.last5 || game.awayTeamStats?.last5) {
+    rows.push({
+      category: "Recent Form",
+      homeValue: game.homeTeamStats?.last5 || "N/A",
+      awayValue: game.awayTeamStats?.last5 || "N/A",
+      advantage: (parseLastFive(game.homeTeamStats?.last5) ?? 0) > (parseLastFive(game.awayTeamStats?.last5) ?? 0) ? "home" : "away",
+    });
+  }
+  if (edgeModel.marketProbability !== undefined) {
+    rows.push({
+      category: "Model vs Market",
+      homeValue: edgeModel.selectedSide === "home" ? `${formatPct(edgeModel.modelProbability)} model` : `${formatPct(1 - edgeModel.modelProbability)} model`,
+      awayValue: edgeModel.selectedSide === "away" ? `${formatPct(edgeModel.modelProbability)} model` : `${formatPct(1 - edgeModel.modelProbability)} model`,
+      advantage: edgeModel.selectedSide,
+    });
+  }
+  const homeStats = mlbContext?.teamStatistics?.home;
+  const awayStats = mlbContext?.teamStatistics?.away;
+  const statCandidates = [
+    ["Runs", ["runs.for.total", "runs.total", "statistics.runs", "runs"]],
+    ["Runs Allowed", ["runs.against.total", "statistics.runsAllowed", "runsAllowed"]],
+    ["Batting Avg", ["batting.average", "statistics.batting.average", "avg"]],
+    ["ERA", ["pitching.era", "statistics.pitching.era", "era"]],
+  ] as const;
+  for (const [label, paths] of statCandidates) {
+    const homeVal = valueFromPaths(homeStats, [...paths]);
+    const awayVal = valueFromPaths(awayStats, [...paths]);
+    if (homeVal !== undefined || awayVal !== undefined) {
+      const homeNum = numericValue(homeVal);
+      const awayNum = numericValue(awayVal);
+      const lowerIsBetter = label === "Runs Allowed" || label === "ERA";
+      let advantage: "home" | "away" | "neutral" = "neutral";
+      if (homeNum !== undefined && awayNum !== undefined && homeNum !== awayNum) {
+        advantage = lowerIsBetter ? (homeNum < awayNum ? "home" : "away") : (homeNum > awayNum ? "home" : "away");
+      }
+      rows.push({ category: label, homeValue: formatStat(homeVal), awayValue: formatStat(awayVal), advantage });
+    }
+  }
+  return rows.slice(0, 8);
+}
+
 export class BettorsEdge {
   private getOpenAIModel() {
     if (typeof window === "undefined") return DEFAULT_OPENAI_MODEL;
@@ -202,74 +320,6 @@ export class BettorsEdge {
     const usage = response.data?.usage;
     await logApiCall("OpenAI", params.model || this.getOpenAIModel(), params.messages.at(-1)?.content || "", text, Date.now() - started, usage);
     return { text, usage, provider: "openai" };
-  }
-
-
-  private normalizeLeagueValue(value: unknown, fallback = "NBA"): Game["league"] {
-    const raw = (() => {
-      if (typeof value === "string") return value;
-      if (value && typeof value === "object") {
-        const obj = value as { name?: unknown; code?: unknown; sport?: unknown; id?: unknown };
-        return obj.code ?? obj.name ?? obj.sport ?? obj.id ?? fallback;
-      }
-      return value ?? fallback;
-    })();
-
-    const key = String(raw).toUpperCase();
-    if (key.includes("MLB") || key.includes("BASEBALL") || key === "1") return "MLB";
-    if (key.includes("NBA") || key.includes("BASKETBALL") || key === "12") return "NBA";
-    if (key.includes("NHL") || key.includes("HOCKEY") || key === "57") return "NHL";
-    if (key.includes("NFL") || key.includes("FOOTBALL")) return "NFL";
-    if (key.includes("NCAA")) return "NCAA";
-    return fallback.toUpperCase() as Game["league"];
-  }
-
-  private normalizeScheduleGame(raw: any, fallbackLeague: string, fallbackDate: string): Game | null {
-    if (!raw) return null;
-    const league = this.normalizeLeagueValue(raw.league, fallbackLeague);
-
-    const homeTeam = raw.homeTeam ?? raw.teams?.home?.name;
-    const awayTeam = raw.awayTeam ?? raw.teams?.away?.name;
-    if (!homeTeam || !awayTeam) return null;
-
-    const rawDate = raw.date ? String(raw.date) : fallbackDate;
-    const dateOnly = rawDate.includes("T") ? rawDate.split("T")[0] : rawDate;
-    const time = raw.time || (rawDate.includes("T") ? rawDate.split("T")[1]?.substring(0, 5) : undefined) || "TBD";
-    const statusCode = String(raw.status?.short ?? raw.status ?? "NS").toUpperCase();
-    const status: Game["status"] =
-      ["FT", "AOT", "FINAL", "FINISHED"].includes(statusCode) ? "finished" :
-      statusCode.startsWith("IN") || ["LIVE", "1Q", "2Q", "3Q", "4Q", "OT", "HT"].includes(statusCode) ? "live" :
-      "scheduled";
-
-    const venue = raw.location ?? raw.venue?.name ?? raw.venue;
-    const id = raw.id && raw.homeTeam && raw.awayTeam
-      ? String(raw.id)
-      : `${league}-${awayTeam}-${homeTeam}-${dateOnly}`.toLowerCase().replace(/[^a-z0-9]/g, "-");
-
-    return stripUndefined({
-      ...raw,
-      id,
-      league,
-      homeTeam,
-      awayTeam,
-      homeLogo: raw.homeLogo ?? raw.teams?.home?.logo,
-      awayLogo: raw.awayLogo ?? raw.teams?.away?.logo,
-      date: dateOnly,
-      time,
-      location: typeof venue === "string" ? venue : venue?.name ?? "Unknown",
-      status,
-      homeScore: raw.homeScore ?? raw.scores?.home?.total,
-      awayScore: raw.awayScore ?? raw.scores?.away?.total,
-      apiSportsGameId: raw.apiSportsGameId ?? raw.id,
-      apiSportsHomeTeamId: raw.apiSportsHomeTeamId ?? raw.teams?.home?.id,
-      apiSportsAwayTeamId: raw.apiSportsAwayTeamId ?? raw.teams?.away?.id,
-    }) as Game;
-  }
-
-  private normalizeScheduleGames(rawGames: any[], fallbackLeague: string, fallbackDate: string): Game[] {
-    return rawGames
-      .map((game) => this.normalizeScheduleGame(game, fallbackLeague, fallbackDate))
-      .filter((game): game is Game => Boolean(game));
   }
 
   private async enrichMlbGame(game: Game, date: string): Promise<Game> {
@@ -305,14 +355,14 @@ export class BettorsEdge {
 
     // MLB/north-american home-field baseline. Keep modest so it does not overpower market or team context.
     homeProbability += 0.025;
-    positiveFactors.push(`Home-field adjustment applied for ${game.homeTeam}.`);
+    positiveFactors.push(`${game.homeTeam} gets the home-field bump at ${game.location || "home venue"}.`);
 
     if (homeSeason !== undefined && awaySeason !== undefined) {
       const seasonDelta = homeSeason - awaySeason;
       homeProbability += seasonDelta * 0.22;
       dataQualityReasons.push("season record available");
       const strongerTeam = seasonDelta >= 0 ? game.homeTeam : game.awayTeam;
-      positiveFactors.push(`${strongerTeam} has the stronger season record (${game.homeTeamStats?.record || formatPct(homeSeason)} vs ${game.awayTeamStats?.record || formatPct(awaySeason)}).`);
+      positiveFactors.push(`${strongerTeam} owns the stronger season profile: ${game.awayTeam} ${game.awayTeamStats?.record || formatPct(awaySeason)} vs ${game.homeTeam} ${game.homeTeamStats?.record || formatPct(homeSeason)}.`);
     } else {
       missingData.push("clean season win-rate/record data unavailable");
     }
@@ -330,12 +380,12 @@ export class BettorsEdge {
     if (game.league === "MLB" && mlbContext?.dataQuality) {
       dataQualityReasons.push(...(mlbContext.dataQuality.notes || []).slice(0, 8));
 
-      if (mlbContext.game) positiveFactors.push("API-Sports game detail was matched by game ID.");
+      if (mlbContext.game) dataQualityReasons.push("single-game provider details available");
       else missingData.push("API-Sports game-detail lookup did not return a payload");
 
       if (mlbContext.pitching?.startersConfirmed) {
         dataQualityReasons.push("probable starting pitcher context available");
-        positiveFactors.push("Probable starting pitcher context is available, so the MLB model can use a fuller pregame profile.");
+        positiveFactors.push("Probable starting pitcher context is available, improving the pregame read.");
         homeProbability += 0.004;
       } else {
         dataQualityReasons.push("probable starting pitchers missing; MLB confidence capped");
@@ -344,17 +394,17 @@ export class BettorsEdge {
         homeProbability = homeProbability * 0.90 + 0.5 * 0.10;
       }
 
-      if (mlbContext.odds?.hasMultiBookOdds) positiveFactors.push(`Multi-book odds are available (${mlbContext.odds.bookCount || "multiple"} book entries).`);
+      if (mlbContext.odds?.hasMultiBookOdds) positiveFactors.push(`Consensus price check uses ${mlbContext.odds.bookCount || "multiple"} sportsbook entries.`);
       else missingData.push("multi-book odds unavailable");
 
-      if (mlbContext.teamStatistics?.home || mlbContext.teamStatistics?.away) positiveFactors.push("API-Sports team statistics are available for matchup context.");
+      if (mlbContext.teamStatistics?.home || mlbContext.teamStatistics?.away) positiveFactors.push("Team statistical profile is included in the matchup comparison.");
       else missingData.push("team-statistics endpoint unavailable");
 
-      if (Array.isArray(mlbContext.h2h) && mlbContext.h2h.length) positiveFactors.push(`Head-to-head context available (${mlbContext.h2h.length} prior games returned).`);
+      if (Array.isArray(mlbContext.h2h) && mlbContext.h2h.length) positiveFactors.push(`Previous matchup history is included (${mlbContext.h2h.length} games returned).`);
       else missingData.push("head-to-head context unavailable");
 
       if (mlbContext.injuries?.unavailable) riskFactors.push("At least one injury endpoint failed; analysis continued without blocking.");
-      else positiveFactors.push("Injury endpoint checked without blocking the analysis flow.");
+      else dataQualityReasons.push("injury endpoint checked");
 
       if (mlbContext.dataQuality.grade === "A") homeProbability += 0.005;
       if (mlbContext.dataQuality.grade === "D") homeProbability = homeProbability * 0.85 + 0.5 * 0.15;
@@ -367,7 +417,7 @@ export class BettorsEdge {
       const marketHome = homeMarketProbability / (homeMarketProbability + awayMarketProbability);
       homeProbability = homeProbability * 0.88 + marketHome * 0.12;
       dataQualityReasons.push("sportsbook market available");
-      positiveFactors.push(`Sportsbook moneyline context available (${game.marketExpectations?.source || "market source"}).`);
+      positiveFactors.push(`Market comparison is anchored to ${game.marketExpectations?.source || "available sportsbook pricing"}.`);
     } else {
       missingData.push("sportsbook moneyline probability unavailable");
     }
@@ -376,7 +426,7 @@ export class BettorsEdge {
     if (kalshiYes !== undefined) {
       homeProbability = homeProbability * 0.94 + kalshiYes * 0.06;
       dataQualityReasons.push("Kalshi market available");
-      positiveFactors.push(`Kalshi market available at ${formatPct(kalshiYes)} YES.`);
+      positiveFactors.push(`Prediction-market reference price is ${formatPct(kalshiYes)} YES.`);
     }
 
     homeProbability = clamp(homeProbability, 0.05, 0.95);
@@ -535,18 +585,41 @@ Return JSON with this shape:
       trends: edgeModel.positiveFactors.join(" "),
       confidenceBreakdown: `Confidence ${confidenceFromEdge}/10. Data quality ${edgeModel.dataQuality}. ${edgeModel.riskFactors.join(" ")}`.trim(),
     };
-    const fallbackTeamStatsComparison: Prediction["teamStatsComparison"] = compactList([
-      analysisGame.awayTeamStats?.record && analysisGame.homeTeamStats?.record ? "Season record" : undefined,
-      edgeModel.marketProbability !== undefined ? "Model vs market" : undefined,
-      "Data quality",
-    ], 3).map((category) => ({
-      category,
-      awayValue: category === "Season record" ? analysisGame.awayTeamStats?.record || "N/A" : category === "Model vs market" ? edgeModel.marketNarrative : edgeModel.dataQuality,
-      homeValue: category === "Season record" ? analysisGame.homeTeamStats?.record || "N/A" : category === "Model vs market" ? edgeModel.marketNarrative : edgeModel.dataQuality,
-      advantage: category === "Season record"
-        ? ((parseRecord(analysisGame.homeTeamStats?.record) ?? 0) > (parseRecord(analysisGame.awayTeamStats?.record) ?? 0) ? "home" : "away")
-        : "neutral",
-    }));
+    const mlbContext = (analysisGame as any).mlbContext;
+    const normalizedPreviousMatchups = normalizeMlbH2H(mlbContext?.h2h);
+    const homePitcher = normalizePitcher(mlbContext?.pitching?.homeStarter);
+    const awayPitcher = normalizePitcher(mlbContext?.pitching?.awayStarter);
+    const pitcherMatchup: Prediction["pitcherMatchup"] | undefined = analysisGame.league === "MLB" ? {
+      homePitcher: homePitcher || { name: "TBD", era: "N/A", whip: "N/A", recentForm: "Probable starter not returned by provider" },
+      awayPitcher: awayPitcher || { name: "TBD", era: "N/A", whip: "N/A", recentForm: "Probable starter not returned by provider" },
+      summary: homePitcher && awayPitcher
+        ? `${analysisGame.awayTeam} sends ${awayPitcher.name} against ${analysisGame.homeTeam} starter ${homePitcher.name}. Pitcher context is included in confidence.`
+        : "Probable starters were not returned by the provider feed yet. MLB confidence remains capped until the starting pitcher matchup is confirmed.",
+    } : undefined;
+
+    const fallbackTeamStatsComparison: Prediction["teamStatsComparison"] = analysisGame.league === "MLB"
+      ? buildMlbTeamStatRows(analysisGame, mlbContext, edgeModel)
+      : compactList([
+        analysisGame.awayTeamStats?.record && analysisGame.homeTeamStats?.record ? "Season record" : undefined,
+        edgeModel.marketProbability !== undefined ? "Model vs market" : undefined,
+        "Data quality",
+      ], 3).map((category) => ({
+        category,
+        awayValue: category === "Season record" ? analysisGame.awayTeamStats?.record || "N/A" : category === "Model vs market" ? edgeModel.marketNarrative : edgeModel.dataQuality,
+        homeValue: category === "Season record" ? analysisGame.homeTeamStats?.record || "N/A" : category === "Model vs market" ? edgeModel.marketNarrative : edgeModel.dataQuality,
+        advantage: category === "Season record"
+          ? ((parseRecord(analysisGame.homeTeamStats?.record) ?? 0) > (parseRecord(analysisGame.awayTeamStats?.record) ?? 0) ? "home" : "away")
+          : "neutral",
+      }));
+
+    if (analysisGame.league === "MLB") {
+      fallbackMatchupAnalysis.h2h = summarizeMlbH2H(normalizedPreviousMatchups, analysisGame.homeTeam, analysisGame.awayTeam);
+      fallbackMatchupAnalysis.playerStats = pitcherMatchup?.summary || fallbackMatchupAnalysis.playerStats;
+      fallbackMatchupAnalysis.trends = compactList([
+        ...edgeModel.positiveFactors,
+        edgeModel.marketNarrative,
+      ], 5).join(" ");
+    }
 
     const prediction: Prediction = {
       gameId: analysisGame.id,
@@ -569,6 +642,8 @@ Return JSON with this shape:
       matchupAnalysis: aiPayload.matchupAnalysis || fallbackMatchupAnalysis,
       playerMatchups: aiPayload.playerMatchups || [],
       teamStatsComparison: aiPayload.teamStatsComparison?.length ? aiPayload.teamStatsComparison : fallbackTeamStatsComparison,
+      previousMatchups: normalizedPreviousMatchups?.length ? normalizedPreviousMatchups : existingPrediction?.previousMatchups,
+      pitcherMatchup: pitcherMatchup || existingPrediction?.pitcherMatchup,
       kalshiPrice: analysisGame.kalshiExpectations?.yes ?? analysisGame.kalshiOdds?.yes ?? edgeModel.marketProbability ?? 0.5,
       winProbability: edgeModel.modelProbability,
       lastUpdated: new Date().toISOString(),
@@ -576,7 +651,7 @@ Return JSON with this shape:
       predictionDataQuality: edgeModel.dataQuality,
       matchupDelta: edgeModel.edge,
       qaStatus: edgeModel.missingData.length ? "adjusted" : "verified",
-      qaNotes: `Model=${MODEL_VERSION}; prompt=${PROMPT_VERSION}; recommendation=${edgeModel.recommendation}; selected=${edgeModel.selectedTeam}; fairOdds=${edgeModel.fairOdds}; dataQuality=${edgeModel.dataQuality}; risks=${edgeModel.riskFactors.join(" | ") || "none"}.`,
+      qaNotes: `Recommendation=${edgeModel.recommendation}; selected=${edgeModel.selectedTeam}; fairOdds=${edgeModel.fairOdds}; dataQuality=${edgeModel.dataQuality}; risks=${edgeModel.riskFactors.join(" | ") || "none"}.`,
       marketExpectations: analysisGame.marketExpectations,
       sourceAudit: {
         googleDriveAccessed: false,
@@ -598,7 +673,7 @@ Return JSON with this shape:
   ) {
     const results: Record<string, Prediction> = {};
     for (const game of games) {
-      onProgress?.(`Analyzing ${game.awayTeam} @ ${game.homeTeam} with OpenAI...`);
+      onProgress?.(`Analyzing ${game.awayTeam} @ ${game.homeTeam}...`);
       results[game.id] = await this.analyzeMatchup(game, date, savedPredictions[game.id], yesterdayResults);
     }
     return results;
@@ -685,71 +760,44 @@ Return JSON with this shape:
   async checkSourceHealth() {
     return {
       status: "degraded",
-      details: "OpenAI engine is active. External injury and pitcher verification should be connected through deterministic sports data providers, not AI-generated claims.",
+      details: "Analysis engine is active. External injury and pitcher verification should be connected through deterministic sports data providers.",
       latestDate: format(getNYDate(), "yyyy-MM-dd"),
     };
   }
 
   async getDailySchedule(league: string, date: string, force = false): Promise<Game[]> {
     const db = getDb();
-    const normalizedLeague = this.normalizeLeagueValue(league, league);
-    const docId = `${normalizedLeague}-${date}`;
+    const docId = `${league}-${date}`;
     const scheduleRef = doc(db, "schedules", docId);
-
     if (!force) {
       try {
         const cached = await getDoc(scheduleRef);
         if (cached.exists()) {
           const data = cached.data();
-          if (Array.isArray(data.games) && data.games.length) {
-            const normalizedCachedGames = this.normalizeScheduleGames(data.games, normalizedLeague, date);
-            if (normalizedCachedGames.length) {
-              // Self-heal old cached schedules where API-Sports stored league as an object.
-              await setDoc(scheduleRef, {
-                league: normalizedLeague,
-                date,
-                games: normalizedCachedGames,
-                lastUpdated: data.lastUpdated || new Date().toISOString(),
-                normalizedAt: new Date().toISOString(),
-                source: data.source || "cache-normalized",
-              }, { merge: true });
-              return normalizedCachedGames;
-            }
-          }
+          if (Array.isArray(data.games) && data.games.length) return data.games as Game[];
         }
       } catch (error) {
         console.warn("[Schedule] Cache read failed:", error);
       }
     }
-
     const dateObj = new Date(`${date}T12:00:00`);
-    let rawGames: any[] = [];
+    let games: Game[] = [];
     try {
-      if (normalizedLeague === "NBA") rawGames = await apiSportsService.getGames(dateObj) as any;
-      else if (normalizedLeague === "MLB") rawGames = await apiSportsMlbService.getGames(dateObj) as any;
-      else if (normalizedLeague === "NHL") rawGames = await apiSportsNhlService.getGames(dateObj) as any;
+      if (league === "NBA") games = await apiSportsService.getGames(dateObj) as any;
+      else if (league === "MLB") games = await apiSportsMlbService.getGames(dateObj) as any;
+      else if (league === "NHL") games = await apiSportsNhlService.getGames(dateObj) as any;
     } catch (error) {
-      console.warn(`[Schedule] API-Sports ${normalizedLeague} fetch failed:`, error);
+      console.warn(`[Schedule] API-Sports ${league} fetch failed:`, error);
     }
-
-    let games = this.normalizeScheduleGames(rawGames, normalizedLeague, date);
-
     if (!games.length) {
       try {
-        games = this.normalizeScheduleGames(await espnService.getSchedule(normalizedLeague, dateObj), normalizedLeague, date);
+        games = await espnService.getSchedule(league, dateObj);
       } catch (error) {
-        console.warn(`[Schedule] ESPN ${normalizedLeague} fetch failed:`, error);
+        console.warn(`[Schedule] ESPN ${league} fetch failed:`, error);
       }
     }
-
     try {
-      await setDoc(scheduleRef, {
-        league: normalizedLeague,
-        date,
-        games,
-        lastUpdated: new Date().toISOString(),
-        source: "deterministic-api-normalized",
-      }, { merge: true });
+      await setDoc(scheduleRef, { league, date, games, lastUpdated: new Date().toISOString(), source: "deterministic-api" }, { merge: true });
     } catch (error) {
       console.warn("[Schedule] Cache write failed:", error);
     }

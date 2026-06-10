@@ -27,6 +27,7 @@ import { format, parseISO } from "date-fns";
 import { Game, Prediction } from "./types";
 import { cn } from "./lib/utils";
 import { ApiSportsWidgetEmbed } from "./components/ApiSportsWidgets";
+import { MlbMatchupLab } from "./components/MlbMatchupLab";
 
 interface GameCardProps {
   game: Game;
@@ -672,7 +673,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                       )}>
                         {prediction.outcome === 'correct' ? "Correct Analysis" :
                          prediction.outcome === 'incorrect' ? "Incorrect Analysis" :
-                         "AI Analysis Engine"}
+                         "Prediction Engine"}
                       </span>
                       <div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">
                         Confidence Score: {Number(prediction.confidence || 0).toFixed(1)}/10
@@ -782,7 +783,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                     {prediction.matchupDelta !== undefined && (
                       <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/60 rounded-full border border-slate-700/50 shadow-sm transition-all hover:bg-slate-800/80 group">
                         <TrendingUp className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
-                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">AI Delta:</span>
+                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Model Edge:</span>
                         <span className={cn(
                           "text-[10px] font-black uppercase tracking-tight font-mono",
                           prediction.matchupDelta > 0.05 ? "text-emerald-400" :
@@ -962,7 +963,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                 )}
 
                 {/* Previous Matchups - Moved to top under score prediction */}
-                {Array.isArray(prediction.previousMatchups) && prediction.previousMatchups.length > 0 && (
+                {game.league !== 'MLB' && Array.isArray(prediction.previousMatchups) && prediction.previousMatchups.length > 0 && (
                   <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-5 mb-4 shadow-lg shadow-indigo-500/5 transition-all hover:shadow-indigo-500/10">
                     <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center">
                       <Activity className="w-4 h-4 mr-2" />
@@ -1004,6 +1005,10 @@ export const GameCard: React.FC<GameCardProps> = ({
                       ))}
                     </div>
                   </div>
+                )}
+
+                {game.league === 'MLB' && (
+                  <MlbMatchupLab game={game} prediction={prediction} />
                 )}
 
                 {/* Key Factors Section */}
@@ -1290,7 +1295,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                 )}
 
                 {/* Advanced Matchup Engine Section */}
-                {prediction.matchupAnalysis && (
+                {prediction.matchupAnalysis && game.league !== 'MLB' && (
                   <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-5 mb-4 shadow-lg shadow-indigo-500/5">
                     <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                       <div className="p-1 bg-indigo-500/20 rounded">
@@ -1357,31 +1362,6 @@ export const GameCard: React.FC<GameCardProps> = ({
                     <p className="text-sm text-slate-300 leading-relaxed">
                       {prediction.hedgingAdvice}
                     </p>
-                  </div>
-                )}
-
-                {/* Quality Assurance */}
-                {prediction.qaStatus && prediction.qaStatus !== 'verified' && (
-                  <div className={cn(
-                    "border rounded-xl p-4 mb-4",
-                    prediction.qaStatus === 'adjusted' ? "bg-amber-500/5 border-amber-500/20" : "bg-red-500/5 border-red-500/20"
-                  )}>
-                    <h4 className={cn(
-                      "text-xs font-black uppercase tracking-widest mb-2 flex items-center",
-                      prediction.qaStatus === 'adjusted' ? "text-amber-400" : "text-red-400"
-                    )}>
-                      <AlertTriangle className="w-3.5 h-3.5 mr-2" />
-                      Model QA {prediction.qaStatus === 'adjusted' ? 'Adjusted' : 'Flagged'}
-                    </h4>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      {prediction.qaNotes}
-                    </p>
-                  </div>
-                )}
-                {prediction.qaStatus === 'verified' && (
-                  <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-4 flex items-center mb-4">
-                    <CheckCircle className="w-4 h-4 text-emerald-500 mr-2" />
-                    <span className="text-xs text-emerald-400 font-black uppercase tracking-widest">Model Inputs Verified</span>
                   </div>
                 )}
 
