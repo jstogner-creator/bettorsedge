@@ -60,6 +60,32 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
   
   const homeStarter = useMemo(() => parsePitcher(pitcherMatchup?.homePitcher || pitcherMatchup?.homeStarter), [pitcherMatchup]);
   const awayStarter = useMemo(() => parsePitcher(pitcherMatchup?.awayPitcher || pitcherMatchup?.awayStarter), [pitcherMatchup]);
+  
+  const favoredStarter = useMemo(() => {
+    if (!homeStarter || !awayStarter || homeStarter.name === "TBD" || awayStarter.name === "TBD") return null;
+    const homeEraNum = parseFloat(String(homeStarter.era));
+    const awayEraNum = parseFloat(String(awayStarter.era));
+    const homeWhipNum = parseFloat(String(homeStarter.whip));
+    const awayWhipNum = parseFloat(String(awayStarter.whip));
+
+    if (isNaN(homeEraNum) || isNaN(awayEraNum)) return null;
+
+    let homeScore = 0;
+    let awayScore = 0;
+
+    if (homeEraNum < awayEraNum) homeScore++;
+    else if (homeEraNum > awayEraNum) awayScore++;
+
+    if (!isNaN(homeWhipNum) && !isNaN(awayWhipNum)) {
+      if (homeWhipNum < awayWhipNum) homeScore++;
+      else if (homeWhipNum > awayWhipNum) awayScore++;
+    }
+
+    if (homeScore > awayScore) return "home";
+    if (awayScore > homeScore) return "away";
+    return null;
+  }, [homeStarter, awayStarter]);
+
   const startersConfirmed = Boolean(
     homeStarter?.name &&
     homeStarter.name !== "TBD" &&
@@ -88,8 +114,8 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
   const selectedSideMarketProb = pickSide === "home" ? marketImplied?.home : pickSide === "away" ? marketImplied?.away : null;
   const edge = typeof modelProb === "number" && typeof selectedSideMarketProb === "number" ? modelProb - selectedSideMarketProb : prediction?.matchupDelta;
 
-  const homeTeamStats = useMemo(() => parseTeamStats(mlbContext?.teamStatistics?.home), [mlbContext]);
-  const awayTeamStats = useMemo(() => parseTeamStats(mlbContext?.teamStatistics?.away), [mlbContext]);
+  const homeTeamStats = mlbContext?.normalizedTeamStats?.home;
+  const awayTeamStats = mlbContext?.normalizedTeamStats?.away;
 
   const h2hSummary = useMemo(() => {
     if (!h2h.length) return null;
@@ -197,10 +223,10 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
   return (
     <div className="space-y-5 animate-in fade-in slide-in-from-top-4 duration-300">
       
-      {/* 1. Final Selection (Play/Lean/Pass) */}
+      {/* 1. Final Selection (PASS or PREDICTION) */}
       <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 relative overflow-hidden">
         
-        {/* Play/Lean/Pass Badge */}
+        {/* Selection Details */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-indigo-500/20 rounded-lg">
@@ -208,12 +234,19 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
             </div>
             <div>
               <span className="text-[10px] text-slate-500 font-bold uppercase block tracking-widest">FINAL SELECTION</span>
-              <span className={cn(
-                "text-lg font-black uppercase tracking-wider",
-                prediction?.winner === "PASS" ? "text-amber-400" : (edge || 0) >= 0.07 ? "text-emerald-400 animate-pulse" : "text-indigo-400"
-              )}>
-                {prediction?.winner === "PASS" ? "Pass" : (edge || 0) >= 0.07 ? "Play" : "Lean"}
-              </span>
+              <div className="flex flex-col">
+                <span className={cn(
+                  "text-lg font-black uppercase tracking-wider",
+                  prediction?.winner === "PASS" ? "text-amber-400" : "text-emerald-400 animate-pulse"
+                )}>
+                  {prediction?.winner === "PASS" ? "PASS" : "PREDICTION"}
+                </span>
+                {prediction?.winner !== "PASS" && prediction?.winner && (
+                  <span className="text-xl font-black text-white mt-1">
+                    {prediction.winner} to Win
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           
@@ -295,10 +328,15 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
           <div className="rounded-xl bg-slate-900/60 p-3.5 border border-slate-800/60 hover:border-slate-800 transition-colors">
             <div className="flex justify-between items-start mb-2">
               <div>
-                <div className="flex items-center gap-1.5 mb-0.5">
+                <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                   <span className="text-[9px] font-black uppercase text-slate-500">AWAY STARTER</span>
                   {!startersConfirmed && (
                     <span className="text-amber-400 text-[8px] font-extrabold bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">PROJECTED</span>
+                  )}
+                  {favoredStarter === "away" && (
+                    <span className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 text-[8px] font-black uppercase px-2 py-0.2 rounded flex items-center gap-0.5">
+                      <Sparkles className="w-2.5 h-2.5" /> FAVORED
+                    </span>
                   )}
                 </div>
                 <span className="text-sm font-black text-white">{awayStarter?.name || "TBD"}</span>
@@ -310,16 +348,16 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
               )}
             </div>
             
-            <div className="grid grid-cols-4 gap-1.5 text-center mt-3">
+            <div className="grid grid-cols-2 gap-2 text-xs font-mono mt-3">
               {[
                 ["ERA", awayStarter?.era],
                 ["WHIP", awayStarter?.whip],
-                ["SO", awayStarter?.strikeouts],
-                ["BB", awayStarter?.walks],
+                ["Strikeouts (SO)", awayStarter?.strikeouts],
+                ["Walks (BB)", awayStarter?.walks],
               ].map(([lbl, val]) => (
-                <div key={lbl} className="bg-slate-950/60 rounded p-1.5 border border-slate-800/30">
-                  <div className="text-[8px] text-slate-500 font-bold uppercase">{lbl}</div>
-                  <div className="text-xs font-mono font-black text-slate-300 mt-0.5">{val || "N/A"}</div>
+                <div key={lbl} className="bg-slate-950/60 rounded p-2 border border-slate-850 flex justify-between items-center">
+                  <span className="text-[8.5px] text-slate-500 font-bold uppercase tracking-wider">{lbl}</span>
+                  <span className="text-xs font-black text-slate-200">{val || "N/A"}</span>
                 </div>
               ))}
             </div>
@@ -333,10 +371,15 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
           <div className="rounded-xl bg-slate-900/60 p-3.5 border border-slate-800/60 hover:border-slate-800 transition-colors">
             <div className="flex justify-between items-start mb-2">
               <div>
-                <div className="flex items-center gap-1.5 mb-0.5">
+                <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                   <span className="text-[9px] font-black uppercase text-slate-500">HOME STARTER</span>
                   {!startersConfirmed && (
                     <span className="text-amber-400 text-[8px] font-extrabold bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">PROJECTED</span>
+                  )}
+                  {favoredStarter === "home" && (
+                    <span className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 text-[8px] font-black uppercase px-2 py-0.2 rounded flex items-center gap-0.5">
+                      <Sparkles className="w-2.5 h-2.5" /> FAVORED
+                    </span>
                   )}
                 </div>
                 <span className="text-sm font-black text-white">{homeStarter?.name || "TBD"}</span>
@@ -348,16 +391,16 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
               )}
             </div>
             
-            <div className="grid grid-cols-4 gap-1.5 text-center mt-3">
+            <div className="grid grid-cols-2 gap-2 text-xs font-mono mt-3">
               {[
                 ["ERA", homeStarter?.era],
                 ["WHIP", homeStarter?.whip],
-                ["SO", homeStarter?.strikeouts],
-                ["BB", homeStarter?.walks],
+                ["Strikeouts (SO)", homeStarter?.strikeouts],
+                ["Walks (BB)", homeStarter?.walks],
               ].map(([lbl, val]) => (
-                <div key={lbl} className="bg-slate-950/60 rounded p-1.5 border border-slate-800/30">
-                  <div className="text-[8px] text-slate-500 font-bold uppercase">{lbl}</div>
-                  <div className="text-xs font-mono font-black text-slate-300 mt-0.5">{val || "N/A"}</div>
+                <div key={lbl} className="bg-slate-950/60 rounded p-2 border border-slate-850 flex justify-between items-center">
+                  <span className="text-[8.5px] text-slate-500 font-bold uppercase tracking-wider">{lbl}</span>
+                  <span className="text-xs font-black text-slate-200">{val || "N/A"}</span>
                 </div>
               ))}
             </div>
@@ -447,96 +490,7 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
         </div>
       </section>
 
-      {/* 4. Market Edge */}
-      <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-        <div className="mb-3 flex items-center gap-2">
-          <div className="p-1 bg-amber-500/10 rounded border border-amber-500/20 text-amber-400">
-            <DollarSign className="w-4 h-4" />
-          </div>
-          <h4 className="text-xs font-black text-amber-200 uppercase tracking-widest">Market Edge</h4>
-        </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-center">
-          <div className="rounded-xl bg-slate-900/50 border border-slate-800 p-3 transition-colors hover:border-slate-800/80">
-            <span className="text-[8px] font-black uppercase tracking-wider text-slate-500">Model win probability</span>
-            <div className="text-base font-mono font-black text-slate-100 mt-1.5">
-              {modelProb ? asPercent(modelProb) : "N/A"}
-            </div>
-          </div>
-
-          <div className="rounded-xl bg-slate-900/50 border border-slate-800 p-3 transition-colors hover:border-slate-800/80">
-            <span className="text-[8px] font-black uppercase tracking-wider text-slate-500">Market implied probability</span>
-            <div className="text-base font-mono font-black text-slate-100 mt-1.5">
-              {selectedSideMarketProb ? asPercent(selectedSideMarketProb) : (marketImplied?.home ? asPercent(marketImplied.home) : "N/A")}
-            </div>
-          </div>
-
-          <div className="rounded-xl bg-slate-900/50 border border-slate-800 p-3 transition-colors hover:border-slate-800/80">
-            <span className="text-[8px] font-black uppercase tracking-wider text-slate-500">Calculated model edge</span>
-            <div className={cn(
-              "text-base font-mono font-black mt-1.5",
-              (edge || 0) >= 0.035 ? "text-emerald-400" : "text-amber-400"
-            )}>
-              {edge == null ? "N/A" : `${edge >= 0 ? "+" : ""}${(edge * 100).toFixed(1)}%`}
-            </div>
-          </div>
-
-          <div className="rounded-xl bg-slate-900/50 border border-slate-800 p-3 transition-colors hover:border-slate-800/80">
-            <span className="text-[8px] font-black uppercase tracking-wider text-slate-500">Kalshi Market Expectations</span>
-            <div className="text-xs font-mono font-black text-indigo-300 mt-2">
-              {game.kalshiExpectations?.yes !== undefined ? `${(game.kalshiExpectations.yes).toFixed(0)}¢ YES` : "No Kalshi Slate"}
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs border-t border-slate-900 pt-4">
-          <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-800/50 flex justify-between items-center">
-            <span className="text-slate-400">{game.awayTeam} Moneyline</span>
-            <span className="font-mono font-black text-white">{formatOdds(awayML)}</span>
-          </div>
-          <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-800/50 flex justify-between items-center">
-            <span className="text-slate-400">{game.homeTeam} Moneyline</span>
-            <span className="font-mono font-black text-white">{formatOdds(homeML)}</span>
-          </div>
-        </div>
-
-        {/* Odds Movement Tracker */}
-        {prediction?.mlbContext?.odds?.openingOdds && prediction?.mlbContext?.odds?.currentOdds && (
-          <div className="mt-4 p-3.5 rounded-xl border border-indigo-500/10 bg-indigo-500/[0.02] space-y-2">
-            <span className="text-[9px] font-black uppercase text-indigo-300 tracking-wider block">Odds Movement Tracker</span>
-            <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-900/80 flex justify-between items-center">
-                <div>
-                  <span className="text-[8.5px] text-slate-500 block uppercase font-bold">{game.awayTeam.substring(0, 3)} ML</span>
-                  <span className="text-[10px] text-slate-400">Open: {prediction.mlbContext.odds.openingOdds.away}</span>
-                </div>
-                <div>
-                  <span className="text-xs font-black text-slate-200">Current: {prediction.mlbContext.odds.currentOdds.away}</span>
-                </div>
-              </div>
-
-              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-900/80 flex justify-between items-center">
-                <div>
-                  <span className="text-[8.5px] text-slate-500 block uppercase font-bold">{game.homeTeam.substring(0, 3)} ML</span>
-                  <span className="text-[10px] text-slate-400">Open: {prediction.mlbContext.odds.openingOdds.home}</span>
-                </div>
-                <div>
-                  <span className="text-xs font-black text-slate-200">Current: {prediction.mlbContext.odds.currentOdds.home}</span>
-                </div>
-              </div>
-            </div>
-            
-            {prediction?.reverseLineMovement?.detected && (
-              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-2.5 text-xs text-emerald-300 flex items-center gap-2 mt-2">
-                <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>
-                  <strong>Reverse Line Movement:</strong> Sharp backing on <strong>{prediction.reverseLineMovement.team}</strong>. Opened {prediction.reverseLineMovement.openingOdds}, currently {prediction.reverseLineMovement.currentOdds}.
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-      </section>
 
       {/* 5. Team Edge */}
       <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
@@ -635,7 +589,7 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
                   <div className={cn(
                     "text-right md:text-left font-mono font-bold px-2.5 py-2 rounded-lg border md:border-0 md:bg-transparent md:p-0 transition-all",
                     advantage === "home" 
-                      ? "text-emerald-300 bg-emerald-500/[0.04] border-emerald-500/20 md:text-cyan-400" 
+                      ? "text-emerald-300 bg-emerald-500/[0.04] border-emerald-500/20 md:text-emerald-400" 
                       : "text-slate-400 bg-slate-900/25 border-slate-900/60 md:text-slate-500"
                   )}>
                     <span className="text-[8px] text-slate-500 block md:hidden uppercase font-bold mb-0.5 text-right">{game.homeTeam.substring(0, 3)}</span>

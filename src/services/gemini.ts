@@ -1088,7 +1088,8 @@ Return JSON with this shape:
 export const bettorsEdge = new BettorsEdge();
 
 function generateMockAiPayload(game: Game, edgeModel: EdgeModelResult): AiPredictionPayload {
-  const winner = edgeModel.selectedTeam;
+  const isPass = edgeModel.recommendation === "NO_PLAY" || edgeModel.selectedTeam === "PASS";
+  const winner = isPass ? "PASS" : edgeModel.selectedTeam;
   const loser = edgeModel.selectedSide === "home" ? game.awayTeam : game.homeTeam;
   const edgePct = edgeModel.edge ? (edgeModel.edge * 100).toFixed(1) : "3.8";
   
@@ -1107,21 +1108,37 @@ function generateMockAiPayload(game: Game, edgeModel: EdgeModelResult): AiPredic
   
   const projectedTotal = predictedHomeScore + predictedAwayScore;
   
-  const reasoning = `The model identifies a clear edge on the ${winner} moneyline, projecting a ${edgeModel.modelProbability ? (edgeModel.modelProbability * 100).toFixed(1) : "54.2"}% win probability compared to the market price. Key value drivers include starting pitching matchups and bullpen depth.`;
+  let reasoning = "";
+  let keyFactors: string[] = [];
+  if (isPass) {
+    reasoning = `The model recommends a PASS on this matchup. The calculated edge of ${edgePct}% does not meet the required threshold of ${(MIN_EDGE_TO_PLAY * 100).toFixed(1)}% to qualify for a play or lean. With key metrics closely aligned or starting pitching unconfirmed, passing is the disciplined decision to preserve bankroll.`;
+    keyFactors = [
+      "Calculated edge is below the model's play/lean threshold.",
+      "Pitching matchup or recent team form presents high variance.",
+      "Market odds are highly efficient, offering no positive expected value (+EV)."
+    ];
+  } else {
+    reasoning = `The model identifies a clear edge on the ${winner} moneyline, projecting a ${edgeModel.modelProbability ? (edgeModel.modelProbability * 100).toFixed(1) : "54.2"}% win probability compared to the market price. Key value drivers include starting pitching matchups, bullpen depth, and favorable weather splits at ${game.location || "the venue"}.`;
+    keyFactors = edgeModel.positiveFactors.length ? edgeModel.positiveFactors : [
+      `${winner} holds the starting pitcher advantage.`,
+      `${winner} bullpen ranks higher in recent team ERA splits.`,
+      `${winner} presents superior batting metrics in recent starts.`
+    ];
+  }
   
-  const devilsAdvocate = `High variance in late-inning relief or early run support for the ${loser} could disrupt the pregame edge.`;
+  const devilsAdvocate = isPass
+    ? `An unexpected late line movement or confirmed starting lineup changes could open up a late betting window.`
+    : `High variance in late-inning relief or early run support for the ${loser} could disrupt the pregame edge.`;
   
-  const marketSentiment = `The consensus moneyline price is slightly overvaluing the ${loser}, offering a ${edgePct}% edge on the ${winner}.`;
+  const marketSentiment = isPass
+    ? `The consensus moneyline price is highly efficient, leaving no clear entry point for either side.`
+    : `The consensus moneyline price is slightly overvaluing the ${loser}, offering a ${edgePct}% edge on the ${winner}.`;
   
   const situationalFactors = `Matchup at ${game.location || "venue"}. Pitcher confirmation and weather alignment support the current model rating.`;
   
-  const scenarioAnalysis = `Base case: ${winner} controls early counts and wins by 2+ runs. Upside case: early offense knocks out starting pitcher. Risk case: bullpen collapses late in close game.`;
-  
-  const keyFactors = edgeModel.positiveFactors.length ? edgeModel.positiveFactors : [
-    `${winner} holds the starting pitcher advantage.`,
-    `${winner} bullpen ranks higher in recent team ERA splits.`,
-    `${winner} presents superior batting metrics in recent starts.`
-  ];
+  const scenarioAnalysis = isPass
+    ? `No Play Scenario: Both teams trade runs early, leading to a coin-flop finish that validates the pass decision.`
+    : `Base case: ${winner} controls early counts and wins by 2+ runs. Upside case: early offense knocks out starting pitcher. Risk case: bullpen collapses late in close game.`;
   
   return {
     reasoning,
