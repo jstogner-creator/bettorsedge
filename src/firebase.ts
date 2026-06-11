@@ -41,48 +41,60 @@ function getFirebase() {
     app = initializeApp(firebaseConfig);
     authInstance = getAuth(app);
 
-    setPersistence(authInstance, browserLocalPersistence)
-      .then(() => console.log('[Firebase] Auth persistence set to local'))
-      .catch(async (err) => {
-        console.error('[Firebase] Failed to set auth persistence to local, trying session:', err);
-        try {
-          await setPersistence(authInstance!, browserSessionPersistence);
-          console.log('[Firebase] Auth persistence set to session');
-        } catch (sessionErr) {
-          console.error('[Firebase] Failed to set auth persistence to session, trying memory:', sessionErr);
-          try {
-            await setPersistence(authInstance!, inMemoryPersistence);
-            console.log('[Firebase] Auth persistence set to memory');
-          } catch (memoryErr) {
-            console.error('[Firebase] Failed to set auth persistence to memory:', memoryErr);
-          }
-        }
-      });
+    const isBrowser = typeof window !== 'undefined';
 
-    try {
-      dbInstance = firebaseConfig.firestoreDatabaseId
-        ? initializeFirestore(
-            app,
-            {
+    if (isBrowser) {
+      setPersistence(authInstance, browserLocalPersistence)
+        .then(() => console.log('[Firebase] Auth persistence set to local'))
+        .catch(async (err) => {
+          console.error('[Firebase] Failed to set auth persistence to local, trying session:', err);
+          try {
+            await setPersistence(authInstance!, browserSessionPersistence);
+            console.log('[Firebase] Auth persistence set to session');
+          } catch (sessionErr) {
+            console.error('[Firebase] Failed to set auth persistence to session, trying memory:', sessionErr);
+            try {
+              await setPersistence(authInstance!, inMemoryPersistence);
+              console.log('[Firebase] Auth persistence set to memory');
+            } catch (memoryErr) {
+              console.error('[Firebase] Failed to set auth persistence to memory:', memoryErr);
+            }
+          }
+        });
+
+      try {
+        dbInstance = firebaseConfig.firestoreDatabaseId
+          ? initializeFirestore(
+              app,
+              {
+                localCache: persistentLocalCache({
+                  tabManager: persistentMultipleTabManager(),
+                }),
+              },
+              firebaseConfig.firestoreDatabaseId
+            )
+          : initializeFirestore(app, {
               localCache: persistentLocalCache({
                 tabManager: persistentMultipleTabManager(),
               }),
-            },
-            firebaseConfig.firestoreDatabaseId
-          )
-        : initializeFirestore(app, {
-            localCache: persistentLocalCache({
-              tabManager: persistentMultipleTabManager(),
-            }),
-          });
-    } catch (e) {
-      console.warn('[Firebase] Failed to initialize persistent cache, falling back to memory cache', e);
+            });
+      } catch (e) {
+        console.warn('[Firebase] Failed to initialize persistent cache, falling back to memory cache', e);
+        dbInstance = firebaseConfig.firestoreDatabaseId
+          ? initializeFirestore(
+              app,
+              { localCache: memoryLocalCache() },
+              firebaseConfig.firestoreDatabaseId
+            )
+          : initializeFirestore(app, { localCache: memoryLocalCache() });
+      }
+    } else {
+      // In Node environment, use simple memory cache and in-memory persistence
+      setPersistence(authInstance, inMemoryPersistence)
+        .catch(err => console.warn('[Firebase] Failed to set in-memory persistence:', err));
+      
       dbInstance = firebaseConfig.firestoreDatabaseId
-        ? initializeFirestore(
-            app,
-            { localCache: memoryLocalCache() },
-            firebaseConfig.firestoreDatabaseId
-          )
+        ? initializeFirestore(app, { localCache: memoryLocalCache() }, firebaseConfig.firestoreDatabaseId)
         : initializeFirestore(app, { localCache: memoryLocalCache() });
     }
   }
@@ -106,7 +118,7 @@ export async function logLoginError(error: any, context: string) {
       code: error.code || 'unknown',
       context,
       timestamp: serverTimestamp(),
-      userAgent: navigator.userAgent,
+      userAgent: typeof window !== 'undefined' ? navigator.userAgent : 'Node.js Server',
     });
     console.log('[Auth] Logged error to Firestore');
   } catch (logErr) {
@@ -145,14 +157,15 @@ export async function loginWithGoogle(): Promise<LoginResult> {
 }
 
 export async function handleGoogleRedirectResult(): Promise<User | null> {
+  if (typeof document === 'undefined') return null;
   const auth = getAuthInstance();
   console.log('[Auth] Checking for redirect result...');
-
+ 
   const wasRedirectPending = document.cookie.includes('redirect_login_pending=true');
   if (wasRedirectPending) {
     console.log('[Auth] Found redirect_login_pending flag in cookie');
   }
-
+ 
   try {
     const result = await getRedirectResult(auth);
     if (result) {
@@ -160,7 +173,7 @@ export async function handleGoogleRedirectResult(): Promise<User | null> {
       document.cookie = 'redirect_login_pending=; path=/; max-age=0; SameSite=Lax';
       return result.user;
     }
-
+ 
     if (wasRedirectPending && !auth.currentUser) {
       console.warn('[Auth] Redirect was pending but getRedirectResult returned null.');
       document.cookie = 'redirect_login_pending=; path=/; max-age=0; SameSite=Lax';

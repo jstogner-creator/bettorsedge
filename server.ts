@@ -18,6 +18,7 @@ import rateLimit from "express-rate-limit";
 import { initializeApp, applicationDefault } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
+import { bettorsEdge } from "./src/services/gemini";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -121,6 +122,161 @@ async function proxyFirebaseHelper(req: Request, res: Response, targetUrl: strin
     if (!res.headersSent) {
       res.status(502).json({ error: "Failed to proxy Firebase auth helper" });
     }
+  }
+}
+
+interface TaskJob {
+  id: string;
+  type: "importSchedule" | "batchAnalyzeMatchups";
+  status: "pending" | "running" | "completed" | "failed";
+  params: any;
+  progress: string;
+  error?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  retryCount: number;
+}
+
+class TaskQueue {
+  private queue: TaskJob[] = [];
+  private isProcessing = false;
+  private maxRetries = 2;
+
+  async addJob(type: TaskJob["type"], params: any): Promise<TaskJob> {
+    const job: TaskJob = {
+      id: crypto.randomUUID(),
+      type,
+      status: "pending",
+      params,
+      progress: "Job queued",
+      createdAt: new Date().toISOString(),
+      retryCount: 0,
+    };
+    this.queue.push(job);
+    console.log(`[TaskQueue] Job ${job.id} added: ${type}`);
+    this.processQueue();
+    return job;
+  }
+
+  getJobs(): TaskJob[] {
+    return this.queue;
+  }
+
+  getJob(id: string): TaskJob | undefined {
+    return this.queue.find((j) => j.id === id);
+  }
+
+  private async processQueue() {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
+
+    while (this.queue.some((j) => j.status === "pending")) {
+      const job = this.queue.find((j) => j.status === "pending")!;
+      job.status = "running";
+      job.startedAt = new Date().toISOString();
+      job.progress = "Starting execution";
+
+      try {
+        console.log(`[TaskQueue] Processing job ${job.id} (${job.type})`);
+        if (job.type === "importSchedule") {
+          const { league, date, days, force } = job.params;
+          const startDate = date ? new Date(date) : new Date();
+          await bettorsEdge.importSchedule(
+            league,
+            startDate,
+            days || 7,
+            (msg) => {
+              job.progress = msg;
+              console.log(`[TaskQueue] Job ${job.id} progress: ${msg}`);
+            },
+            force || false
+          );
+        } else if (job.type === "batchAnalyzeMatchups") {
+          const { league, date, force } = job.params;
+          const targetDate = date || new Date().toISOString().split("T")[0];
+          job.progress = "Fetching schedule...";
+          const games = await bettorsEdge.getDailySchedule(league, targetDate, force || false);
+          
+          if (games.length === 0) {
+            job.progress = `No games found for ${league} on ${targetDate}.`;
+          } else {
+            job.progress = `Analyzing ${games.length} matchups...`;
+            const savedPredictions = await bettorsEdge.getPredictionsForDate(targetDate);
+            await bettorsEdge.batchAnalyzeMatchups(
+              games,
+              targetDate,
+              savedPredictions,
+              [],
+              (msg) => {
+                job.progress = msg;
+                console.log(`[TaskQueue] Job ${job.id} progress: ${msg}`);
+              }
+            );
+          }
+        }
+        
+        job.status = "completed";
+        job.completedAt = new Date().toISOString();
+        job.progress = "Completed successfully";
+        console.log(`[TaskQueue] Job ${job.id} completed successfully`);
+      } catch (error: any) {
+        console.error(`[TaskQueue] Job ${job.id} failed:`, error);
+        job.retryCount++;
+        if (job.retryCount <= this.maxRetries) {
+          job.status = "pending";
+          job.progress = `Failed, retrying (${job.retryCount}/${this.maxRetries}): ${error.message}`;
+        } else {
+          job.status = "failed";
+          job.error = error.message;
+          job.completedAt = new Date().toISOString();
+          job.progress = `Failed: ${error.message}`;
+        }
+      }
+    }
+
+    this.isProcessing = false;
+  }
+}
+
+const taskQueue = new TaskQueue();
+
+function startBackgroundScheduler() {
+  console.log("[Scheduler] Initializing background worker scheduler (30-minute interval)...");
+  
+  // Run initial check after 10 seconds
+  setTimeout(() => {
+    console.log("[Scheduler] Triggering initial background slate check...");
+    triggerSlateUpdates();
+  }, 10000);
+
+  setInterval(() => {
+    console.log("[Scheduler] Triggering periodic background slate check...");
+    triggerSlateUpdates();
+  }, 30 * 60 * 1000); // 30 minutes
+}
+
+async function triggerSlateUpdates() {
+  try {
+    const todayStr = new Date().toISOString().split("T")[0];
+    console.log(`[Scheduler] Checking and updating MLB schedule for today: ${todayStr}`);
+    
+    // Add job to import MLB schedule for the next 3 days
+    await taskQueue.addJob("importSchedule", {
+      league: "MLB",
+      date: todayStr,
+      days: 3,
+      force: false
+    });
+
+    // Add job to analyze matches
+    await taskQueue.addJob("batchAnalyzeMatchups", {
+      league: "MLB",
+      date: todayStr,
+      force: false
+    });
+  } catch (error) {
+    console.error("[Scheduler] Failed to trigger slate updates:", error);
   }
 }
 
@@ -607,6 +763,56 @@ async function startServer() {
     } catch (error: any) {
       console.error("[Snark API] Error:", error);
       res.status(500).json({ error: error.message || "Failed to consult Snark" });
+    }
+  });
+
+  // Queue status endpoint (admin only)
+  app.get("/api/admin/queue-status", authenticate, async (req, res) => {
+    const adminUser = (req as any).user;
+    try {
+      const userDoc = await db.collection('users').doc(adminUser.uid).get();
+      const userData = userDoc.data();
+      const isAdmin = userData?.role === 'admin' || adminUser.email === 'jstogner@risenetworkcabling.com';
+      
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      res.json({
+        success: true,
+        jobs: taskQueue.getJobs()
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to get queue status", message: error.message });
+    }
+  });
+
+  // Trigger job endpoint (admin only)
+  app.post("/api/admin/trigger-job", authenticate, async (req, res) => {
+    const adminUser = (req as any).user;
+    const { type, params } = req.body;
+
+    if (!type || !["importSchedule", "batchAnalyzeMatchups"].includes(type)) {
+      return res.status(400).json({ error: "Invalid job type" });
+    }
+
+    try {
+      const userDoc = await db.collection('users').doc(adminUser.uid).get();
+      const userData = userDoc.data();
+      const isAdmin = userData?.role === 'admin' || adminUser.email === 'jstogner@risenetworkcabling.com';
+      
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      const job = await taskQueue.addJob(type, params || {});
+      res.json({
+        success: true,
+        message: `Job ${job.id} triggered successfully`,
+        job
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to trigger job", message: error.message });
     }
   });
 
@@ -1298,6 +1504,7 @@ const fetchKalshiWithRetry = async (
 
   const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    startBackgroundScheduler();
   });
 
   // Graceful shutdown

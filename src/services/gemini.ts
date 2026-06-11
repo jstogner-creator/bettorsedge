@@ -32,6 +32,12 @@ type EdgeModelResult = {
   marketNarrative: string;
   recommendation: "PLAY" | "LEAN" | "NO_PLAY";
   fairOdds: number;
+  reverseLineMovement?: {
+    detected: boolean;
+    team: string;
+    openingOdds: string;
+    currentOdds: string;
+  };
 };
 
 type AiPredictionPayload = {
@@ -50,6 +56,7 @@ type AiPredictionPayload = {
   matchupAnalysis?: Prediction["matchupAnalysis"];
   playerMatchups?: Prediction["playerMatchups"];
   teamStatsComparison?: Prediction["teamStatsComparison"];
+  groundingUrls?: Prediction["groundingUrls"];
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -351,6 +358,7 @@ export class BettorsEdge {
     const awayRecent = parseLastFive(game.awayTeamStats?.last5);
 
     let homeProbability = 0.5;
+    let reverseLineMovement: EdgeModelResult["reverseLineMovement"] = undefined;
     const dataQualityReasons: string[] = [];
     const positiveFactors: string[] = [];
     const riskFactors: string[] = [];
@@ -433,6 +441,20 @@ export class BettorsEdge {
           bullpenEdge = (normAwayStats.teamEra - normHomeStats.teamEra) * 0.015;
         }
 
+        // Bullpen Fatigue adjustments
+        if (mlbContext?.bullpenFatigue) {
+          const homeFatigue = mlbContext.bullpenFatigue.home;
+          const awayFatigue = mlbContext.bullpenFatigue.away;
+          if (homeFatigue > 0.70) {
+            bullpenEdge -= (homeFatigue - 0.70) * 0.15;
+            riskFactors.push(`${game.homeTeam} bullpen fatigue index is elevated at ${(homeFatigue * 100).toFixed(0)}%.`);
+          }
+          if (awayFatigue > 0.70) {
+            bullpenEdge += (awayFatigue - 0.70) * 0.15;
+            positiveFactors.push(`${game.awayTeam} bullpen fatigue index is elevated at ${(awayFatigue * 100).toFixed(0)}%, giving ${game.homeTeam} a bullpen advantage.`);
+          }
+        }
+
         // Offensive Edge
         offensiveEdge = (normHomeStats.runsPerGame - normAwayStats.runsPerGame) * 0.025;
         if (normHomeStats.ops > 0 && normAwayStats.ops > 0) {
@@ -508,6 +530,36 @@ export class BettorsEdge {
       // Sum all baseball specific factors and update home probability
       const baseballScore = pitcherEdge + bullpenEdge + offensiveEdge + defensiveEdge + splitEdge + formEdge + injuryImpact + h2hEdge;
       homeProbability += baseballScore;
+
+      // Reverse Line Movement (RLM) sharp money detection
+      let rlmNudge = 0;
+      if (mlbContext?.odds?.openingOdds && mlbContext?.odds?.currentOdds) {
+        const opHome = mlbContext.odds.openingOdds.home;
+        const opAway = mlbContext.odds.openingOdds.away;
+        const curHome = mlbContext.odds.currentOdds.home;
+        const curAway = mlbContext.odds.currentOdds.away;
+
+        if (curHome < opHome - 0.03) {
+          rlmNudge = 0.025; // 2.5% nudge to home team
+          reverseLineMovement = {
+            detected: true,
+            team: game.homeTeam,
+            openingOdds: `${opHome}`,
+            currentOdds: `${curHome}`
+          };
+          positiveFactors.push(`Reverse Line Movement detected: sharp money moving on ${game.homeTeam} (opened ${opHome}, current ${curHome}).`);
+        } else if (curAway < opAway - 0.03) {
+          rlmNudge = -0.025; // 2.5% nudge to away team
+          reverseLineMovement = {
+            detected: true,
+            team: game.awayTeam,
+            openingOdds: `${opAway}`,
+            currentOdds: `${curAway}`
+          };
+          positiveFactors.push(`Reverse Line Movement detected: sharp money moving on ${game.awayTeam} (opened ${opAway}, current ${curAway}).`);
+        }
+      }
+      homeProbability += rlmNudge;
 
       // Add descriptive decision notes
       if (pitcherEdge > 0.015) positiveFactors.push(`${game.homeTeam} has a starting pitcher advantage.`);
@@ -596,6 +648,7 @@ export class BettorsEdge {
       marketNarrative,
       recommendation,
       fairOdds: probabilityToAmerican(modelProbability),
+      reverseLineMovement,
     };
   }
 
@@ -623,12 +676,13 @@ export class BettorsEdge {
     const predictedWinner = predictedHome ? analysisGame.homeTeam : analysisGame.awayTeam;
     const winner = edgeModel.recommendation === "NO_PLAY" ? "PASS" : predictedWinner;
 
-    const systemPrompt = "You are Bettors Edge, a senior MLB betting analyst and risk manager. Explain the deterministic model with sharp, bettor-facing language. Never invent pitcher names, injuries, lineups, odds, weather, umpire data, or news. If a data point is missing, classify it as a risk or missing input instead of pretending it exists. Avoid any developer or model backend debug terminology such as API-Sports, provider payload, OpenAI, model version, prompt version, QA adjusted, or API audit notes. Return only JSON.";
+    const systemPrompt = "You are Bettors Edge, a senior MLB betting analyst and risk manager. Explain the deterministic model with sharp, bettor-facing language. Ground your qualitative analyses and historical team updates in references and news typical of ESPN.com, MLB.com, and Sports-Reference.com. Never invent pitcher names, injuries, lineups, odds, weather, umpire data, or news. If a data point is missing, classify it as a risk or missing input instead of pretending it exists. Avoid any developer or model backend debug terminology such as API-Sports, provider payload, OpenAI, model version, prompt version, QA adjusted, or API audit notes. Return only JSON.";
     const userPrompt = `
 Create a premium betting-card analysis for this matchup. The deterministic model controls the final recommendation, but your job is to explain it like a sharp bettor: decision, edge, market context, risk controls, and why this is or is not a bet.
 
 Rules:
 - Act as a professional sports betting analyst.
+- Ground your analysis in news, trends, and statistics aligned with ESPN.com, MLB.com, and Sports-Reference.com (Baseball-Reference). Reference these sources in your narrative when highlighting pitcher h2h splits, bullpen usage warnings, or recent roster updates.
 - Do NOT use developer or API status wording (e.g. "API-Sports", "provider payload", "OpenAI", "model version", "prompt version", "QA adjusted", "API audit notes").
 - If probable starting pitchers are missing in the data, explicitly state that this pick is preliminary and confidence is capped due to unconfirmed pitching matchups.
 - If recommendation is NO_PLAY, do not force a pick. Explain why passing is disciplined.
@@ -665,7 +719,12 @@ Return JSON with this shape:
     "confidenceBreakdown": "what pushed confidence up/down"
   },
   "playerMatchups": [],
-  "teamStatsComparison": []
+  "teamStatsComparison": [],
+  "groundingUrls": [
+    { "title": "ESPN MLB Center", "uri": "https://www.espn.com/mlb/" },
+    { "title": "MLB Official News", "uri": "https://www.mlb.com/" },
+    { "title": "Baseball-Reference Historical Stats", "uri": "https://www.sports-reference.com/" }
+  ]
 }`;
 
     let aiPayload: AiPredictionPayload = {};
@@ -742,6 +801,51 @@ Return JSON with this shape:
       ], 5).join(" ");
     }
 
+    let adjustedProjectedTotal = aiPayload.projectedTotal ?? 8.5;
+    let adjustedScorePrediction = aiPayload.scorePrediction || { home: 4.2, away: 4.3 };
+
+    if (analysisGame.league === "MLB" && mlbContext) {
+      const weather = mlbContext.weather;
+      const stadium = mlbContext.stadium;
+
+      let adjustment = 0;
+      
+      // Park Factor adjustment
+      if (stadium) {
+        // park factor baseline is 1.00
+        adjustment += (stadium.parkFactor - 1.00) * 4;
+      }
+
+      // Weather temperature & wind adjustment
+      if (weather) {
+        // baseline temperature is 70 F
+        adjustment += (weather.temp - 70) * 0.04;
+
+        // Wind adjustment
+        if (weather.windDir === "OUT" && weather.windSpeed > 8) {
+          adjustment += (weather.windSpeed - 8) * 0.1 + 0.5;
+        } else if (weather.windDir === "IN" && weather.windSpeed > 8) {
+          adjustment -= (weather.windSpeed - 8) * 0.08 + 0.4;
+        }
+      }
+
+      if (adjustment !== 0) {
+        adjustedProjectedTotal = Number((adjustedProjectedTotal + adjustment).toFixed(2));
+        
+        // Adjust individual scores proportionally
+        const sumScore = adjustedScorePrediction.home + adjustedScorePrediction.away;
+        if (sumScore > 0) {
+          const homeRatio = adjustedScorePrediction.home / sumScore;
+          const awayRatio = adjustedScorePrediction.away / sumScore;
+          adjustedScorePrediction.home = Number((adjustedScorePrediction.home + adjustment * homeRatio).toFixed(1));
+          adjustedScorePrediction.away = Number((adjustedScorePrediction.away + adjustment * awayRatio).toFixed(1));
+        } else {
+          adjustedScorePrediction.home = Number((adjustedProjectedTotal / 2).toFixed(1));
+          adjustedScorePrediction.away = Number((adjustedProjectedTotal / 2).toFixed(1));
+        }
+      }
+    }
+
     const prediction: Prediction = {
       gameId: analysisGame.id,
       league: analysisGame.league,
@@ -757,8 +861,8 @@ Return JSON with this shape:
       scenarioAnalysis: aiPayload.scenarioAnalysis || `Base case: ${edgeModel.marketNarrative} Upside case: late market movement creates a better entry. Risk case: missing starters or injury context changes the true price.`,
       keyFactors: compactList(aiPayload.keyFactors?.length ? aiPayload.keyFactors : edgeModel.positiveFactors, 5),
       injuries: aiPayload.injuries || existingPrediction?.injuries || [],
-      scorePrediction: aiPayload.scorePrediction,
-      projectedTotal: aiPayload.projectedTotal,
+      scorePrediction: adjustedScorePrediction,
+      projectedTotal: adjustedProjectedTotal,
       recommendedTotalLine: aiPayload.recommendedTotalLine || "PASS on total unless a separate total edge is confirmed by odds and run-context data.",
       matchupAnalysis: aiPayload.matchupAnalysis || fallbackMatchupAnalysis,
       playerMatchups: aiPayload.playerMatchups || [],
@@ -775,6 +879,11 @@ Return JSON with this shape:
       qaNotes: `Recommendation=${edgeModel.recommendation}; selected=${edgeModel.selectedTeam}; fairOdds=${edgeModel.fairOdds}; dataQuality=${edgeModel.dataQuality}; risks=${edgeModel.riskFactors.join(" | ") || "none"}.`,
       marketExpectations: analysisGame.marketExpectations,
       mlbContext: (analysisGame as any).mlbContext,
+      stadium: mlbContext?.stadium,
+      weather: mlbContext?.weather,
+      bullpenFatigue: mlbContext?.bullpenFatigue,
+      reverseLineMovement: edgeModel.reverseLineMovement,
+      groundingUrls: aiPayload.groundingUrls || existingPrediction?.groundingUrls || [],
       sourceAudit: {
         googleDriveAccessed: false,
         nbaOfficialAccessed: !!(analysisGame as any).apiSportsGameId,
@@ -971,3 +1080,61 @@ Return JSON with this shape:
 }
 
 export const bettorsEdge = new BettorsEdge();
+
+function generateMockAiPayload(game: Game, edgeModel: EdgeModelResult): AiPredictionPayload {
+  const winner = edgeModel.selectedTeam;
+  const loser = edgeModel.selectedSide === "home" ? game.awayTeam : game.homeTeam;
+  const edgePct = edgeModel.edge ? (edgeModel.edge * 100).toFixed(1) : "3.8";
+  
+  // Generate realistic score prediction based on team average runs or 4.5 baseline
+  const homeStats = (game as any).mlbContext?.normalizedTeamStats?.home;
+  const awayStats = (game as any).mlbContext?.normalizedTeamStats?.away;
+  const homeRuns = homeStats?.runsPerGame || 4.6;
+  const awayRuns = awayStats?.runsPerGame || 4.2;
+  
+  let predictedHomeScore = Math.round(homeRuns + (edgeModel.selectedSide === "home" ? 0.8 : -0.8));
+  let predictedAwayScore = Math.round(awayRuns + (edgeModel.selectedSide === "away" ? 0.8 : -0.8));
+  if (predictedHomeScore === predictedAwayScore) {
+    if (edgeModel.selectedSide === "home") predictedHomeScore += 1;
+    else predictedAwayScore += 1;
+  }
+  
+  const projectedTotal = predictedHomeScore + predictedAwayScore;
+  
+  const reasoning = `The model identifies a clear edge on the ${winner} moneyline, projecting a ${edgeModel.modelProbability ? (edgeModel.modelProbability * 100).toFixed(1) : "54.2"}% win probability compared to the market price. Key value drivers include starting pitching matchups and bullpen depth.`;
+  
+  const devilsAdvocate = `High variance in late-inning relief or early run support for the ${loser} could disrupt the pregame edge.`;
+  
+  const marketSentiment = `The consensus moneyline price is slightly overvaluing the ${loser}, offering a ${edgePct}% edge on the ${winner}.`;
+  
+  const situationalFactors = `Matchup at ${game.location || "venue"}. Pitcher confirmation and weather alignment support the current model rating.`;
+  
+  const scenarioAnalysis = `Base case: ${winner} controls early counts and wins by 2+ runs. Upside case: early offense knocks out starting pitcher. Risk case: bullpen collapses late in close game.`;
+  
+  const keyFactors = edgeModel.positiveFactors.length ? edgeModel.positiveFactors : [
+    `${winner} holds the starting pitcher advantage.`,
+    `${winner} bullpen ranks higher in recent team ERA splits.`,
+    `${winner} presents superior batting metrics in recent starts.`
+  ];
+  
+  return {
+    reasoning,
+    devilsAdvocate,
+    marketSentiment,
+    situationalFactors,
+    scenarioAnalysis,
+    keyFactors,
+    scorePrediction: {
+      home: predictedHomeScore,
+      away: predictedAwayScore
+    },
+    projectedTotal,
+    recommendedTotalLine: `${projectedTotal - 0.5} OVER`,
+    injuries: [],
+    groundingUrls: [
+      { title: "ESPN MLB Center", uri: "https://www.espn.com/mlb/" },
+      { title: "MLB Official News & Standings", uri: "https://www.mlb.com/" },
+      { title: "Baseball-Reference Analytics & Records", uri: "https://www.sports-reference.com/" }
+    ],
+  };
+}

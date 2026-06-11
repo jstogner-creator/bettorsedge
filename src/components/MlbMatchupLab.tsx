@@ -17,6 +17,8 @@ import {
   Shield,
   ShieldCheck,
   RefreshCw,
+  Thermometer,
+  Wind,
 } from "lucide-react";
 import { Game, Prediction } from "../types";
 import { cn } from "../lib/utils";
@@ -52,7 +54,7 @@ function formatOdds(odds?: number | null) {
 export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: MlbMatchupLabProps) {
   const [showWidget, setShowWidget] = useState(false);
 
-  const mlbContext = (game as any).mlbContext;
+  const mlbContext = (game as any).mlbContext || prediction?.mlbContext;
   const h2h = Array.isArray(prediction?.previousMatchups) ? prediction.previousMatchups : [];
   const pitcherMatchup = prediction?.pitcherMatchup || mlbContext?.pitching;
   
@@ -345,6 +347,17 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
           <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> Date: {game.date}</span>
           <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> Time: {game.time}</span>
           <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> Venue: {game.location}</span>
+          {prediction?.weather && (
+            <span className="flex items-center gap-1 text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded border border-slate-800/30">
+              <Thermometer className="w-3 h-3 text-amber-500" /> Temp: {prediction.weather.temp}°F
+              <Wind className="w-3 h-3 text-cyan-400 ml-1.5" /> Wind: {prediction.weather.windSpeed} mph {prediction.weather.windDir} ({prediction.weather.condition})
+            </span>
+          )}
+          {prediction?.stadium && (
+            <span className="flex items-center gap-1 text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded border border-slate-800/30">
+              <TrendingUp className="w-3 h-3 text-emerald-400" /> Alt: {prediction.stadium.elevation}ft (PF: {prediction.stadium.parkFactor.toFixed(2)})
+            </span>
+          )}
         </div>
       </section>
 
@@ -400,6 +413,43 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
             <span className="font-mono font-black text-white">{formatOdds(homeML)}</span>
           </div>
         </div>
+
+        {/* Odds Movement Tracker */}
+        {prediction?.mlbContext?.odds?.openingOdds && prediction?.mlbContext?.odds?.currentOdds && (
+          <div className="mt-4 p-3.5 rounded-xl border border-indigo-500/10 bg-indigo-500/[0.02] space-y-2">
+            <span className="text-[9px] font-black uppercase text-indigo-300 tracking-wider block">Odds Movement Tracker</span>
+            <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-900/80 flex justify-between items-center">
+                <div>
+                  <span className="text-[8.5px] text-slate-500 block uppercase font-bold">{game.awayTeam.substring(0, 3)} ML</span>
+                  <span className="text-[10px] text-slate-400">Open: {prediction.mlbContext.odds.openingOdds.away}</span>
+                </div>
+                <div>
+                  <span className="text-xs font-black text-slate-200">Current: {prediction.mlbContext.odds.currentOdds.away}</span>
+                </div>
+              </div>
+
+              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-900/80 flex justify-between items-center">
+                <div>
+                  <span className="text-[8.5px] text-slate-500 block uppercase font-bold">{game.homeTeam.substring(0, 3)} ML</span>
+                  <span className="text-[10px] text-slate-400">Open: {prediction.mlbContext.odds.openingOdds.home}</span>
+                </div>
+                <div>
+                  <span className="text-xs font-black text-slate-200">Current: {prediction.mlbContext.odds.currentOdds.home}</span>
+                </div>
+              </div>
+            </div>
+            
+            {prediction?.reverseLineMovement?.detected && (
+              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-2.5 text-xs text-emerald-300 flex items-center gap-2 mt-2">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>
+                  <strong>Reverse Line Movement:</strong> Sharp backing on <strong>{prediction.reverseLineMovement.team}</strong>. Opened {prediction.reverseLineMovement.openingOdds}, currently {prediction.reverseLineMovement.currentOdds}.
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {/* 4. Team Edge */}
@@ -434,12 +484,18 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
               }
             }
 
+            const isBullpen = stat.label === "Bullpen ERA";
+            const homeFatigue = prediction?.bullpenFatigue?.home;
+            const awayFatigue = prediction?.bullpenFatigue?.away;
+            const homeFatigued = isBullpen && homeFatigue && homeFatigue > 0.70;
+            const awayFatigued = isBullpen && awayFatigue && awayFatigue > 0.70;
+
             const homeLabel = stat.customString && homeTeamStats 
               ? (stat.label.includes("Splits") ? `${homeVal} (runs: ${homeTeamStats.homeSplits.runs} / allowed: ${homeTeamStats.homeSplits.runsAllowed})` : `${homeVal} OPS (OBP: ${homeTeamStats.obp.toFixed(3)} / SLG: ${homeTeamStats.slg.toFixed(3)})`)
-              : homeVal;
+              : (homeFatigued ? `${homeVal} (🚨 Fatigue: ${(homeFatigue * 100).toFixed(0)}%)` : homeVal);
             const awayLabel = stat.customString && awayTeamStats
               ? (stat.label.includes("Splits") ? `${awayVal} (runs: ${awayTeamStats.awaySplits.runs} / allowed: ${awayTeamStats.awaySplits.runsAllowed})` : `${awayVal} OPS (OBP: ${awayTeamStats.obp.toFixed(3)} / SLG: ${awayTeamStats.slg.toFixed(3)})`)
-              : awayVal;
+              : (awayFatigued ? `(🚨 Fatigue: ${(awayFatigue * 100).toFixed(0)}%) ${awayVal}` : awayVal);
 
             return (
               <div key={idx} className="flex items-center gap-3">

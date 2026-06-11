@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, TrendingUp, BrainCircuit, Coins, Flag, Scale, Zap, Activity, ExternalLink, Info } from "lucide-react";
+import { X, TrendingUp, BrainCircuit, Coins, Flag, Scale, Zap, Activity, ExternalLink, Info, ShieldCheck, AlertTriangle } from "lucide-react";
 import { Prediction, Game } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import ReactMarkdown from "react-markdown";

@@ -27,6 +27,7 @@ export interface Game {
   apiSportsGameId?: number;
   apiSportsHomeTeamId?: number;
   apiSportsAwayTeamId?: number;
+  mlbContext?: any;
   kalshiOdds?: {
     yes: number;
     no: number;
@@ -143,6 +144,27 @@ export interface Prediction {
     summary?: string;
   };
   mlbContext?: any;
+  stadium?: {
+    name: string;
+    elevation: number;
+    parkFactor: number;
+  };
+  weather?: {
+    temp: number;
+    windSpeed: number;
+    windDir: "IN" | "OUT" | "CROSS" | "CALM";
+    condition: string;
+  };
+  bullpenFatigue?: {
+    home: number;
+    away: number;
+  };
+  reverseLineMovement?: {
+    detected: boolean;
+    team: string;
+    openingOdds: string;
+    currentOdds: string;
+  };
   
   // Resolution & Learning
   actualWinner?: string;
