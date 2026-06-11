@@ -185,13 +185,16 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
 
   // Widget html
   const widgetHtml = useMemo(() => {
-    if (!game.apiSportsGameId) return "";
-    const h2hId = game.apiSportsHomeTeamId && game.apiSportsAwayTeamId ? `${game.apiSportsHomeTeamId}-${game.apiSportsAwayTeamId}` : "";
+    // Fallback to demo game ID (1280387) if unconfigured, to allow live preview/QA
+    const gameId = game.apiSportsGameId || 1280387;
+    const h2hId = (game.apiSportsHomeTeamId && game.apiSportsAwayTeamId) 
+      ? `${game.apiSportsHomeTeamId}-${game.apiSportsAwayTeamId}` 
+      : "1-2"; // Fallback demo H2H
     return `
       <div class="space-y-4">
         <api-sports-widget
           data-type="game"
-          data-game-id="${game.apiSportsGameId}"
+          data-game-id="${gameId}"
           data-refresh="30"
           data-show-toolbar="true"
           data-tab="all"
@@ -818,20 +821,22 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
       {activeDetailTab === "live" && (
         <div className="space-y-5 animate-in fade-in duration-200">
           {/* Provider game widget */}
-          {game.apiSportsGameId ? (
-            <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-              <h4 className="text-xs font-black text-slate-350 uppercase tracking-widest flex items-center gap-2 mb-4">
+          <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4">
+              <h4 className="text-xs font-black text-slate-350 uppercase tracking-widest flex items-center gap-2">
                 <Info className="w-4 h-4 text-cyan-400" /> Live Provider details widget
               </h4>
-              <div className="min-h-[500px] overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60 p-2">
-                <ApiSportsWidgetEmbed html={widgetHtml} />
-              </div>
-            </section>
-          ) : (
-            <div className="text-xs text-slate-500 bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-center italic">
-              Live provider details widget is not active or unconfigured for this game/league.
+              {!game.apiSportsGameId && (
+                <span className="text-[10px] font-extrabold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 uppercase tracking-wider">
+                  ⚠️ Demo Mode (API Key Missing)
+                </span>
+              )}
             </div>
-          )}
+            
+            <div className="min-h-[500px] overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60 p-2">
+              <ApiSportsWidgetEmbed html={widgetHtml} />
+            </div>
+          </section>
         </div>
       )}
     </div>

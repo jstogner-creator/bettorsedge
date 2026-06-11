@@ -10,7 +10,7 @@ const firebaseConfigPath = path.join(__dirname, "../firebase-applet-config.json"
 const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf8"));
 
 const app = initializeApp(firebaseConfig);
-const db = initializeFirestore(app, {}, firebaseConfig.firestoreDatabaseId);
+const db = initializeFirestore(app, {});
 
 async function run() {
   console.log("Querying Firestore predictions with Client SDK & Custom DB ID...");
