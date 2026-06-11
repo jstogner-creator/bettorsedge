@@ -219,6 +219,9 @@ export const GameCard: React.FC<GameCardProps> = ({
       "openai",
       "model=",
       "prompt=",
+      "qa adjusted",
+      "api audit notes",
+      "audit notes",
     ];
 
     const rawFactors = Array.isArray(prediction.keyFactors) ? prediction.keyFactors : [];
@@ -678,6 +681,8 @@ export const GameCard: React.FC<GameCardProps> = ({
                 <p className="font-bold">Analyzing Matchup...</p>
                 <p className="text-xs mt-1 opacity-80">Processing stats, injuries, and market data.</p>
               </div>
+            ) : isMlb ? (
+              <MlbMatchupLab game={game} prediction={prediction} onReanalyze={onReanalyze} isAnalyzing={isAnalyzing} />
             ) : prediction ? (
               <div className="space-y-4">
                 {/* Post-Mortem Analysis (Move to top if incorrect) */}

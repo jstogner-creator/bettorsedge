@@ -29,6 +29,7 @@ import { Toast } from "../components/Toast";
 import { SportControls } from "../components/SportControls";
 import { LegalModal } from "../components/LegalModal";
 import { cn, getSlateDate, getNYDate } from "../lib/utils";
+import { normalizeGame } from "../utils/normalize";
 import { getAuthInstance, getDb, loginWithGoogle, logout, getIdToken } from "../firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
 import {
@@ -873,7 +874,7 @@ export function Dashboard({
     setSelectedGameIds(new Set());
     fetchGames().catch(console.error);
     // We no longer cancel analysis on tab change to allow background processing
-  }, [activeTab, selectedDate]);
+  }, [activeTab, selectedDate, user]);
 
   const [alertedGames, setAlertedGames] = useState<Set<string>>(new Set());
 
@@ -1102,18 +1103,40 @@ const fetchGames = async (force: boolean = false) => {
       ? (activeTab === "NBA" ? apiSportsService.getGames(selectedDate).catch(() => []) : apiSportsMlbService.getGames(selectedDate).catch(() => []))
       : Promise.resolve([]);
 
-    // 3. ONLY fetch AI schedule if ESPN returned 0 games OR if force is true
+    // 3. Fetch AI schedule. If ESPN has games and we are not forcing, try direct Firestore cache lookup
     const shouldFetchAiSchedule = espnGames.length === 0 || force;
     
-    const aiSchedulePromise = shouldFetchAiSchedule
-      ? bettorsEdge.getDailySchedule(activeTab, dateStrIso, force).catch(() => [])
-      : Promise.resolve([]);
-
-    [apiSportsGames, aiGames] = await Promise.all([apiSportsPromise, aiSchedulePromise]);
-
     if (shouldFetchAiSchedule) {
-      console.log(`[Dashboard] fetchGames: AI/Firestore fetch SUCCESS: ${aiGames.length} games for ${activeTab}`);
-      addDebugLog(`AI/Firestore returned ${aiGames.length} games for ${activeTab}`);
+      try {
+        aiGames = await bettorsEdge.getDailySchedule(activeTab, dateStrIso, force);
+        console.log(`[Dashboard] fetchGames: AI/Firestore fetch SUCCESS: ${aiGames.length} games for ${activeTab}`);
+        addDebugLog(`AI/Firestore returned ${aiGames.length} games for ${activeTab}`);
+      } catch (e) {
+        console.warn("[Dashboard] fetchGames: AI schedule fetch failed:", e);
+      }
+    } else {
+      // Direct Firestore cache read (very fast, no external API calls)
+      try {
+        const db = getDb();
+        const scheduleRef = doc(db, "schedules", `${activeTab}-${dateStrIso}`);
+        const cached = await getDoc(scheduleRef);
+        if (cached.exists()) {
+          const data = cached.data();
+          if (Array.isArray(data.games)) {
+            aiGames = data.games.map((g: any) => normalizeGame(g, activeTab, dateStrIso));
+            console.log(`[Dashboard] fetchGames: Loaded ${aiGames.length} cached schedule games from Firestore`);
+            addDebugLog(`Loaded ${aiGames.length} cached schedule games from Firestore`);
+          }
+        }
+      } catch (error) {
+        console.warn("[Dashboard] fetchGames: Failed to read cached schedule from Firestore:", error);
+      }
+    }
+
+    try {
+      apiSportsGames = await apiSportsPromise;
+    } catch (e) {
+      console.warn("[Dashboard] fetchGames: apiSportsPromise failed:", e);
     }
 
     if (Array.isArray(espnGames)) {
@@ -1390,6 +1413,17 @@ const fetchGames = async (force: boolean = false) => {
                 `[Dashboard] fetchGames: Syncing ID for ${existingGame.awayTeam} @ ${existingGame.homeTeam}: ${existingGame.id} -> ${g.id}`
               );
               existingGame.id = g.id;
+              if (g.apiSportsGameId) existingGame.apiSportsGameId = g.apiSportsGameId;
+              if (g.apiSportsHomeTeamId) existingGame.apiSportsHomeTeamId = g.apiSportsHomeTeamId;
+              if (g.apiSportsAwayTeamId) existingGame.apiSportsAwayTeamId = g.apiSportsAwayTeamId;
+              if (g.homeLogo && !existingGame.homeLogo) existingGame.homeLogo = g.homeLogo;
+              if (g.awayLogo && !existingGame.awayLogo) existingGame.awayLogo = g.awayLogo;
+              if (g.marketExpectations && !existingGame.marketExpectations) {
+                existingGame.marketExpectations = g.marketExpectations;
+              }
+              if (g.allSources && !existingGame.allSources) {
+                existingGame.allSources = g.allSources;
+              }
             }
           }
         });
@@ -1442,7 +1476,7 @@ const fetchGames = async (force: boolean = false) => {
       }
     });
 
-    fetchedGames = finalUniqueGames;
+    fetchedGames = finalUniqueGames.map((g) => normalizeGame(g, activeTab, dateStrIso));
 
     const targetDateStr = format(selectedDate, "yyyy-MM-dd");
     fetchedGames = fetchedGames.filter((g) => {

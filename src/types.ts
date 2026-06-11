@@ -142,6 +142,7 @@ export interface Prediction {
     };
     summary?: string;
   };
+  mlbContext?: any;
   
   // Resolution & Learning
   actualWinner?: string;

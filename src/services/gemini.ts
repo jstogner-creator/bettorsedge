@@ -6,9 +6,10 @@ import { getNYDate } from "../lib/utils";
 import { Game, Prediction, TournamentBracket } from "../types";
 import { espnService } from "./espn";
 import { apiSportsService } from "./apiSports";
-import { apiSportsMlbService } from "./apiSportsMlb";
+import { apiSportsMlbService, parsePitcher, parseTeamStats, parseRecentForm } from "./apiSportsMlb";
 import { apiSportsNhlService } from "./apiSportsNhl";
 import { logApiCall, logError } from "./logger";
+import { normalizeGame } from "../utils/normalize";
 
 const MODEL_VERSION = "openai-edge-v1.2.0";
 const PROMPT_VERSION = "openai-sports-analysis-v1.2.0";
@@ -332,6 +333,8 @@ export class BettorsEdge {
         season,
         homeTeamId: g.apiSportsHomeTeamId,
         awayTeamId: g.apiSportsAwayTeamId,
+        homeTeam: game.homeTeam,
+        awayTeam: game.awayTeam,
       });
       return { ...game, mlbContext } as Game & { mlbContext: any };
     } catch (error) {
@@ -380,31 +383,139 @@ export class BettorsEdge {
     if (game.league === "MLB" && mlbContext?.dataQuality) {
       dataQualityReasons.push(...(mlbContext.dataQuality.notes || []).slice(0, 8));
 
-      if (mlbContext.game) dataQualityReasons.push("single-game provider details available");
-      else missingData.push("API-Sports game-detail lookup did not return a payload");
+      let pitcherEdge = 0;
+      let bullpenEdge = 0;
+      let offensiveEdge = 0;
+      let defensiveEdge = 0;
+      let splitEdge = 0;
+      let formEdge = 0;
+      let injuryImpact = 0;
+      let h2hEdge = 0;
+      let marketVariance = 0;
 
-      if (mlbContext.pitching?.startersConfirmed) {
+      const normHomeStats = parseTeamStats(mlbContext?.teamStatistics?.home);
+      const normAwayStats = parseTeamStats(mlbContext?.teamStatistics?.away);
+
+      const homePitcher = parsePitcher(mlbContext?.pitching?.homeStarter);
+      const awayPitcher = parsePitcher(mlbContext?.pitching?.awayStarter);
+
+      // 1. Starting Pitcher Edge
+      if (homePitcher && awayPitcher && homePitcher.name !== "TBD" && awayPitcher.name !== "TBD" && !homePitcher.name.toLowerCase().includes("not returned") && !awayPitcher.name.toLowerCase().includes("not returned")) {
         dataQualityReasons.push("probable starting pitcher context available");
-        positiveFactors.push("Probable starting pitcher context is available, improving the pregame read.");
-        homeProbability += 0.004;
+        const hEra = parseFloat(String(homePitcher.era));
+        const aEra = parseFloat(String(awayPitcher.era));
+        const hWhip = parseFloat(String(homePitcher.whip));
+        const aWhip = parseFloat(String(awayPitcher.whip));
+
+        if (!isNaN(hEra) && !isNaN(aEra)) {
+          pitcherEdge += (aEra - hEra) * 0.035; // Lower ERA is better
+        }
+        if (!isNaN(hWhip) && !isNaN(aWhip)) {
+          pitcherEdge += (aWhip - hWhip) * 0.08; // Lower WHIP is better
+        }
+        positiveFactors.push(`Starting pitching matchup: ${awayPitcher.name} vs ${homePitcher.name}.`);
       } else {
-        dataQualityReasons.push("probable starting pitchers missing; MLB confidence capped");
-        riskFactors.push("Probable starters are missing, so MLB confidence is capped and the model avoids forcing a bet.");
-        missingData.push("probable starting pitchers unavailable");
-        homeProbability = homeProbability * 0.90 + 0.5 * 0.10;
+        missingData.push("probable starting pitchers");
+        riskFactors.push("Starting pitchers are unconfirmed. Prediction confidence is heavily penalized.");
+        // Regress home probability back towards 50% on missing starters
+        homeProbability = homeProbability * 0.75 + 0.5 * 0.25;
       }
 
-      if (mlbContext.odds?.hasMultiBookOdds) positiveFactors.push(`Consensus price check uses ${mlbContext.odds.bookCount || "multiple"} sportsbook entries.`);
-      else missingData.push("multi-book odds unavailable");
+      // 2. Bullpen Edge & 3. Team Offensive Strength & 4. Team Run Prevention & 5. Home/Away splits
+      if (normHomeStats && normAwayStats) {
+        dataQualityReasons.push("team stats comparison available");
 
-      if (mlbContext.teamStatistics?.home || mlbContext.teamStatistics?.away) positiveFactors.push("Team statistical profile is included in the matchup comparison.");
-      else missingData.push("team-statistics endpoint unavailable");
+        // Bullpen Edge
+        if (normHomeStats.bullpenEra > 0 && normAwayStats.bullpenEra > 0) {
+          bullpenEdge = (normAwayStats.bullpenEra - normHomeStats.bullpenEra) * 0.025; // Lower bullpen ERA is better
+          positiveFactors.push(`Bullpen comparison: ${game.homeTeam} ${normHomeStats.bullpenEra.toFixed(2)} ERA vs ${game.awayTeam} ${normAwayStats.bullpenEra.toFixed(2)} ERA.`);
+        } else {
+          bullpenEdge = (normAwayStats.teamEra - normHomeStats.teamEra) * 0.015;
+        }
 
-      if (Array.isArray(mlbContext.h2h) && mlbContext.h2h.length) positiveFactors.push(`Previous matchup history is included (${mlbContext.h2h.length} games returned).`);
-      else missingData.push("head-to-head context unavailable");
+        // Offensive Edge
+        offensiveEdge = (normHomeStats.runsPerGame - normAwayStats.runsPerGame) * 0.025;
+        if (normHomeStats.ops > 0 && normAwayStats.ops > 0) {
+          offensiveEdge += (normHomeStats.ops - normAwayStats.ops) * 0.15;
+        } else if (normHomeStats.battingAverage > 0 && normAwayStats.battingAverage > 0) {
+          offensiveEdge += (normHomeStats.battingAverage - normAwayStats.battingAverage) * 0.2;
+        }
 
-      if (mlbContext.injuries?.unavailable) riskFactors.push("At least one injury endpoint failed; analysis continued without blocking.");
-      else dataQualityReasons.push("injury endpoint checked");
+        // Defensive Edge
+        defensiveEdge = (normAwayStats.runsAllowed - normHomeStats.runsAllowed) * 0.025;
+
+        // Splits Edge
+        const homeDiff = normHomeStats.homeSplits.runs - normHomeStats.homeSplits.runsAllowed;
+        const awayDiff = normAwayStats.awaySplits.runs - normAwayStats.awaySplits.runsAllowed;
+        splitEdge = (homeDiff - awayDiff) * 0.01;
+      } else {
+        missingData.push("team stats comparison");
+      }
+
+      // 6. Recent Form
+      const homeForm = parseRecentForm(mlbContext?.teamStatistics?.home, game, game.homeTeam);
+      const awayForm = parseRecentForm(mlbContext?.teamStatistics?.away, game, game.awayTeam);
+      if (homeForm.last5 !== "N/A" && awayForm.last5 !== "N/A") {
+        dataQualityReasons.push("recent form available");
+        formEdge = (homeForm.wins5 / 5 - awayForm.wins5 / 5) * 0.04;
+      }
+
+      // 7. Injuries
+      const homeInjuriesCount = mlbContext?.injuries?.home?.length || 0;
+      const awayInjuriesCount = mlbContext?.injuries?.away?.length || 0;
+      injuryImpact = (awayInjuriesCount - homeInjuriesCount) * 0.005;
+
+      // 8. Previous Matchup History
+      const normalizedH2h = normalizeMlbH2H(mlbContext?.h2h);
+      if (normalizedH2h && normalizedH2h.length > 0) {
+        dataQualityReasons.push("head-to-head history available");
+        const homeWins = normalizedH2h.filter((m) => m.homeTeam === game.homeTeam ? m.homeScore > m.awayScore : m.awayTeam === game.homeTeam ? m.awayScore > m.homeScore : false).length;
+        const h2hTotal = normalizedH2h.length;
+        h2hEdge = (homeWins / h2hTotal - 0.5) * 0.03;
+      }
+
+      // 9. Sportsbook Disagreement (Market Variance)
+      if (mlbContext?.odds?.books && mlbContext.odds.books.length > 0) {
+        const homeProbs: number[] = [];
+        mlbContext.odds.books.forEach((book: any) => {
+          (book.bookmakers || []).forEach((bm: any) => {
+            const mlBet = bm.bets?.find((bet: any) => bet.betName === "Home/Away" || bet.betName === "Moneyline");
+            const hOdd = mlBet?.values?.find((v: any) => v.value === "Home" || v.value === "1")?.odd;
+            const aOdd = mlBet?.values?.find((v: any) => v.value === "Away" || v.value === "2")?.odd;
+            if (hOdd && aOdd) {
+              const hDec = parseFloat(hOdd);
+              const aDec = parseFloat(aOdd);
+              if (hDec > 0 && aDec > 0) {
+                const hProb = 1 / hDec;
+                const aProb = 1 / aDec;
+                homeProbs.push(hProb / (hProb + aProb));
+              }
+            }
+          });
+        });
+
+        if (homeProbs.length >= 2) {
+          const avg = homeProbs.reduce((sum, val) => sum + val, 0) / homeProbs.length;
+          const variance = homeProbs.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / homeProbs.length;
+          const stdDev = Math.sqrt(variance);
+          marketVariance = stdDev;
+          if (stdDev > 0.03) {
+            riskFactors.push("Significant disagreement among sportsbooks on moneyline pricing.");
+          }
+        }
+      }
+
+      // Sum all baseball specific factors and update home probability
+      const baseballScore = pitcherEdge + bullpenEdge + offensiveEdge + defensiveEdge + splitEdge + formEdge + injuryImpact + h2hEdge;
+      homeProbability += baseballScore;
+
+      // Add descriptive decision notes
+      if (pitcherEdge > 0.015) positiveFactors.push(`${game.homeTeam} has a starting pitcher advantage.`);
+      if (pitcherEdge < -0.015) positiveFactors.push(`${game.awayTeam} holds the starting pitcher advantage.`);
+      if (bullpenEdge > 0.01) positiveFactors.push(`${game.homeTeam} bullpen statistics rate stronger.`);
+      if (bullpenEdge < -0.01) positiveFactors.push(`${game.awayTeam} bullpen statistics rate stronger.`);
+      if (offensiveEdge > 0.02) positiveFactors.push(`${game.homeTeam} batting metrics present a clear edge.`);
+      if (offensiveEdge < -0.02) positiveFactors.push(`${game.awayTeam} batting metrics present a clear edge.`);
 
       if (mlbContext.dataQuality.grade === "A") homeProbability += 0.005;
       if (mlbContext.dataQuality.grade === "D") homeProbability = homeProbability * 0.85 + 0.5 * 0.15;
@@ -512,11 +623,14 @@ export class BettorsEdge {
     const predictedWinner = predictedHome ? analysisGame.homeTeam : analysisGame.awayTeam;
     const winner = edgeModel.recommendation === "NO_PLAY" ? "PASS" : predictedWinner;
 
-    const systemPrompt = "You are Bettors Edge, a senior MLB betting analyst and risk manager. Explain the deterministic model with sharp, bettor-facing language. Never invent pitcher names, injuries, lineups, odds, weather, umpire data, or news. If a data point is missing, classify it as a risk or missing input instead of pretending it exists. Return only JSON.";
+    const systemPrompt = "You are Bettors Edge, a senior MLB betting analyst and risk manager. Explain the deterministic model with sharp, bettor-facing language. Never invent pitcher names, injuries, lineups, odds, weather, umpire data, or news. If a data point is missing, classify it as a risk or missing input instead of pretending it exists. Avoid any developer or model backend debug terminology such as API-Sports, provider payload, OpenAI, model version, prompt version, QA adjusted, or API audit notes. Return only JSON.";
     const userPrompt = `
 Create a premium betting-card analysis for this matchup. The deterministic model controls the final recommendation, but your job is to explain it like a sharp bettor: decision, edge, market context, risk controls, and why this is or is not a bet.
 
 Rules:
+- Act as a professional sports betting analyst.
+- Do NOT use developer or API status wording (e.g. "API-Sports", "provider payload", "OpenAI", "model version", "prompt version", "QA adjusted", "API audit notes").
+- If probable starting pitchers are missing in the data, explicitly state that this pick is preliminary and confidence is capped due to unconfirmed pitching matchups.
 - If recommendation is NO_PLAY, do not force a pick. Explain why passing is disciplined.
 - Do not list missing data as an advantage.
 - Key factors must be decision drivers, not raw diagnostics.
@@ -563,11 +677,18 @@ Return JSON with this shape:
       });
       aiPayload = safeJsonParse<AiPredictionPayload>(result.text, {});
     } catch (error) {
-      await logError(error, "OpenAI matchup analysis failed");
+      await logError(error, "OpenAI matchup analysis failed. Falling back to deterministic high-fidelity mock analysis payload.");
+      aiPayload = generateMockAiPayload(analysisGame, edgeModel);
     }
 
     const rawConfidenceFromEdge = edgeModel.edge === undefined ? 5 : clamp(5 + Math.abs(edgeModel.edge) * 45, 1, 10);
-    const confidenceFromEdge = roundTo(winner === "PASS" ? Math.min(6.2, rawConfidenceFromEdge) : rawConfidenceFromEdge, 1);
+    let confidenceFromEdge = roundTo(winner === "PASS" ? Math.min(6.2, rawConfidenceFromEdge) : rawConfidenceFromEdge, 1);
+    
+    // MLB Specific confidence penalty for missing starting pitcher context
+    if (analysisGame.league === "MLB" && !analysisGame.mlbContext?.pitching?.startersConfirmed) {
+      confidenceFromEdge = Math.min(4.5, confidenceFromEdge);
+    }
+
     const noPlayReason = edgeModel.edge !== undefined && edgeModel.edge < MIN_EDGE_TO_PLAY
       ? `NO PLAY: ${edgeModel.marketNarrative} The edge is below the ${(MIN_EDGE_TO_PLAY * 100).toFixed(1)}% lean threshold, so this is a pass instead of a forced pick.`
       : `${edgeModel.recommendation}: ${edgeModel.marketNarrative}`;
@@ -653,6 +774,7 @@ Return JSON with this shape:
       qaStatus: edgeModel.missingData.length ? "adjusted" : "verified",
       qaNotes: `Recommendation=${edgeModel.recommendation}; selected=${edgeModel.selectedTeam}; fairOdds=${edgeModel.fairOdds}; dataQuality=${edgeModel.dataQuality}; risks=${edgeModel.riskFactors.join(" | ") || "none"}.`,
       marketExpectations: analysisGame.marketExpectations,
+      mlbContext: (analysisGame as any).mlbContext,
       sourceAudit: {
         googleDriveAccessed: false,
         nbaOfficialAccessed: !!(analysisGame as any).apiSportsGameId,
@@ -774,7 +896,9 @@ Return JSON with this shape:
         const cached = await getDoc(scheduleRef);
         if (cached.exists()) {
           const data = cached.data();
-          if (Array.isArray(data.games) && data.games.length) return data.games as Game[];
+          if (Array.isArray(data.games) && data.games.length) {
+            return data.games.map((g: any) => normalizeGame(g, league, date));
+          }
         }
       } catch (error) {
         console.warn("[Schedule] Cache read failed:", error);
@@ -796,12 +920,13 @@ Return JSON with this shape:
         console.warn(`[Schedule] ESPN ${league} fetch failed:`, error);
       }
     }
+    const normalizedGames = games.map((g: any) => normalizeGame(g, league, date));
     try {
-      await setDoc(scheduleRef, { league, date, games, lastUpdated: new Date().toISOString(), source: "deterministic-api" }, { merge: true });
+      await setDoc(scheduleRef, { league, date, games: normalizedGames, lastUpdated: new Date().toISOString(), source: "deterministic-api" }, { merge: true });
     } catch (error) {
       console.warn("[Schedule] Cache write failed:", error);
     }
-    return games;
+    return normalizedGames;
   }
 
   async importSchedule(league: string, startDate: Date, days = 7, onProgress?: (message: string) => void, force = false) {
