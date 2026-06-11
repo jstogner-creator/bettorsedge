@@ -697,7 +697,7 @@ async function startServer() {
   app.use("/api/snark", authenticate);
   app.use("/api/create-checkout-session", authenticate);
   app.use("/api/kalshi", authenticate);
-  app.use("/api/espn", authenticate);
+  // app.use("/api/espn", authenticate); // Public endpoint for reliable schedule fallbacks
 
   app.post("/api/snark", authenticate, async (req, res) => {
     const { message, history, context, model = "gpt-4o-mini" } = req.body;
