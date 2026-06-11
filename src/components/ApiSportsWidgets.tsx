@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { format } from "date-fns";
 
+const WIDGET_KEY = import.meta.env.VITE_API_SPORTS_WIDGET_KEY || "b2795a8c744b26f971aaf15eb994212e";
+
 let apiSportsScriptPromise: Promise<void> | null = null;
 
 function loadApiSportsScript() {
@@ -132,7 +134,7 @@ export function NbaApiSportsPanel({
 
       <api-sports-widget
         data-type="config"
-        data-key="b2795a8c744b26f971aaf15eb994212e"
+        data-key="${WIDGET_KEY}"
         data-sport="nba"
         data-lang="en"
         data-theme="grey"
@@ -157,7 +159,7 @@ export function NbaApiSportsPanel({
       
       <api-sports-widget
         data-type="config"
-        data-key="b2795a8c744b26f971aaf15eb994212e"
+        data-key="${WIDGET_KEY}"
         data-sport="nba"
         data-lang="en"
         data-theme="grey"
@@ -186,7 +188,7 @@ export function NbaApiSportsPanel({
       
       <api-sports-widget
         data-type="config"
-        data-key="b2795a8c744b26f971aaf15eb994212e"
+        data-key="${WIDGET_KEY}"
         data-sport="nba"
         data-lang="en"
         data-theme="grey"

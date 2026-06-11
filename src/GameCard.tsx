@@ -29,6 +29,8 @@ import { cn } from "./lib/utils";
 import { ApiSportsWidgetEmbed } from "./components/ApiSportsWidgets";
 import { MlbMatchupLab } from "./components/MlbMatchupLab";
 
+const WIDGET_KEY = import.meta.env.VITE_API_SPORTS_WIDGET_KEY || "b2795a8c744b26f971aaf15eb994212e";
+
 interface GameCardProps {
   game: Game;
   prediction?: Prediction | null;
@@ -57,7 +59,7 @@ export const GameCard: React.FC<GameCardProps> = ({
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
   const [checkingInjuries, setCheckingInjuries] = useState(false);
-  const [activeDetailTab, setActiveDetailTab] = useState<"ai" | "matchup" | "h2h" | "injuries" | "live">("ai");
+  const [activeDetailTab, setActiveDetailTab] = useState<"ai" | "matchup" | "h2h" | "injuries">("ai");
 
   const handleCardClick = () => {
     setIsExpanded(!isExpanded);
@@ -767,11 +769,10 @@ export const GameCard: React.FC<GameCardProps> = ({
                 {/* Detail Tabs */}
                 <div className="flex flex-wrap items-center bg-slate-950/40 p-1 rounded-xl border border-slate-850 mb-4 gap-1">
                   {([
-                    { id: "ai", label: "AI Read" },
+                    { id: "ai", label: "AI & Live Widget" },
                     { id: "matchup", label: "Matchup" },
                     { id: "h2h", label: "H2H" },
-                    { id: "injuries", label: "Injuries" },
-                    { id: "live", label: "Live Widget" }
+                    { id: "injuries", label: "Injuries" }
                   ] as const).map((tab) => (
                     <button
                       key={tab.id}
@@ -791,9 +792,142 @@ export const GameCard: React.FC<GameCardProps> = ({
                   ))}
                 </div>
 
-                {/* Tab 1: AI Read */}
+                {/* Tab 1: AI & Live Widget */}
                 {activeDetailTab === "ai" && (
                   <div className="space-y-4 animate-in fade-in duration-200">
+                    {/* Live Provider Details Widget */}
+                    <div className="p-4 bg-slate-950/40 border border-slate-800 rounded-xl space-y-4">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <h4 className="text-xs font-black text-slate-350 uppercase tracking-widest flex items-center">
+                          <Info className="w-4 h-4 mr-2 text-indigo-500" /> Live Provider details widget
+                        </h4>
+                        {!game.apiSportsGameId && (
+                          <span className="text-[10px] font-extrabold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 uppercase tracking-wider">
+                            ⚠️ Demo Mode (API Key Missing)
+                          </span>
+                        )}
+                      </div>
+                      
+                      {/* Market Expectations */}
+                      {(game.marketExpectations || game.allSources) && (
+                        <div className="p-4 bg-slate-800/40 rounded-xl border border-slate-700/50">
+                          <div className="text-[10px] uppercase text-slate-500 font-bold mb-3 flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                              <span>Market Expectations Summary</span>
+                              {game.allSources && game.allSources.length > 0 && (
+                                <select 
+                                  className="bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5 text-[9px] outline-none"
+                                  value={selectedSourceId || ''}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedSourceId(Number(e.target.value));
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {game.allSources.map(b => (
+                                    <option key={b.id} value={b.id}>{b.name}</option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+                            <TrendingUp className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-center">
+                            <div className="bg-slate-950/50 p-2.5 rounded border border-slate-900">
+                              <div className="text-[8px] text-slate-500 uppercase mb-0.5">Win Prob</div>
+                              <div className="text-[10px] text-slate-300 font-mono">
+                                {awayML ? (awayML > 0 ? `+${awayML}` : awayML) : '-'} / {homeML ? (homeML > 0 ? `+${homeML}` : homeML) : '-'}
+                              </div>
+                            </div>
+                            <div className="bg-slate-950/50 p-2.5 rounded border border-slate-900">
+                              <div className="text-[8px] text-slate-500 uppercase mb-0.5">Margin</div>
+                              <div className="text-[10px] text-slate-300 font-mono">
+                                {spread ? (spread > 0 ? `+${spread}` : spread) : '-'} / {spread ? (spread > 0 ? `-${spread}` : `+${Math.abs(spread)}`) : '-'}
+                              </div>
+                            </div>
+                            <div className="bg-slate-950/50 p-2.5 rounded border border-slate-900">
+                              <div className="text-[8px] text-slate-500 uppercase mb-0.5">Total</div>
+                              <div className="text-[10px] text-slate-300 font-mono">
+                                {total || '-'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* API-Sports Widgets */}
+                      {(game.league === 'NBA' || !game.apiSportsGameId) ? (
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 border-t border-slate-800 pt-6">
+                          <div className="space-y-4">
+                            <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center">
+                              <Info className="w-4 h-4 mr-2 text-indigo-500" />
+                              Lineups & Injuries
+                            </h4>
+                            <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-2xl">
+                              <ApiSportsWidgetEmbed 
+                                html={`
+                                  <api-sports-widget
+                                    data-type="game"
+                                    data-game-id="${game.apiSportsGameId || 286705}"
+                                    data-refresh="0"
+                                    data-show-toolbar="false"
+                                    data-tab="all"
+                                    data-game-style="2"
+                                  ></api-sports-widget>
+                                  <api-sports-widget
+                                    data-type="config"
+                                    data-key="${WIDGET_KEY}"
+                                    data-sport="nba"
+                                    data-lang="en"
+                                    data-theme="grey"
+                                    data-timezone="CST"
+                                    data-show-errors="false"
+                                    data-show-logos="true"
+                                    data-favorite="true"
+                                  ></api-sports-widget>
+                                `}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center">
+                              <TrendingUp className="w-4 h-4 mr-2 text-indigo-500" />
+                              Matchup History
+                            </h4>
+                            <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-2xl">
+                              <ApiSportsWidgetEmbed 
+                                html={`
+                                  <api-sports-widget
+                                    data-type="h2h"
+                                    data-h2h="${(game.apiSportsHomeTeamId && game.apiSportsAwayTeamId) ? `${game.apiSportsHomeTeamId}-${game.apiSportsAwayTeamId}` : '135-141'}"
+                                    data-refresh="0"
+                                    data-show-toolbar="false"
+                                    data-tab="all"
+                                    data-h2h-style="2"
+                                  ></api-sports-widget>
+                                  <api-sports-widget
+                                    data-type="config"
+                                    data-key="${WIDGET_KEY}"
+                                    data-sport="nba"
+                                    data-lang="en"
+                                    data-theme="grey"
+                                    data-timezone="CST"
+                                    data-show-errors="false"
+                                    data-show-logos="true"
+                                    data-favorite="true"
+                                  ></api-sports-widget>
+                                `}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-slate-500 bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-center italic">
+                          Live provider details widget is not active or unconfigured for this game/league.
+                        </div>
+                      )}
+                    </div>
                     {/* Post-Mortem Analysis (if incorrect) */}
                     {prediction.outcome === 'incorrect' && prediction.postMortem && (
                       <div className="p-5 bg-rose-500/10 border border-rose-500/30 rounded-xl shadow-lg shadow-rose-500/5">
@@ -1353,130 +1487,6 @@ export const GameCard: React.FC<GameCardProps> = ({
                   </div>
                 )}
 
-                {/* Tab 5: Live Widget */}
-                {activeDetailTab === "live" && (
-                  <div className="space-y-4 animate-in fade-in duration-200">
-                    {/* Market Expectations */}
-                    {(game.marketExpectations || game.allSources) && (
-                      <div className="p-4 bg-slate-800/40 rounded-xl border border-slate-700/50">
-                        <div className="text-[10px] uppercase text-slate-500 font-bold mb-3 flex justify-between items-center">
-                          <div className="flex items-center gap-2">
-                            <span>Market Expectations Summary</span>
-                            {game.allSources && game.allSources.length > 0 && (
-                              <select 
-                                className="bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5 text-[9px] outline-none"
-                                value={selectedSourceId || ''}
-                                onChange={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedSourceId(Number(e.target.value));
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {game.allSources.map(b => (
-                                  <option key={b.id} value={b.id}>{b.name}</option>
-                                ))}
-                              </select>
-                            )}
-                          </div>
-                          <TrendingUp className="w-3.5 h-3.5" />
-                        </div>
-                        <div className="grid grid-cols-3 gap-2 text-center">
-                          <div className="bg-slate-950/50 p-2.5 rounded border border-slate-900">
-                            <div className="text-[8px] text-slate-500 uppercase mb-0.5">Win Prob</div>
-                            <div className="text-[10px] text-slate-300 font-mono">
-                              {awayML ? (awayML > 0 ? `+${awayML}` : awayML) : '-'} / {homeML ? (homeML > 0 ? `+${homeML}` : homeML) : '-'}
-                            </div>
-                          </div>
-                          <div className="bg-slate-950/50 p-2.5 rounded border border-slate-900">
-                            <div className="text-[8px] text-slate-500 uppercase mb-0.5">Margin</div>
-                            <div className="text-[10px] text-slate-300 font-mono">
-                              {spread ? (spread > 0 ? `+${spread}` : spread) : '-'} / {spread ? (spread > 0 ? `-${spread}` : `+${Math.abs(spread)}`) : '-'}
-                            </div>
-                          </div>
-                          <div className="bg-slate-950/50 p-2.5 rounded border border-slate-900">
-                            <div className="text-[8px] text-slate-500 uppercase mb-0.5">Total</div>
-                            <div className="text-[10px] text-slate-300 font-mono">
-                              {total || '-'}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* API-Sports Widgets */}
-                    {game.league === 'NBA' && game.apiSportsGameId ? (
-                      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 border-t border-slate-800 pt-6">
-                        <div className="space-y-4">
-                          <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center">
-                            <Info className="w-4 h-4 mr-2 text-indigo-500" />
-                            Lineups & Injuries
-                          </h4>
-                          <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-2xl">
-                            <ApiSportsWidgetEmbed 
-                              html={`
-                                <api-sports-widget
-                                  data-type="game"
-                                  data-game-id="${game.apiSportsGameId}"
-                                  data-refresh="0"
-                                  data-show-toolbar="false"
-                                  data-tab="all"
-                                  data-game-style="2"
-                                ></api-sports-widget>
-                                <api-sports-widget
-                                  data-type="config"
-                                  data-key="b2795a8c744b26f971aaf15eb994212e"
-                                  data-sport="nba"
-                                  data-lang="en"
-                                  data-theme="grey"
-                                  data-timezone="CST"
-                                  data-show-errors="false"
-                                  data-show-logos="true"
-                                ></api-sports-widget>
-                              `}
-                            />
-                          </div>
-                        </div>
-
-                        {game.apiSportsHomeTeamId && game.apiSportsAwayTeamId && (
-                          <div className="space-y-4">
-                            <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center">
-                              <TrendingUp className="w-4 h-4 mr-2 text-indigo-500" />
-                              Matchup History
-                            </h4>
-                            <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-2xl">
-                              <ApiSportsWidgetEmbed 
-                                html={`
-                                  <api-sports-widget
-                                    data-type="h2h"
-                                    data-h2h="${game.apiSportsHomeTeamId}-${game.apiSportsAwayTeamId}"
-                                    data-refresh="0"
-                                    data-show-toolbar="false"
-                                    data-tab="all"
-                                    data-h2h-style="2"
-                                  ></api-sports-widget>
-                                  <api-sports-widget
-                                    data-type="config"
-                                    data-key="b2795a8c744b26f971aaf15eb994212e"
-                                    data-sport="nba"
-                                    data-lang="en"
-                                    data-theme="grey"
-                                    data-timezone="CST"
-                                    data-show-errors="false"
-                                    data-show-logos="true"
-                                  ></api-sports-widget>
-                                `}
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-slate-500 bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-center italic">
-                        Live provider details widget is not active or unconfigured for this game/league.
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
           ) : (
             <div className="text-center py-8 text-slate-500 bg-slate-800/20 rounded-lg border border-slate-800 border-dashed flex flex-col items-center justify-center">

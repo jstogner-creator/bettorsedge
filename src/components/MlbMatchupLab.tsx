@@ -25,7 +25,7 @@ import { cn } from "../lib/utils";
 import { ApiSportsWidgetEmbed } from "./ApiSportsWidgets";
 import { parsePitcher, parseTeamStats } from "../services/apiSportsMlb";
 
-const WIDGET_KEY = "b2795a8c744b26f971aaf15eb994212e";
+const WIDGET_KEY = import.meta.env.VITE_API_SPORTS_WIDGET_KEY || "b2795a8c744b26f971aaf15eb994212e";
 
 interface MlbMatchupLabProps {
   game: Game;
@@ -53,7 +53,7 @@ function formatOdds(odds?: number | null) {
 
 export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: MlbMatchupLabProps) {
   const [showWidget, setShowWidget] = useState(false);
-  const [activeDetailTab, setActiveDetailTab] = useState<"ai" | "matchup" | "h2h" | "injuries" | "live">("ai");
+  const [activeDetailTab, setActiveDetailTab] = useState<"ai" | "matchup" | "h2h" | "injuries">("ai");
 
   const mlbContext = (game as any).mlbContext || prediction?.mlbContext;
   const h2h = Array.isArray(prediction?.previousMatchups) ? prediction.previousMatchups : [];
@@ -229,11 +229,10 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
       {/* Detail Tabs */}
       <div className="flex flex-wrap items-center bg-slate-950/40 p-1 rounded-xl border border-slate-850 mb-4 gap-1">
         {([
-          { id: "ai", label: "AI Read" },
+          { id: "ai", label: "AI & Live Widget" },
           { id: "matchup", label: "Matchup" },
           { id: "h2h", label: "H2H" },
-          { id: "injuries", label: "Injuries" },
-          { id: "live", label: "Live Widget" }
+          { id: "injuries", label: "Injuries" }
         ] as const).map((tab) => (
           <button
             key={tab.id}
@@ -253,9 +252,26 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
         ))}
       </div>
 
-      {/* Tab 1: AI Read */}
+      {/* Tab 1: AI & Live Widget */}
       {activeDetailTab === "ai" && (
         <div className="space-y-5 animate-in fade-in duration-200">
+          {/* Live Provider details widget */}
+          <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4">
+              <h4 className="text-xs font-black text-slate-350 uppercase tracking-widest flex items-center gap-2">
+                <Info className="w-4 h-4 text-cyan-400" /> Live Provider details widget
+              </h4>
+              {!game.apiSportsGameId && (
+                <span className="text-[10px] font-extrabold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 uppercase tracking-wider">
+                  ⚠️ Demo Mode (API Key Missing)
+                </span>
+              )}
+            </div>
+            
+            <div className="min-h-[500px] overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60 p-2">
+              <ApiSportsWidgetEmbed html={widgetHtml} />
+            </div>
+          </section>
           {/* 1. Final Selection (PASS or PREDICTION) */}
           <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 relative overflow-hidden">
             {/* Selection Details */}
@@ -817,28 +833,6 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
         </div>
       )}
 
-      {/* Tab 5: Live Widget */}
-      {activeDetailTab === "live" && (
-        <div className="space-y-5 animate-in fade-in duration-200">
-          {/* Provider game widget */}
-          <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4">
-              <h4 className="text-xs font-black text-slate-350 uppercase tracking-widest flex items-center gap-2">
-                <Info className="w-4 h-4 text-cyan-400" /> Live Provider details widget
-              </h4>
-              {!game.apiSportsGameId && (
-                <span className="text-[10px] font-extrabold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 uppercase tracking-wider">
-                  ⚠️ Demo Mode (API Key Missing)
-                </span>
-              )}
-            </div>
-            
-            <div className="min-h-[500px] overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60 p-2">
-              <ApiSportsWidgetEmbed html={widgetHtml} />
-            </div>
-          </section>
-        </div>
-      )}
     </div>
   );
 }
