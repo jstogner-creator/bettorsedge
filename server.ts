@@ -22,6 +22,20 @@ import { bettorsEdge } from "./src/services/gemini";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Configure Axios request interceptor for server-side relative API calls
+axios.interceptors.request.use(
+  (config) => {
+    if (config.url && config.url.startsWith("/api/")) {
+      const port = process.env.PORT || 3000;
+      config.url = `http://localhost:${port}${config.url}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
 // Initialize Firebase Admin
 const firebaseConfigPath = path.join(__dirname, "firebase-applet-config.json");
 let firestoreDatabaseId: string | undefined;

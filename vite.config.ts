@@ -17,5 +17,8 @@ export default defineConfig(() => ({
   server: {
     // HMR may be disabled in embedded AI Studio environments to prevent flickering during edits.
     hmr: process.env.DISABLE_HMR !== 'true',
+    watch: {
+      ignored: ['**/dist/**', '**/build/**']
+    }
   },
 }));
