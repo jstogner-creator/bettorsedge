@@ -10,7 +10,23 @@
     <title>Bettors Edge – Find the edge before you bet.</title>
   </head>
   <body>
+    <api-sports-widget 
+      data-type="config" 
+      data-key="%VITE_API_SPORTS_WIDGET_KEY%"
+      data-theme="grey"
+      data-timezone="CST"
+      data-show-errors="true"
+      data-show-logos="true"
+      data-favorite="true"
+      data-statistics="true"
+      data-team-statistics="true"
+      data-player-statistics="true"
+      data-events="true"
+      data-standings="true"
+      data-team-squad="true"
+    ></api-sports-widget>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="https://widgets.api-sports.io/3.1.0/widgets.js"></script>
   </body>
 </html>

@@ -2206,22 +2206,25 @@ export function Dashboard({
 
       if (!cancelAnalysisRef.current[targetLeague] && gameUpdates && Array.isArray(gameUpdates)) {
         const docRef = doc(db, "predictions", game.id);
-        const newPredictionData = { 
-          gameId: game.id,
-          league: targetLeague,
-          date: dateStr,
-          injuries: gameUpdates,
-          lastUpdated: new Date().toISOString(),
-          winner: savedPredictions[game.id]?.winner || "TBD",
-          confidence: savedPredictions[game.id]?.confidence || 5,
-          reasoning: savedPredictions[game.id]?.reasoning,
-          scenarioAnalysis: savedPredictions[game.id]?.scenarioAnalysis,
-          hedgingAdvice: savedPredictions[game.id]?.hedgingAdvice,
-          keyFactors: savedPredictions[game.id]?.keyFactors || [],
-          kalshiPrice: savedPredictions[game.id]?.kalshiPrice || 0.5,
-          qaStatus: savedPredictions[game.id]?.qaStatus || "verified"
-        };
+        const newPredictionData = Object.fromEntries(
+          Object.entries({ 
+            gameId: game.id,
+            league: targetLeague,
+            date: dateStr,
+            injuries: gameUpdates,
+            lastUpdated: new Date().toISOString(),
+            winner: savedPredictions[game.id]?.winner || "TBD",
+            confidence: savedPredictions[game.id]?.confidence || 5,
+            reasoning: savedPredictions[game.id]?.reasoning || null,
+            scenarioAnalysis: savedPredictions[game.id]?.scenarioAnalysis || null,
+            hedgingAdvice: savedPredictions[game.id]?.hedgingAdvice || null,
+            keyFactors: savedPredictions[game.id]?.keyFactors || [],
+            kalshiPrice: savedPredictions[game.id]?.kalshiPrice || 0.5,
+            qaStatus: savedPredictions[game.id]?.qaStatus || "verified"
+          }).filter(([, v]) => v !== undefined)
+        );
         await setDoc(docRef, newPredictionData, { merge: true });
+
         
         // Update local state
         setSavedPredictions(prev => ({
@@ -2229,9 +2232,10 @@ export function Dashboard({
           [game.id]: {
             ...(prev[game.id] || {}),
             ...newPredictionData
-          }
+          } as Prediction
         }));
       }
+
 
       if (cancelAnalysisRef.current[targetLeague]) {
         setToast({ message: "Analysis stopped by user.", type: "info" });

@@ -247,6 +247,39 @@ export interface Prediction {
     lastAuditTime: string;
     auditNotes?: string;
   };
+
+  // ── Structured AI Analysis (v2) ──────────────────────────────────────────
+  /** Model recommendation: PLAY (clear edge), PASS (no edge), NO_PLAY (poor data) */
+  recommendation?: 'PLAY' | 'PASS' | 'NO_PLAY';
+  /** Which side the model recommends, or null on PASS/NO_PLAY */
+  recommendedSide?: string | null;
+  /** One-sentence bettor-friendly summary of the pick */
+  summary?: string;
+  /** Explanation of WHY there is or isn't a betting edge */
+  bettingAngle?: string;
+  /** Structured top reasons for the recommendation (up to 5) */
+  topReasons?: string[];
+  /** Risk factors that could invalidate the pick (up to 4) */
+  riskFactors?: string[];
+
+  /** Explicit list of matchup category advantages */
+  matchupAdvantages?: {
+    startingPitching: 'away' | 'home' | 'even' | 'unknown';
+    bullpen:          'away' | 'home' | 'even' | 'unknown';
+    offense:          'away' | 'home' | 'even' | 'unknown';
+    recentForm:       'away' | 'home' | 'even' | 'unknown';
+    marketValue:      'away' | 'home' | 'none' | 'unknown';
+  };
+  /** Explicit list of data fields that were unavailable for analysis */
+  missingDataFields?: string[];
+  /** Human-readable explanation of why confidence is high/medium/low */
+  confidenceExplanation?: string;
+  /** Human-readable explanation of what data was/wasn't available */
+  dataQualityExplanation?: string;
+  /** Model edge over implied market probability (decimal, e.g. 0.042 = +4.2%) */
+  aiEdge?: number;
+  /** ISO timestamp of when AI analysis was last run */
+  lastAnalyzedAt?: string;
 }
 
 export interface BracketRound {

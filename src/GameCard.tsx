@@ -855,83 +855,138 @@ export const GameCard: React.FC<GameCardProps> = ({
                         </div>
                       )}
 
-                      {/* API-Sports Widgets */}
-                      {(() => {
-                        const widgetSport = game.league === 'NBA' ? 'nba' :
-                                            game.league === 'MLB' ? 'baseball' :
-                                            game.league === 'NHL' ? 'hockey' :
-                                            game.league === 'NFL' ? 'football' :
-                                            'nba';
+                       {/* API-Sports Widgets */}
+                       {(() => {
+                         const widgetSport = game.league === 'NBA' ? 'nba' :
+                                             game.league === 'MLB' ? 'baseball' :
+                                             game.league === 'NHL' ? 'hockey' :
+                                             game.league === 'NFL' ? 'football' :
+                                             'nba';
 
-                        const isSupportedLeague = game.league === 'NBA' || game.league === 'NHL' || game.league === 'NFL' || game.league === 'MLB' || !game.apiSportsGameId;
+                         const defaultGameId = widgetSport === 'baseball' ? 164265 :
+                                               widgetSport === 'nba' ? 12478 :
+                                               286705;
 
-                        return isSupportedLeague ? (
-                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 border-t border-slate-800 pt-6">
-                            <div className="space-y-4">
-                              <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center">
-                                <Info className="w-4 h-4 mr-2 text-indigo-500" />
-                                Lineups & Injuries
-                              </h4>
-                              <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-2xl">
-                                <ApiSportsWidgetEmbed 
-                                  html={`
-                                    <api-sports-widget
-                                      data-type="game"
-                                      data-game-id="${game.apiSportsGameId || 286705}"
-                                      data-refresh="0"
-                                      data-show-toolbar="false"
-                                      data-tab="all"
-                                      data-game-style="2"
-                                    ></api-sports-widget>
-                                    <api-sports-widget
-                                      data-type="config"
-                                      data-key="${WIDGET_KEY}"
-                                      data-sport="${widgetSport}"
-                                      data-lang="en"
-                                      data-theme="grey"
-                                      data-timezone="CST"
-                                      data-show-errors="false"
-                                      data-show-logos="true"
-                                      data-favorite="true"
-                                    ></api-sports-widget>
-                                  `}
-                                />
+                         const defaultH2hId = widgetSport === 'baseball' ? '18-30' :
+                                              widgetSport === 'nba' ? '8-22' :
+                                              '135-141';
+
+                         const gameDate = game.date || new Date().toISOString();
+                         const dateObj = new Date(gameDate);
+                         const year = dateObj.getFullYear();
+                         const month = dateObj.getMonth();
+                         const widgetSeason = widgetSport === 'nba' ? (month >= 9 ? String(year) : String(year - 1)) : String(year);
+                         const widgetLeagueId = game.league === 'NBA' ? '12' :
+                                                game.league === 'MLB' ? '1' :
+                                                game.league === 'NHL' ? '57' :
+                                                game.league === 'NFL' ? '1' :
+                                                '12';
+
+                         const isSupportedLeague = game.league === 'NBA' || game.league === 'NHL' || game.league === 'NFL' || game.league === 'MLB' || !game.apiSportsGameId;
+
+                         return isSupportedLeague ? (
+                            <div className="space-y-6 border-t border-slate-800 pt-6">
+
+                              {/* ── 1. Game Statistics (full width, toolbar on, Statistics tab) ── */}
+                              <div className="space-y-2">
+                                <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2">
+                                  <BarChart3 className="w-4 h-4 text-indigo-500" />
+                                  Game Statistics &amp; Lineups
+                                </h4>
+                                <div className="rounded-2xl border border-slate-700 bg-slate-950/60 overflow-hidden shadow-2xl">
+                                  <ApiSportsWidgetEmbed
+                                    html={`
+                                      <api-sports-widget
+                                        data-type="game"
+                                        data-game-id="${game.apiSportsGameId || defaultGameId}"
+                                        data-sport="${widgetSport}"
+                                        data-season="${widgetSeason}"
+                                        data-refresh="30"
+                                        data-show-toolbar="true"
+                                        data-tab="statistics"
+                                        data-game-style="2"
+                                      ></api-sports-widget>
+                                    `}
+                                  />
+                                </div>
                               </div>
-                            </div>
 
-                            <div className="space-y-4">
-                              <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center">
-                                <TrendingUp className="w-4 h-4 mr-2 text-indigo-500" />
-                                Matchup History
-                              </h4>
-                              <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-2xl">
-                                <ApiSportsWidgetEmbed 
-                                  html={`
-                                    <api-sports-widget
-                                      data-type="h2h"
-                                      data-h2h="${(game.apiSportsHomeTeamId && game.apiSportsAwayTeamId) ? `${game.apiSportsHomeTeamId}-${game.apiSportsAwayTeamId}` : '135-141'}"
-                                      data-refresh="0"
-                                      data-show-toolbar="false"
-                                      data-tab="all"
-                                      data-h2h-style="2"
-                                    ></api-sports-widget>
-                                    <api-sports-widget
-                                      data-type="config"
-                                      data-key="${WIDGET_KEY}"
-                                      data-sport="${widgetSport}"
-                                      data-lang="en"
-                                      data-theme="grey"
-                                      data-timezone="CST"
-                                      data-show-errors="false"
-                                      data-show-logos="true"
-                                      data-favorite="true"
-                                    ></api-sports-widget>
-                                  `}
-                                />
+                              {/* ── 2. Head-to-Head History ── */}
+                              <div className="space-y-2">
+                                <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2">
+                                  <TrendingUp className="w-4 h-4 text-indigo-500" />
+                                  Head-to-Head History
+                                </h4>
+                                <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-2xl">
+                                  <ApiSportsWidgetEmbed
+                                    html={`
+                                      <api-sports-widget
+                                        data-type="h2h"
+                                        data-h2h="${(game.apiSportsHomeTeamId && game.apiSportsAwayTeamId) ? `${game.apiSportsHomeTeamId}-${game.apiSportsAwayTeamId}` : defaultH2hId}"
+                                        data-sport="${widgetSport}"
+                                        data-season="${widgetSeason}"
+                                        data-refresh="0"
+                                        data-show-toolbar="false"
+                                        data-tab="all"
+                                        data-h2h-style="2"
+                                      ></api-sports-widget>
+                                    `}
+                                  />
+                                </div>
                               </div>
+
+                              {/* ── 3. Team Profile Cards (side by side) ── */}
+                              {game.apiSportsHomeTeamId && game.apiSportsAwayTeamId && (
+                                <div className="space-y-2">
+                                  <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2">
+                                    <Info className="w-4 h-4 text-indigo-500" />
+                                    Team Season Profiles
+                                  </h4>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-xl p-3">
+                                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mr-1.5"></span>
+                                        {game.awayTeam || "Away"} Profile
+                                      </h5>
+                                      <ApiSportsWidgetEmbed
+                                        html={`
+                                          <api-sports-widget
+                                            data-type="team"
+                                            data-id="${game.apiSportsAwayTeamId}"
+                                            data-sport="${widgetSport}"
+                                            data-league="${widgetLeagueId}"
+                                            data-season="${widgetSeason}"
+                                            data-refresh="0"
+                                            data-show-toolbar="false"
+                                          ></api-sports-widget>
+                                        `}
+                                      />
+                                    </div>
+                                    <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-xl p-3">
+                                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mr-1.5"></span>
+                                        {game.homeTeam || "Home"} Profile
+                                      </h5>
+                                      <ApiSportsWidgetEmbed
+                                        html={`
+                                          <api-sports-widget
+                                            data-type="team"
+                                            data-id="${game.apiSportsHomeTeamId}"
+                                            data-sport="${widgetSport}"
+                                            data-league="${widgetLeagueId}"
+                                            data-season="${widgetSeason}"
+                                            data-refresh="0"
+                                            data-show-toolbar="false"
+                                          ></api-sports-widget>
+                                        `}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
                             </div>
-                          </div>
-                        ) : (
+                         ) : (
                           <div className="text-xs text-slate-500 bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-center italic">
                             Live provider details widget is not active or unconfigured for this game/league.
                           </div>

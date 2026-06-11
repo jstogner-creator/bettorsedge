@@ -23,7 +23,7 @@ export function normalizeGame(g: any, fallbackLeague: string, fallbackDate: stri
 
   // Ensure stable document ID
   let id = g.id;
-  if (!id || id === "unique-id" || id === "unique_string_id" || id.startsWith("undefined-")) {
+  if (!id || id === "unique-id" || id === "unique_string_id" || String(id).startsWith("undefined-")) {
     id = `${league.toLowerCase()}-${awayTeam}-${homeTeam}-${safeDateStr}`
       .toLowerCase()
       .replace(/[^a-z0-9]/g, "-");
@@ -34,6 +34,39 @@ export function normalizeGame(g: any, fallbackLeague: string, fallbackDate: stri
   const apiSportsHomeTeamId = g.apiSportsHomeTeamId !== undefined && g.apiSportsHomeTeamId !== null ? Number(g.apiSportsHomeTeamId) : undefined;
   const apiSportsAwayTeamId = g.apiSportsAwayTeamId !== undefined && g.apiSportsAwayTeamId !== null ? Number(g.apiSportsAwayTeamId) : undefined;
 
+  // Normalize status
+  let statusStr: Game["status"] = "scheduled";
+  if (g.status) {
+    if (typeof g.status === "string") {
+      const s = g.status.toLowerCase();
+      if (s === "live" || s === "in_progress" || s === "in progress" || s === "active") {
+        statusStr = "live";
+      } else if (s === "finished" || s === "ft" || s === "complete" || s === "final") {
+        statusStr = "finished";
+      } else {
+        statusStr = "scheduled";
+      }
+    } else if (typeof g.status === "object") {
+      const short = String(g.status.short || "").toUpperCase();
+      const long = String(g.status.long || "").toLowerCase();
+      
+      const finishedShorts = ["FT", "AOT", "POST", "AET", "AWD", "WO", "FT-OT", "FINISHED", "FINAL", "COMPLETE"];
+      const liveShorts = [
+        "1H", "2H", "1Q", "2Q", "3Q", "4Q", "OT", "LIVE", 
+        "Q1", "Q2", "Q3", "Q4", "BT", 
+        "I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8", "I9", "EI"
+      ];
+
+      if (finishedShorts.includes(short) || long.includes("finished") || long.includes("complete") || long.includes("final")) {
+        statusStr = "finished";
+      } else if (liveShorts.includes(short) || long.includes("inning") || long.includes("progress") || long.includes("halftime") || long.includes("live")) {
+        statusStr = "live";
+      } else {
+        statusStr = "scheduled";
+      }
+    }
+  }
+
   return {
     ...g,
     id,
@@ -41,7 +74,7 @@ export function normalizeGame(g: any, fallbackLeague: string, fallbackDate: stri
     date: safeDateStr,
     homeTeam,
     awayTeam,
-    status: g.status || "scheduled",
+    status: statusStr,
     time: g.time || "00:00",
     location: g.location || "Unknown Venue",
     apiSportsGameId,

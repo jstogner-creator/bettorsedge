@@ -1278,6 +1278,66 @@ async function startServer() {
     }
   });
 
+  // ── ESPN MLB Fallback Routes ──────────────────────────────────────────────
+  // These proxy ESPN public pages for MLB pitching stats, team info, and odds.
+  // Used as a data fallback when API-Sports is unavailable or returns low-quality data.
+
+  /** GET /api/espn/mlb/team-stats — MLB team pitching statistics */
+  app.get("/api/espn/mlb/team-stats", async (req, res) => {
+    const cacheKey = "espn-mlb-team-stats-pitching";
+    const cached = apiCache.get(cacheKey);
+    if (cached) return res.json(cached);
+    try {
+      // ESPN site API for MLB team stats (pitching view)
+      const url = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/statistics?group=54&season=2025&seasontype=2";
+      console.log(`[ESPN MLB Proxy] Fetching team pitching stats: ${url}`);
+      const resp = await fetchWithRetry(url);
+      apiCache.set(cacheKey, resp.data, 15 * 60 * 1000); // 15-min cache
+      return res.json(resp.data);
+    } catch (err: any) {
+      console.warn("[ESPN MLB Proxy] team-stats failed:", err.message);
+      return res.status(502).json({ error: "ESPN team stats unavailable", details: err.message });
+    }
+  });
+
+  /** GET /api/espn/mlb/teams — MLB team info and logos */
+  app.get("/api/espn/mlb/teams", async (req, res) => {
+    const cacheKey = "espn-mlb-teams";
+    const cached = apiCache.get(cacheKey);
+    if (cached) return res.json(cached);
+    try {
+      const url = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams?limit=50";
+      console.log(`[ESPN MLB Proxy] Fetching team info: ${url}`);
+      const resp = await fetchWithRetry(url);
+      apiCache.set(cacheKey, resp.data, 60 * 60 * 1000); // 1-hour cache
+      return res.json(resp.data);
+    } catch (err: any) {
+      console.warn("[ESPN MLB Proxy] teams failed:", err.message);
+      return res.status(502).json({ error: "ESPN teams unavailable", details: err.message });
+    }
+  });
+
+  /** GET /api/espn/mlb/odds — Current MLB betting odds from ESPN */
+  app.get("/api/espn/mlb/odds", async (req, res) => {
+    const cacheKey = "espn-mlb-odds";
+    const cached = apiCache.get(cacheKey);
+    if (cached) return res.json(cached);
+    try {
+      // ESPN scoreboard with odds embedded — current day
+      const today = new Date();
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const dateStr = `${today.getFullYear()}${pad(today.getMonth() + 1)}${pad(today.getDate())}`;
+      const url = `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=${dateStr}&limit=50`;
+      console.log(`[ESPN MLB Proxy] Fetching odds/scoreboard: ${url}`);
+      const resp = await fetchWithRetry(url);
+      apiCache.set(cacheKey, resp.data, 5 * 60 * 1000); // 5-min cache
+      return res.json(resp.data);
+    } catch (err: any) {
+      console.warn("[ESPN MLB Proxy] odds failed:", err.message);
+      return res.status(502).json({ error: "ESPN odds unavailable", details: err.message });
+    }
+  });
+
   // Simple in-memory cache for API responses
   class SimpleCache {
     private cache = new Map<string, { data: any; expires: number }>();
