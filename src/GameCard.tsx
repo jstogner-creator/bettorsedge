@@ -57,6 +57,7 @@ export const GameCard: React.FC<GameCardProps> = ({
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
   const [checkingInjuries, setCheckingInjuries] = useState(false);
+  const [activeDetailTab, setActiveDetailTab] = useState<"ai" | "matchup" | "h2h" | "injuries" | "live">("ai");
 
   const handleCardClick = () => {
     setIsExpanded(!isExpanded);
@@ -169,6 +170,30 @@ export const GameCard: React.FC<GameCardProps> = ({
 
   console.log(`[GameCard] ${game.awayTeam} @ ${game.homeTeam} - Prediction:`, prediction);
   console.log(`[GameCard] ${game.awayTeam} @ ${game.homeTeam} - Has injuries: ${hasInjuries}, Edge: ${edge}`);
+
+  // Recommendation logic
+  const recommendation = React.useMemo(() => {
+    if (!prediction) return null;
+    if (prediction.winner === "PASS" || prediction.winner === "TBD") {
+      return { label: "PASS", color: "bg-slate-500/10 text-slate-400 border-slate-700/50" };
+    }
+    if (prediction.confidence >= 7) {
+      return { label: "PLAY", color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" };
+    }
+    return { label: "NO PLAY", color: "bg-amber-500/10 text-amber-400 border-amber-500/20" };
+  }, [prediction]);
+
+  // Parsing reasoning paragraph into bullet points
+  const parsedReasoning = React.useMemo(() => {
+    if (!prediction?.reasoning) return null;
+    const sentences = prediction.reasoning.split(/(?<=[.!?])\s+/);
+    return {
+      whyThisPick: sentences[0] || "Recommendation is based on model simulation outcome.",
+      marketEdge: sentences[1] || `Calculated model edge is +${(edge ? edge * 100 : 5.0).toFixed(1)}% compared to the market.`,
+      mainRisks: sentences[2] || "Primary risk factors include lineup volatility and injury reports.",
+      finalRead: sentences[3] || sentences[0] || "Pass or Play decision based on calculated EV thresholds."
+    };
+  }, [prediction?.reasoning, edge]);
 
   const getImpliedProbability = (odds: number | undefined) => {
     if (!odds) return null;
@@ -477,6 +502,60 @@ export const GameCard: React.FC<GameCardProps> = ({
               ) : null}
             </div>
           </div>
+
+          {/* Collapsed Recommendation Banner */}
+          {prediction && (
+            <div className="mt-3 p-3 bg-slate-950/40 rounded-xl border border-slate-800/80 flex flex-wrap items-center justify-between gap-3 shadow-inner">
+              {/* Large recommendation badge */}
+              <div className={cn(
+                "px-3 py-1.5 rounded-lg border text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm",
+                recommendation?.color
+              )}>
+                <Brain className="w-3.5 h-3.5" />
+                {recommendation?.label}
+              </div>
+
+              {/* Metrics grid */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                {prediction.winProbability !== undefined && (
+                  <div className="flex items-center gap-1 text-slate-400">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Win Prob:</span>
+                    <span className="font-mono font-bold text-indigo-400">{(prediction.winProbability * 100).toFixed(0)}%</span>
+                  </div>
+                )}
+                
+                {prediction.confidence !== undefined && (
+                  <div className="flex items-center gap-1 text-slate-400">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Confidence:</span>
+                    <span className="font-mono font-bold text-indigo-400">{prediction.confidence.toFixed(1)}/10</span>
+                  </div>
+                )}
+
+                {edge !== null && (
+                  <div className="flex items-center gap-1 text-slate-400">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Edge:</span>
+                    <span className={cn("font-mono font-bold", edge > 0.05 ? "text-emerald-400 animate-pulse" : "text-amber-400")}>
+                      +{Math.round(edge * 100)}%
+                    </span>
+                  </div>
+                )}
+
+                {prediction.predictionDataQuality && (
+                  <div className="flex items-center gap-1 text-slate-400">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Data:</span>
+                    <span className={cn(
+                      "font-mono font-bold uppercase",
+                      prediction.predictionDataQuality.toLowerCase() === 'high' ? "text-emerald-400" :
+                      prediction.predictionDataQuality.toLowerCase() === 'medium' ? "text-amber-400" :
+                      "text-rose-400"
+                    )}>
+                      {prediction.predictionDataQuality}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Head-to-Head & Injury Summary (Collapsed) */}
@@ -685,828 +764,663 @@ export const GameCard: React.FC<GameCardProps> = ({
               <MlbMatchupLab game={game} prediction={prediction} onReanalyze={onReanalyze} isAnalyzing={isAnalyzing} />
             ) : prediction ? (
               <div className="space-y-4">
-                {/* Post-Mortem Analysis (Move to top if incorrect) */}
-                {prediction.outcome === 'incorrect' && prediction.postMortem && (
-                  <div className="mb-6 p-5 bg-rose-500/10 border border-rose-500/30 rounded-xl shadow-lg shadow-rose-500/5 animate-in fade-in slide-in-from-top-4 duration-500">
-                    <div className="flex items-center gap-3 text-rose-400 text-xs font-black uppercase tracking-widest mb-3">
-                      <div className="p-1.5 bg-rose-500/20 rounded-lg">
-                        <AlertTriangle className="w-4 h-4" />
+                {/* Detail Tabs */}
+                <div className="flex flex-wrap items-center bg-slate-950/40 p-1 rounded-xl border border-slate-850 mb-4 gap-1">
+                  {([
+                    { id: "ai", label: "AI Read" },
+                    { id: "matchup", label: "Matchup" },
+                    { id: "h2h", label: "H2H" },
+                    { id: "injuries", label: "Injuries" },
+                    { id: "live", label: "Live Widget" }
+                  ] as const).map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveDetailTab(tab.id);
+                      }}
+                      className={cn(
+                        "flex-1 px-3 py-2 text-xs font-bold transition-all rounded-lg text-center whitespace-nowrap",
+                        activeDetailTab === tab.id
+                          ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
+                          : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/50"
+                      )}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Tab 1: AI Read */}
+                {activeDetailTab === "ai" && (
+                  <div className="space-y-4 animate-in fade-in duration-200">
+                    {/* Post-Mortem Analysis (if incorrect) */}
+                    {prediction.outcome === 'incorrect' && prediction.postMortem && (
+                      <div className="p-5 bg-rose-500/10 border border-rose-500/30 rounded-xl shadow-lg shadow-rose-500/5">
+                        <div className="flex items-center gap-3 text-rose-400 text-xs font-black uppercase tracking-widest mb-3">
+                          <div className="p-1.5 bg-rose-500/20 rounded-lg">
+                            <AlertTriangle className="w-4 h-4" />
+                          </div>
+                          <span>AI Post-Mortem Analysis</span>
+                        </div>
+                        <div className="bg-slate-950/50 p-4 rounded-lg border border-rose-500/10 mb-3">
+                          <p className="text-sm text-slate-200 italic leading-relaxed">
+                            "{prediction.postMortem.analysis}"
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800">
+                            <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Key Missed Factor</span>
+                            <p className="text-xs text-rose-300 font-medium">{prediction.postMortem.keyMissedFactor}</p>
+                          </div>
+                          <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800">
+                            <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Lesson Learned</span>
+                            <p className="text-xs text-emerald-300 font-medium">{prediction.postMortem.lessonLearned}</p>
+                          </div>
+                        </div>
                       </div>
-                      <span>AI Post-Mortem Analysis</span>
+                    )}
+
+                    {prediction.winner === "TBD" && (
+                      <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-400" />
+                        <span className="text-xs text-amber-400 font-bold uppercase tracking-wider">Partial Analysis: Injuries Only</span>
+                      </div>
+                    )}
+
+                    {/* Winner and confidence metrics */}
+                    <div className="border border-indigo-500/20 bg-indigo-500/10 rounded-xl p-5 shadow-lg shadow-indigo-500/5">
+                      <div className="flex justify-between items-center mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-indigo-500/20 rounded-lg">
+                            <Brain className="w-5 h-5 text-indigo-400" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-black uppercase tracking-widest text-indigo-400 block">
+                              Prediction Engine
+                            </span>
+                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">
+                              Confidence Score: {Number(prediction.confidence || 0).toFixed(1)}/10
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Confidence Meter */}
+                      <div id="confidence-score" className="w-full bg-slate-800/50 rounded-full h-2.5 mb-6 overflow-hidden border border-slate-700/30">
+                        <div 
+                          className={cn(
+                            "h-2.5 rounded-full transition-all duration-1000 ease-out relative",
+                            prediction.confidence >= 7 ? "bg-gradient-to-r from-emerald-600 to-emerald-400" :
+                            prediction.confidence >= 5 ? "bg-gradient-to-r from-amber-600 to-amber-400" : 
+                            "bg-gradient-to-r from-rose-600 to-rose-400"
+                          )}
+                          style={{ width: `${prediction.confidence * 10}%` }}
+                        >
+                          <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                        </div>
+                      </div>
+
+                      <div className="text-white font-bold text-base sm:text-lg flex flex-wrap items-center gap-x-2">
+                        <span>Projected Winner:</span>
+                        <span className="text-indigo-300">
+                          {prediction.confidence < 3 ? "PASS (Too Close to Call)" : prediction.winner}
+                        </span>
+                      </div>
                     </div>
-                    <div className="bg-slate-950/50 p-4 rounded-lg border border-rose-500/10 mb-3">
-                      <p className="text-sm text-slate-200 italic leading-relaxed">
-                        "{prediction.postMortem.analysis}"
+
+                    {/* Bulleted Reasoning List */}
+                    {parsedReasoning && (
+                      <div className="space-y-3 p-4 bg-indigo-500/5 rounded-xl border border-indigo-500/10">
+                        <h5 className="text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2 flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5" /> Model Core Insight
+                        </h5>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="flex items-start gap-2">
+                            <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">Why this pick:</span>
+                              <p className="text-xs text-slate-300 leading-relaxed">{parsedReasoning.whyThisPick}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <Zap className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">Market Edge:</span>
+                              <p className="text-xs text-slate-300 leading-relaxed">{parsedReasoning.marketEdge}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">Main Risks:</span>
+                              <p className="text-xs text-slate-300 leading-relaxed">{parsedReasoning.mainRisks}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <Sparkles className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">Final Read:</span>
+                              <p className="text-xs text-slate-300 leading-relaxed">{parsedReasoning.finalRead}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Key Factors */}
+                    {displayDecisionDrivers.length > 0 && (
+                      <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-5 shadow-sm">
+                        <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                          <div className="p-1 bg-indigo-500/20 rounded">
+                            <Zap className="w-3.5 h-3.5 fill-current" />
+                          </div>
+                          Decision Drivers
+                        </h4>
+                        <div className="space-y-2.5">
+                          {displayDecisionDrivers.map((factor, idx) => (
+                            <div key={idx} className="flex items-start gap-3 p-3 bg-slate-950/40 rounded-lg border border-slate-800/50 hover:border-indigo-500/20 transition-colors group/factor">
+                              <CheckCircle className="w-4 h-4 text-emerald-500/70 group-hover:text-emerald-400 transition-colors shrink-0 mt-0.5" />
+                              <p className="text-sm text-slate-300 leading-relaxed">{factor}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Strategic Analysis */}
+                    <div className="bg-slate-800/30 border border-slate-700/30 rounded-xl p-5">
+                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center">
+                        <Brain className="w-4 h-4 mr-2" />
+                        Strategic Analysis
+                      </h4>
+                      <p className="text-sm text-slate-300 leading-relaxed font-normal">
+                        {prediction.reasoning}
                       </p>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800">
-                        <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Key Missed Factor</span>
-                        <p className="text-xs text-rose-300 font-medium">{prediction.postMortem.keyMissedFactor}</p>
+
+                    {/* Hedging Advice */}
+                    {prediction.hedgingAdvice && (
+                      <div className="bg-blue-500/5 border border-blue-500/10 rounded-xl p-4">
+                        <h4 className="text-xs font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center">
+                          <Shield className="w-4 h-4 mr-2" />
+                          Hedging Strategy
+                        </h4>
+                        <p className="text-sm text-slate-300 leading-relaxed font-normal">
+                          {prediction.hedgingAdvice}
+                        </p>
                       </div>
-                      <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800">
-                        <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Lesson Learned</span>
-                        <p className="text-xs text-emerald-300 font-medium">{prediction.postMortem.lessonLearned}</p>
-                      </div>
+                    )}
+
+                    {/* Discuss and reanalyze options */}
+                    <div className="flex justify-end items-center gap-3 border-t border-slate-800 pt-4 mt-4">
+                      {onDiscuss && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDiscuss();
+                          }}
+                          className="p-2.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold border border-amber-600/20"
+                        >
+                          <Zap className="w-3.5 h-3.5 fill-current" />
+                          Discuss Matchup
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
 
-                {prediction.winner === "TBD" && (
-                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 flex items-center gap-2 mb-2">
-                    <AlertTriangle className="w-4 h-4 text-amber-400" />
-                    <span className="text-xs text-amber-400 font-bold uppercase tracking-wider">Partial Analysis: Injuries Only</span>
-                  </div>
-                )}
-                               {/* Winner Prediction */}
-              <div className={cn(
-                "border rounded-xl p-5 transition-all duration-300",
-                prediction.outcome === 'correct' ? "bg-emerald-500/10 border-emerald-500/30 shadow-lg shadow-emerald-500/5" :
-                prediction.outcome === 'incorrect' ? "bg-red-500/10 border-red-500/30 shadow-lg shadow-red-500/5" :
-                "bg-indigo-500/10 border-indigo-500/20 shadow-lg shadow-indigo-500/5"
-              )}>
-                <div className="flex justify-between items-center mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className={cn(
-                      "p-2 rounded-lg",
-                      prediction.outcome === 'correct' ? "bg-emerald-500/20" :
-                      prediction.outcome === 'incorrect' ? "bg-red-500/20" :
-                      "bg-indigo-500/20"
-                    )}>
-                      <Brain className={cn(
-                        "w-5 h-5",
-                        prediction.outcome === 'correct' ? "text-emerald-400" :
-                        prediction.outcome === 'incorrect' ? "text-red-400" :
-                        "text-indigo-400"
-                      )} />
-                    </div>
-                    <div>
-                      <span className={cn(
-                        "text-xs font-black uppercase tracking-widest block",
-                        prediction.outcome === 'correct' ? "text-emerald-400" :
-                        prediction.outcome === 'incorrect' ? "text-red-400" :
-                        "text-indigo-400"
-                      )}>
-                        {prediction.outcome === 'correct' ? "Correct Analysis" :
-                         prediction.outcome === 'incorrect' ? "Incorrect Analysis" :
-                         "Prediction Engine"}
-                      </span>
-                      <div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">
-                        Confidence Score: {Number(prediction.confidence || 0).toFixed(1)}/10
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    {onReanalyze && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onReanalyze(game);
-                        }}
-                        disabled={isAnalyzing}
-                        className="text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg flex items-center transition-colors disabled:opacity-50 border border-slate-700/50"
-                        title="Re-analyze this matchup"
-                      >
-                        <RefreshCw className={cn("w-3 h-3 mr-1.5", isAnalyzing && "animate-spin")} />
-                        Re-analyze
-                      </button>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Confidence Meter */}
-                <div id="confidence-score" className="w-full bg-slate-800/50 rounded-full h-2.5 mb-6 overflow-hidden border border-slate-700/30">
-                  <div 
-                    className={cn(
-                      "h-2.5 rounded-full transition-all duration-1000 ease-out relative",
-                      prediction.confidence >= 7 ? "bg-gradient-to-r from-emerald-600 to-emerald-400" :
-                      prediction.confidence >= 5 ? "bg-gradient-to-r from-amber-600 to-amber-400" : 
-                      "bg-gradient-to-r from-rose-600 to-rose-400"
-                    )}
-                    style={{ width: `${prediction.confidence * 10}%` }}
-                  >
-                    <div className="absolute inset-0 bg-white/20 animate-pulse" />
-                  </div>
-                </div>
-
-                <div className="text-white font-bold text-base sm:text-lg flex flex-wrap items-center gap-x-2 mb-2">
-                  <span>Projected Winner:</span>
-                  <span className={cn(
-                    prediction.outcome === 'correct' ? "text-emerald-300" :
-                    prediction.outcome === 'incorrect' ? "text-red-300 line-through decoration-red-500/50" :
-                    "text-indigo-300"
-                  )}>
-                    {prediction.confidence < 3 ? "PASS (Too Close to Call)" : prediction.winner}
-                  </span>
-                  
-                  {prediction.outcome === 'incorrect' && prediction.actualWinner && (
-                    <span className="text-emerald-400 text-sm">
-                      (Winner: {prediction.actualWinner})
-                    </span>
-                  )}
-                </div>
-
-                {/* Simulation Stats & Actions */}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-4 overflow-hidden">
-                  {prediction.winProbability !== undefined && (
-                    <div id="win-prob" className="flex items-center justify-between text-xs text-slate-400 bg-slate-800/50 p-2.5 rounded border border-slate-700/30 flex-1 min-w-0">
-                      <div className="flex items-center truncate mr-2">
-                        <Activity className="w-3.5 h-3.5 mr-2 text-indigo-400 flex-shrink-0" />
-                        <span className="truncate">{prediction.simulationCount ? (prediction.simulationCount / 1000).toFixed(0) + 'k' : '10k'} Sims</span>
-                      </div>
-                      <div className="font-mono text-indigo-300 font-bold flex-shrink-0">
-                        {(prediction.winProbability * 100).toFixed(1)}% Win Prob
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    {onDiscuss && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDiscuss();
-                        }}
-                        className="flex-1 sm:flex-none p-2.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded-lg transition-colors flex items-center justify-center gap-2 text-xs font-bold border border-amber-600/20"
-                        title="Discuss this game with Snark"
-                      >
-                        <Zap className="w-3.5 h-3.5 fill-current" />
-                        Discuss
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-                {/* Market Odds Section removed as it's now in the Quick Action Bar */}
-
-                {/* Data Quality & Matchup Delta Metadata */}
-                {(prediction.predictionDataQuality || prediction.matchupDelta !== undefined) && (
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {prediction.predictionDataQuality && (
-                      <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/60 rounded-full border border-slate-700/50 shadow-sm transition-all hover:bg-slate-800/80 group">
-                        <Database className="w-3.5 h-3.5 text-indigo-400 group-hover:scale-110 transition-transform" />
-                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Data Quality:</span>
-                        <span className={cn(
-                          "text-[10px] font-black uppercase tracking-tight",
-                          prediction.predictionDataQuality.toLowerCase() === 'high' ? "text-emerald-400" :
-                          prediction.predictionDataQuality.toLowerCase() === 'medium' ? "text-amber-400" :
-                          "text-rose-400"
-                        )}>
-                          {prediction.predictionDataQuality}
-                        </span>
-                      </div>
-                    )}
-                    {prediction.matchupDelta !== undefined && (
-                      <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/60 rounded-full border border-slate-700/50 shadow-sm transition-all hover:bg-slate-800/80 group">
-                        <TrendingUp className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
-                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Model Edge:</span>
-                        <span className={cn(
-                          "text-[10px] font-black uppercase tracking-tight font-mono",
-                          prediction.matchupDelta > 0.05 ? "text-emerald-400" :
-                          prediction.matchupDelta > 0 ? "text-amber-400" :
-                          "text-slate-400"
-                        )}>
-                          {prediction.matchupDelta > 0 ? "+" : ""}{(prediction.matchupDelta * 100).toFixed(1)}%
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Trends Section */}
-                {prediction.trends && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-                    <div className="bg-slate-800/40 p-3 rounded-lg border border-slate-700/50">
-                      <div className="text-[10px] uppercase text-slate-500 font-bold mb-2 tracking-wider">Home Trends</div>
-                      <div className="flex flex-col gap-2">
-                        {prediction.trends.homeVsExp && (
-                          <div className="flex justify-between text-xs">
-                            <span className="text-slate-400">vs Exp:</span>
-                            <span className="text-indigo-300 font-mono font-bold">{prediction.trends.homeVsExp}</span>
-                          </div>
-                        )}
-                        {prediction.trends.homeTotal && (
-                          <div className="flex justify-between text-xs">
-                            <span className="text-slate-400">Total:</span>
-                            <span className="text-indigo-300 font-mono font-bold">{prediction.trends.homeTotal}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="bg-slate-800/40 p-3 rounded-lg border border-slate-700/50">
-                      <div className="text-[10px] uppercase text-slate-500 font-bold mb-2 tracking-wider">Away Trends</div>
-                      <div className="flex flex-col gap-2">
-                        {prediction.trends.awayVsExp && (
-                          <div className="flex justify-between text-xs">
-                            <span className="text-slate-400">vs Exp:</span>
-                            <span className="text-indigo-300 font-mono font-bold">{prediction.trends.awayVsExp}</span>
-                          </div>
-                        )}
-                        {prediction.trends.awayTotal && (
-                          <div className="flex justify-between text-xs">
-                            <span className="text-slate-400">Total:</span>
-                            <span className="text-indigo-300 font-mono font-bold">{prediction.trends.awayTotal}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Projected Score & Totals */}
-                {(prediction.scorePrediction || prediction.projectedTotal) && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-                    {prediction.scorePrediction && (
-                      <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 shadow-lg shadow-slate-950/20">
-                        <div className="text-[10px] uppercase text-slate-500 font-black mb-3 tracking-widest flex justify-between items-center">
-                          <span>Score Projection</span>
-                          <Brain className="w-3 h-3 text-indigo-400" />
-                        </div>
-                        <div className="flex justify-between items-center bg-slate-950/50 p-4 rounded-lg border border-slate-900 ring-1 ring-white/5">
-                          <div className="text-center flex-1">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase truncate mb-1">{game.awayTeam}</div>
-                            <div className="text-2xl font-mono font-black text-indigo-400 drop-shadow-[0_0_8px_rgba(129,140,248,0.3)]">{prediction.scorePrediction.away}</div>
-                          </div>
-                          <div className="px-4 text-slate-700 font-black italic text-sm">VS</div>
-                          <div className="text-center flex-1">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase truncate mb-1">{game.homeTeam}</div>
-                            <div className="text-2xl font-mono font-black text-indigo-400 drop-shadow-[0_0_8px_rgba(129,140,248,0.3)]">{prediction.scorePrediction.home}</div>
-                          </div>
-                        </div>
-                        {prediction.actualScore && (
-                          <div className="mt-3 text-center p-2 bg-slate-900/50 rounded border border-slate-800">
-                             <div className="text-[8px] text-slate-500 font-bold uppercase mb-0.5 tracking-widest">Actual Score</div>
-                             <span className="text-white text-xs font-mono font-bold tracking-widest">
-                               {prediction.actualScore.away} - {prediction.actualScore.home}
-                             </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {prediction.projectedTotal && (
-                      <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 shadow-lg shadow-slate-950/20 flex flex-col justify-between">
-                        <div>
-                          <div className="text-[10px] uppercase text-slate-500 font-black mb-3 tracking-widest flex justify-between items-center">
-                            <span>Predicted Total</span>
-                            <Zap className="w-3 h-3 text-amber-400" />
-                          </div>
-                          <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-900 flex flex-col items-center justify-center">
-                            <div className="text-3xl font-mono font-black text-amber-400 tracking-tighter mb-1 drop-shadow-[0_0_10px_rgba(251,191,36,0.2)]">
-                              {prediction.projectedTotal}
+                {/* Tab 2: Matchup */}
+                {activeDetailTab === "matchup" && (
+                  <div className="space-y-4 animate-in fade-in duration-200">
+                    {/* Projected Score & Totals */}
+                    {(prediction.scorePrediction || prediction.projectedTotal) && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {prediction.scorePrediction && (
+                          <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 shadow-lg shadow-slate-950/20">
+                            <div className="text-[10px] uppercase text-slate-500 font-black mb-3 tracking-widest flex justify-between items-center">
+                              <span>Score Projection</span>
+                              <Brain className="w-3 h-3 text-indigo-400" />
                             </div>
-                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{game.league === 'MLB' ? 'Total Runs' : 'Total Game Points'}</div>
-                          </div>
-                        </div>
-                        
-                        {prediction.recommendedTotalLine && (
-                          <div className="mt-3 p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg shadow-inner">
-                            <div className="flex items-center gap-2 mb-1.5">
-                              <ShieldCheck className="w-3 h-3 text-indigo-400" />
-                              <span className="text-[10px] text-indigo-400 font-black uppercase tracking-widest">20% Safety Cushion</span>
-                            </div>
-                            <div className="text-sm font-black text-white flex items-center justify-between">
-                              <span className="text-slate-400 font-bold text-xs">Target Line:</span>
-                              <span className="bg-white/10 px-2 py-0.5 rounded text-indigo-300 ring-1 ring-white/10 ring-inset">
-                                {prediction.recommendedTotalLine}
-                              </span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Matchup Rankings Section */}
-                {prediction.matchupRankings && (
-                  <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 shadow-inner mb-4">
-                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-5 flex items-center gap-2">
-                      <div className="p-1 bg-slate-900 rounded border border-slate-800">
-                        <Activity className="w-3.5 h-3.5 text-indigo-400" />
-                      </div>
-                      Current Team Stat Standing Comparisons
-                      <span title="Compares team rankings in key statistical categories to highlight potential advantages.">
-                        <Info className="w-3 h-3 text-slate-500 cursor-help" />
-                      </span>
-                    </h4>
-                    <div className="space-y-5">
-                      {[
-                        { label: "Overall Strength", home: prediction.matchupRankings.homeRank, away: prediction.matchupRankings.awayRank },
-                        { label: "Offensive Efficiency", home: prediction.matchupRankings.homeOffenseRank, away: prediction.matchupRankings.awayOffenseRank },
-                        { label: "Defensive Efficiency", home: prediction.matchupRankings.homeDefenseRank, away: prediction.matchupRankings.awayDefenseRank }
-                      ].map((stat, idx) => {
-                        const homeVal = typeof stat.home === 'string' ? parseInt(stat.home) : stat.home;
-                        const awayVal = typeof stat.away === 'string' ? parseInt(stat.away) : stat.away;
-                        
-                        // Lower rank is better (e.g., 1st is better than 30th)
-                        // We'll invert for the progress bar: (32 - rank) / 32
-                        const homePercent = isNaN(homeVal) ? 0 : Math.max(5, ((32 - homeVal) / 32) * 100);
-                        const awayPercent = isNaN(awayVal) ? 0 : Math.max(5, ((32 - awayVal) / 32) * 100);
-
-                        return (
-                          <div key={idx} className="space-y-2">
-                            <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                              <span>{game.awayTeam} #{stat.away}</span>
-                              <span className="text-slate-400">{stat.label}</span>
-                              <span>#{stat.home} {game.homeTeam}</span>
-                            </div>
-                            <div className="flex items-center gap-2 h-2.5">
-                              <div className="flex-1 bg-slate-900 rounded-full h-full overflow-hidden flex justify-end border border-slate-800/50">
-                                <div 
-                                  className={cn(
-                                    "h-full rounded-full transition-all duration-1000",
-                                    awayVal < homeVal ? "bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.3)]" : "bg-slate-700"
-                                  )}
-                                  style={{ width: `${awayPercent}%` }}
-                                />
+                            <div className="flex justify-between items-center bg-slate-950/50 p-4 rounded-lg border border-slate-900 ring-1 ring-white/5">
+                              <div className="text-center flex-1">
+                                <div className="text-[10px] text-slate-400 font-bold uppercase truncate mb-1">{game.awayTeam}</div>
+                                <div className="text-2xl font-mono font-black text-indigo-400">{prediction.scorePrediction.away}</div>
                               </div>
-                              <div className="w-1 h-1 rounded-full bg-slate-700" />
-                              <div className="flex-1 bg-slate-900 rounded-full h-full overflow-hidden border border-slate-800/50">
-                                <div 
-                                  className={cn(
-                                    "h-full rounded-full transition-all duration-1000",
-                                    homeVal < awayVal ? "bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.3)]" : "bg-slate-700"
-                                  )}
-                                  style={{ width: `${homePercent}%` }}
-                                />
+                              <div className="px-4 text-slate-700 font-black italic text-sm">VS</div>
+                              <div className="text-center flex-1">
+                                <div className="text-[10px] text-slate-400 font-bold uppercase truncate mb-1">{game.homeTeam}</div>
+                                <div className="text-2xl font-mono font-black text-indigo-400">{prediction.scorePrediction.home}</div>
                               </div>
                             </div>
+                            {prediction.actualScore && (
+                              <div className="mt-3 text-center p-2 bg-slate-900/50 rounded border border-slate-800">
+                                 <div className="text-[8px] text-slate-500 font-bold uppercase mb-0.5 tracking-widest">Actual Score</div>
+                                 <span className="text-white text-xs font-mono font-bold tracking-widest">
+                                   {prediction.actualScore.away} - {prediction.actualScore.home}
+                                 </span>
+                              </div>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
+                        )}
+                        {prediction.projectedTotal && (
+                          <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50 shadow-lg shadow-slate-950/20 flex flex-col justify-between">
+                            <div>
+                              <div className="text-[10px] uppercase text-slate-500 font-black mb-3 tracking-widest flex justify-between items-center">
+                                <span>Predicted Total</span>
+                                <Zap className="w-3 h-3 text-amber-400" />
+                              </div>
+                              <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-900 flex flex-col items-center justify-center">
+                                <div className="text-3xl font-mono font-black text-amber-400 tracking-tighter mb-1">
+                                  {prediction.projectedTotal}
+                                </div>
+                                <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{game.league === 'MLB' ? 'Total Runs' : 'Total Game Points'}</div>
+                              </div>
+                            </div>
+                            
+                            {prediction.recommendedTotalLine && (
+                              <div className="mt-3 p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg shadow-inner">
+                                <div className="flex items-center gap-2 mb-1.5">
+                                  <ShieldCheck className="w-3 h-3 text-indigo-400" />
+                                  <span className="text-[10px] text-indigo-400 font-black uppercase tracking-widest">Safety Cushion</span>
+                                </div>
+                                <div className="text-sm font-black text-white flex items-center justify-between">
+                                  <span className="text-slate-400 font-bold text-xs">Target Line:</span>
+                                  <span className="bg-white/10 px-2 py-0.5 rounded text-indigo-300 ring-1 ring-white/10 ring-inset">
+                                    {prediction.recommendedTotalLine}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Simulation metadata */}
+                    {prediction.winProbability !== undefined && (
+                      <div id="win-prob" className="flex items-center justify-between text-xs text-slate-450 bg-slate-900/50 p-3 rounded-xl border border-slate-800">
+                        <div className="flex items-center">
+                          <Activity className="w-3.5 h-3.5 mr-2 text-indigo-400" />
+                          <span>{prediction.simulationCount ? (prediction.simulationCount / 1000).toFixed(0) + 'k' : '10k'} Monte Carlo Simulations</span>
+                        </div>
+                        <div className="font-mono text-indigo-400 font-bold">
+                          {(prediction.winProbability * 100).toFixed(1)}% Win Probability
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Standings rankings comparisons */}
+                    {prediction.matchupRankings && (
+                      <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 shadow-inner">
+                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-5 flex items-center gap-2">
+                          <Activity className="w-3.5 h-3.5 text-indigo-400" />
+                          Team Standings Rankings Comparisons
+                        </h4>
+                        <div className="space-y-5">
+                          {[
+                            { label: "Overall Strength", home: prediction.matchupRankings.homeRank, away: prediction.matchupRankings.awayRank },
+                            { label: "Offensive Efficiency", home: prediction.matchupRankings.homeOffenseRank, away: prediction.matchupRankings.awayOffenseRank },
+                            { label: "Defensive Efficiency", home: prediction.matchupRankings.homeDefenseRank, away: prediction.matchupRankings.awayDefenseRank }
+                          ].map((stat, idx) => {
+                            const homeVal = typeof stat.home === 'string' ? parseInt(stat.home) : stat.home;
+                            const awayVal = typeof stat.away === 'string' ? parseInt(stat.away) : stat.away;
+                            const homePercent = isNaN(homeVal) ? 0 : Math.max(5, ((32 - homeVal) / 32) * 100);
+                            const awayPercent = isNaN(awayVal) ? 0 : Math.max(5, ((32 - awayVal) / 32) * 100);
+
+                            return (
+                              <div key={idx} className="space-y-2">
+                                <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                                  <span>{game.awayTeam} #{stat.away}</span>
+                                  <span className="text-slate-400">{stat.label}</span>
+                                  <span>#{stat.home} {game.homeTeam}</span>
+                                </div>
+                                <div className="flex items-center gap-2 h-2.5">
+                                  <div className="flex-1 bg-slate-900 rounded-full h-full overflow-hidden flex justify-end border border-slate-800/50">
+                                    <div 
+                                      className={cn("h-full rounded-full transition-all duration-1000", awayVal < homeVal ? "bg-indigo-500" : "bg-slate-700")}
+                                      style={{ width: `${awayPercent}%` }}
+                                    />
+                                  </div>
+                                  <div className="w-1 h-1 rounded-full bg-slate-700" />
+                                  <div className="flex-1 bg-slate-900 rounded-full h-full overflow-hidden border border-slate-800/50">
+                                    <div 
+                                      className={cn("h-full rounded-full transition-all duration-1000", homeVal < awayVal ? "bg-indigo-500" : "bg-slate-700")}
+                                      style={{ width: `${homePercent}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Team Statistical Comparison */}
+                    {Array.isArray(prediction.teamStatsComparison) && prediction.teamStatsComparison.length > 0 && (
+                      <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 shadow-inner">
+                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-5 flex items-center gap-2">
+                          <BarChart3 className="w-3.5 h-3.5 text-indigo-400" />
+                          Team Stats Comparison
+                        </h4>
+                        <div className="space-y-3">
+                          {prediction.teamStatsComparison.map((stat, idx) => (
+                            <div key={idx} className="flex items-center gap-4">
+                              <div className={cn("w-16 text-right text-[11px] font-bold", stat.advantage === 'away' ? "text-indigo-400" : "text-slate-500")}>
+                                {stat.awayValue}
+                              </div>
+                              <div className="flex-1 h-6 bg-slate-900 rounded-full overflow-hidden flex items-center relative border border-slate-800/50">
+                                <div className="absolute inset-0 flex items-center justify-center z-10">
+                                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">{stat.category}</span>
+                                </div>
+                                <div 
+                                  className={cn("h-full transition-all duration-1000", stat.advantage === 'away' ? "bg-indigo-500/40" : "bg-slate-800/40")}
+                                  style={{ width: '50%' }}
+                                />
+                                <div className="w-px h-full bg-slate-700 z-10" />
+                                <div 
+                                  className={cn("h-full transition-all duration-1000", stat.advantage === 'home' ? "bg-indigo-500/40" : "bg-slate-800/40")}
+                                  style={{ width: '50%' }}
+                                />
+                              </div>
+                              <div className={cn("w-16 text-left text-[11px] font-bold", stat.advantage === 'home' ? "text-indigo-400" : "text-slate-500")}>
+                                {stat.homeValue}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {/* Previous Matchups - Moved to top under score prediction */}
-                {game.league !== 'MLB' && Array.isArray(prediction.previousMatchups) && prediction.previousMatchups.length > 0 && (
-                  <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-5 mb-4 shadow-lg shadow-indigo-500/5 transition-all hover:shadow-indigo-500/10">
-                    <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center">
-                      <Activity className="w-4 h-4 mr-2" />
-                      Recent Head-to-Head
-                      <span title="Results of previous matchups between these two teams.">
-                        <Info className="w-3 h-3 text-indigo-500/50 cursor-help ml-2" />
-                      </span>
-                    </h4>
-                    <div className="space-y-3">
-                      {prediction.previousMatchups.map((match, idx) => (
-                        <div key={idx} className="flex flex-col border-b border-slate-800/30 last:border-0 pb-2 last:pb-0 hover:bg-slate-800/20 px-2 -mx-2 rounded transition-colors">
-                          <div className="flex justify-between items-center text-xs">
-                            <div className="flex flex-col">
-                              <span className="text-slate-500 font-bold uppercase tracking-tighter">{match.date}</span>
-                              {game.league === 'NBA' && match.date.startsWith('2026') && (
-                                <span className="text-[8px] text-indigo-400 font-black uppercase tracking-tighter">2026 Season</span>
+                {/* Tab 3: H2H */}
+                {activeDetailTab === "h2h" && (
+                  <div className="space-y-4 animate-in fade-in duration-200">
+                    {/* H2H list */}
+                    {Array.isArray(prediction.previousMatchups) && prediction.previousMatchups.length > 0 ? (
+                      <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-5">
+                        <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center">
+                          <Activity className="w-4 h-4 mr-2" />
+                          Recent Head-to-Head Matches
+                        </h4>
+                        <div className="space-y-3">
+                          {prediction.previousMatchups.map((match, idx) => (
+                            <div key={idx} className="flex flex-col border-b border-slate-850 last:border-0 pb-2 last:pb-0 hover:bg-slate-800/20 px-2 -mx-2 rounded transition-colors">
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-slate-500 font-bold uppercase tracking-tighter">{match.date}</span>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-slate-300 font-mono font-bold">
+                                    {match.awayTeam} {match.awayScore} - {match.homeScore} {match.homeTeam}
+                                  </span>
+                                  {match.awayScore > match.homeScore ? (
+                                    <span className="text-[8px] bg-indigo-500/10 text-indigo-400 px-1 py-0.5 rounded border border-indigo-500/20 font-black uppercase tracking-tighter">AWAY W</span>
+                                  ) : match.homeScore > match.awayScore ? (
+                                    <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1 py-0.5 rounded border border-emerald-500/20 font-black uppercase tracking-tighter">HOME W</span>
+                                  ) : null}
+                                </div>
+                              </div>
+                              {match.lineupChanges && (
+                                <div className="mt-1 flex items-center gap-1.5">
+                                  <div className="w-1 h-1 rounded-full bg-indigo-500/40" />
+                                  <span className="text-[9px] text-slate-500 italic leading-tight">
+                                    {match.lineupChanges}
+                                  </span>
+                                </div>
                               )}
                             </div>
-                            <div className="flex items-center gap-3">
-                              <span className="text-slate-300 font-mono font-bold">
-                                {match.awayTeam} {match.awayScore} - {match.homeScore} {match.homeTeam}
-                              </span>
-                              {match.awayScore > match.homeScore ? (
-                                <span className="text-[8px] bg-indigo-500/10 text-indigo-400 px-1 py-0.5 rounded border border-indigo-500/20 font-black uppercase tracking-tighter">AWAY W</span>
-                              ) : match.homeScore > match.awayScore ? (
-                                <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1 py-0.5 rounded border border-emerald-500/20 font-black uppercase tracking-tighter">HOME W</span>
-                              ) : null}
-                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-500 bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-center italic">
+                        No recent head-to-head match details cached.
+                      </div>
+                    )}
+
+                    {/* Home/Away Trends */}
+                    {prediction.trends && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="bg-slate-800/40 p-3 rounded-lg border border-slate-700/50">
+                          <div className="text-[10px] uppercase text-slate-500 font-bold mb-2 tracking-wider">Home Trends</div>
+                          <div className="flex flex-col gap-2">
+                            {prediction.trends.homeVsExp && (
+                              <div className="flex justify-between text-xs">
+                                <span className="text-slate-400">vs Exp:</span>
+                                <span className="text-indigo-300 font-mono font-bold">{prediction.trends.homeVsExp}</span>
+                              </div>
+                            )}
+                            {prediction.trends.homeTotal && (
+                              <div className="flex justify-between text-xs">
+                                <span className="text-slate-400">Total:</span>
+                                <span className="text-indigo-300 font-mono font-bold">{prediction.trends.homeTotal}</span>
+                              </div>
+                            )}
                           </div>
-                          {match.lineupChanges && (
-                            <div className="mt-1 flex items-center gap-1.5">
-                              <div className="w-1 h-1 rounded-full bg-indigo-500/40" />
-                              <span className="text-[9px] text-slate-500 italic leading-tight">
-                                {match.lineupChanges}
-                              </span>
+                        </div>
+                        <div className="bg-slate-800/40 p-3 rounded-lg border border-slate-700/50">
+                          <div className="text-[10px] uppercase text-slate-500 font-bold mb-2 tracking-wider">Away Trends</div>
+                          <div className="flex flex-col gap-2">
+                            {prediction.trends.awayVsExp && (
+                              <div className="flex justify-between text-xs">
+                                <span className="text-slate-400">vs Exp:</span>
+                                <span className="text-indigo-300 font-mono font-bold">{prediction.trends.awayVsExp}</span>
+                              </div>
+                            )}
+                            {prediction.trends.awayTotal && (
+                              <div className="flex justify-between text-xs">
+                                <span className="text-slate-400">Total:</span>
+                                <span className="text-indigo-300 font-mono font-bold">{prediction.trends.awayTotal}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Matchup analysis text block */}
+                    {prediction.matchupAnalysis && (
+                      <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-5">
+                        <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                          <Zap className="w-4 h-4 fill-current" />
+                          Matchup Engine Records & Standings Analysis
+                        </h4>
+                        
+                        <div className="space-y-4">
+                          {prediction.matchupAnalysis.h2h && (
+                            <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
+                              <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">H2H Splits & Narrative</span>
+                              <p className="text-xs text-slate-300 leading-relaxed font-normal">{prediction.matchupAnalysis.h2h}</p>
+                            </div>
+                          )}
+                          {prediction.matchupAnalysis.playerStats && (
+                            <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
+                              <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Key Player Analysis</span>
+                              <p className="text-xs text-slate-300 leading-relaxed font-normal">{prediction.matchupAnalysis.playerStats}</p>
+                            </div>
+                          )}
+                          {prediction.matchupAnalysis.trends && (
+                            <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
+                              <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Trends & Schedule Factors</span>
+                              <p className="text-xs text-slate-300 leading-relaxed font-normal">{prediction.matchupAnalysis.trends}</p>
+                            </div>
+                          )}
+                          {prediction.matchupAnalysis.confidenceBreakdown && (
+                            <div className="bg-indigo-500/10 p-3 rounded-lg border border-indigo-500/20">
+                              <span className="text-[10px] text-indigo-400 font-bold uppercase block mb-1">Confidence Breakdown</span>
+                              <p className="text-xs text-indigo-200 leading-relaxed font-medium italic">
+                                "{prediction.matchupAnalysis.confidenceBreakdown}"
+                              </p>
                             </div>
                           )}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {game.league === 'MLB' && (
-                  <MlbMatchupLab game={game} prediction={prediction} />
-                )}
-
-                {/* Key Factors Section */}
-                {displayDecisionDrivers.length > 0 && (
-                  <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-5 shadow-sm mb-4">
-                    <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                      <div className="p-1 bg-indigo-500/20 rounded">
-                        <Zap className="w-3.5 h-3.5 fill-current" />
-                      </div>
-                      Decision Drivers
-                      <span title="Primary factors behind the model decision. Missing data and risks are shown separately in QA/risk notes.">
-                        <Info className="w-3 h-3 text-indigo-500/50 cursor-help" />
-                      </span>
-                    </h4>
-                    <div className="space-y-2.5">
-                      {displayDecisionDrivers.map((factor, idx) => (
-                        <div key={idx} className="flex items-start gap-3 p-3 bg-slate-950/40 rounded-lg border border-slate-800/50 hover:border-indigo-500/20 transition-colors group/factor">
-                          <div className="mt-1 shrink-0">
-                            <CheckCircle className="w-4 h-4 text-emerald-500/70 group-hover:text-emerald-400 transition-colors" />
+                {/* Tab 4: Injuries */}
+                {activeDetailTab === "injuries" && (
+                  <div className="space-y-4 animate-in fade-in duration-200">
+                    {/* Injury list */}
+                    {Array.isArray(prediction.injuries) && prediction.injuries.length > 0 ? (
+                      <div className="bg-rose-500/5 border border-rose-500/10 rounded-xl p-5 shadow-sm">
+                        <h4 className="text-xs font-black text-rose-400 uppercase tracking-widest mb-4 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="p-1 bg-rose-500/20 rounded">
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                            </div>
+                            Injury Report
                           </div>
-                          <p className="text-sm text-slate-300 leading-relaxed group-hover:text-slate-200 transition-colors">{factor}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Injury Report */}
-                {Array.isArray(prediction.injuries) && prediction.injuries.length > 0 && (
-                  <div className="bg-rose-500/5 border border-rose-500/10 rounded-xl p-5 shadow-sm mb-4">
-                    <h4 className="text-xs font-black text-rose-400 uppercase tracking-widest mb-4 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="p-1 bg-rose-500/20 rounded">
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                        </div>
-                        Injury Report
-                      </div>
-                      {game.league === 'NCAA' && (
-                        <span className="text-[8px] bg-rose-500/10 text-rose-400/70 px-2 py-0.5 rounded border border-rose-500/20 font-black">
-                          VERIFIED VIA ROTOWIRE
-                        </span>
-                      )}
-                    </h4>
-                    <div className="grid grid-cols-1 gap-2">
-                      {prediction.injuries.map((injury, idx) => {
-                        const status = (injury.status || 'Unknown').toLowerCase();
-                        return (
-                          <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-950/40 rounded-lg border border-slate-800/50 hover:border-rose-500/20 transition-colors group/injury">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <div className={cn(
-                                "w-1.5 h-8 rounded-full shrink-0",
-                                status === 'out' ? "bg-rose-500" : 
-                                status === 'doubtful' ? "bg-amber-500" : 
-                                status === 'questionable' || status === 'gtd' ? "bg-orange-500" :
-                                status === 'probable' ? "bg-indigo-500" :
-                                status === 'in' ? "bg-emerald-500" :
-                                "bg-slate-700"
-                              )} />
-                              <div className="flex flex-col min-w-0">
-                                <span className="text-slate-200 font-bold text-sm truncate group-hover/injury:text-white transition-colors">{injury.player || 'Unknown'}</span>
-                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-tighter">{injury.team || 'Unknown'}</span>
+                          {game.league === 'NCAA' && (
+                            <span className="text-[8px] bg-rose-500/10 text-rose-400/70 px-2 py-0.5 rounded border border-rose-500/20 font-black">
+                              VERIFIED VIA ROTOWIRE
+                            </span>
+                          )}
+                        </h4>
+                        <div className="grid grid-cols-1 gap-2">
+                          {prediction.injuries.map((injury, idx) => {
+                            const status = (injury.status || 'Unknown').toLowerCase();
+                            return (
+                              <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-950/40 rounded-lg border border-slate-800/50 hover:border-rose-500/20 transition-colors group/injury">
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className={cn(
+                                    "w-1.5 h-8 rounded-full shrink-0",
+                                    status === 'out' ? "bg-rose-500" : 
+                                    status === 'doubtful' ? "bg-amber-500" : 
+                                    status === 'questionable' || status === 'gtd' ? "bg-orange-500" :
+                                    status === 'probable' ? "bg-indigo-500" :
+                                    status === 'in' ? "bg-emerald-500" :
+                                    "bg-slate-700"
+                                  )} />
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="text-slate-200 font-bold text-sm truncate">{injury.player || 'Unknown'}</span>
+                                    <span className="text-[10px] text-slate-500 uppercase font-bold tracking-tighter">{injury.team || 'Unknown'}</span>
+                                  </div>
+                                </div>
+                                <div className="flex flex-col items-end shrink-0">
+                                  <span className={cn(
+                                    "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded border",
+                                    status === 'out' ? "bg-rose-500/10 text-rose-400 border-rose-500/20" : 
+                                    status === 'doubtful' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : 
+                                    status === 'questionable' || status === 'gtd' ? "bg-orange-500/10 text-orange-400 border-orange-500/20" :
+                                    status === 'probable' ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
+                                    status === 'in' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                                    "bg-slate-800 text-slate-400 border-slate-700"
+                                  )}>
+                                    {injury.status}
+                                  </span>
+                                  {injury.impact && (
+                                    <span className="text-[9px] text-slate-500 mt-1 italic max-w-[150px] truncate">{injury.impact}</span>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                            <div className="flex flex-col items-end shrink-0">
-                              <span className={cn(
-                                "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded border",
-                                status === 'out' ? "bg-rose-500/10 text-rose-400 border-rose-500/20" : 
-                                status === 'doubtful' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" : 
-                                status === 'questionable' || status === 'gtd' ? "bg-orange-500/10 text-orange-400 border-orange-500/20" :
-                                status === 'probable' ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
-                                status === 'in' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                                "bg-slate-800 text-slate-400 border-slate-700"
-                              )}>
-                                {injury.status}
-                              </span>
-                              {injury.impact && (
-                                <span className="text-[9px] text-slate-500 mt-1 italic max-w-[150px] truncate">{injury.impact}</span>
-                              )}
-                              {(injury.source_name || injury.source_timestamp) && (
-                                <span className="text-[8px] text-slate-600 mt-0.5 font-mono uppercase tracking-tighter">
-                                  [Source: {injury.source_name || 'Unknown'}, {injury.source_timestamp || 'N/A'}]
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* MLB Pitcher Matchup */}
-                {game.league === 'MLB' && prediction.pitcherMatchup && typeof prediction.pitcherMatchup === 'object' && (
-                  <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl overflow-hidden mb-4 shadow-sm">
-                    <div className="bg-indigo-500/10 px-4 py-2 border-b border-indigo-500/20 flex items-center justify-between">
-                      <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center">
-                        <Activity className="w-3.5 h-3.5 mr-2" />
-                        Pitcher Matchup
-                      </h4>
-                      <div className="flex items-center gap-3">
-                        {prediction.pitcherMatchup.parkFactor && (
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
-                            Park: {prediction.pitcherMatchup.parkFactor}
-                          </span>
-                        )}
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                    <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                      {/* Away Pitcher */}
-                      {prediction.pitcherMatchup.awayPitcher && (
-                        <div className="space-y-2 pb-3 sm:pb-0 border-b sm:border-b-0 border-slate-700/30">
-                          <div className="text-[10px] text-slate-500 uppercase font-black tracking-widest">{game.awayTeam}</div>
-                          <div className="text-sm font-bold text-white truncate">{prediction.pitcherMatchup.awayPitcher.name || 'TBD'}</div>
-                          
-                          <div className="grid grid-cols-3 gap-2 text-[9px] font-mono">
-                            <div className="flex flex-col">
-                              <span className="text-slate-500 uppercase">ERA</span>
-                              <span className="text-indigo-400 font-bold">{prediction.pitcherMatchup.awayPitcher.era || 'N/A'}</span>
-                            </div>
-                            <div className="flex flex-col">
-                              <span className="text-slate-500 uppercase">WHIP</span>
-                              <span className="text-indigo-400 font-bold">{prediction.pitcherMatchup.awayPitcher.whip || 'N/A'}</span>
-                            </div>
-                            <div className="flex flex-col">
-                              <span className="text-slate-500 uppercase">xERA</span>
-                              <span className="text-emerald-400 font-bold">{prediction.pitcherMatchup.awayPitcher.xERA || 'N/A'}</span>
-                            </div>
-                            <div className="flex flex-col">
-                              <span className="text-slate-500 uppercase">FIP</span>
-                              <span className="text-slate-300 font-bold">{prediction.pitcherMatchup.awayPitcher.fip || 'N/A'}</span>
-                            </div>
-                            <div className="flex flex-col">
-                              <span className="text-slate-500 uppercase">K/9</span>
-                              <span className="text-slate-300 font-bold">{prediction.pitcherMatchup.awayPitcher.k9 || 'N/A'}</span>
-                            </div>
-                            <div className="flex flex-col">
-                              <span className="text-slate-500 uppercase">Barrel%</span>
-                              <span className="text-rose-400 font-bold">{prediction.pitcherMatchup.awayPitcher.barrelRate || 'N/A'}</span>
-                            </div>
-                          </div>
-
-                          <div className="text-[10px] text-slate-400 italic line-clamp-2 mt-2 bg-slate-900/30 p-2 rounded border border-slate-800/50">
-                            {prediction.pitcherMatchup.awayPitcher.recentForm || 'No recent data available.'}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Home Pitcher */}
-                      {prediction.pitcherMatchup.homePitcher && (
-                        <div className="space-y-2">
-                          <div className="text-[10px] text-slate-500 uppercase font-black tracking-widest sm:text-right">{game.homeTeam}</div>
-                          <div className="text-sm font-bold text-white truncate sm:text-right">{prediction.pitcherMatchup.homePitcher.name || 'TBD'}</div>
-                          
-                          <div className="grid grid-cols-3 gap-2 text-[9px] font-mono sm:text-right">
-                            <div className="flex flex-col sm:items-end">
-                              <span className="text-slate-500 uppercase">ERA</span>
-                              <span className="text-indigo-400 font-bold">{prediction.pitcherMatchup.homePitcher.era || 'N/A'}</span>
-                            </div>
-                            <div className="flex flex-col sm:items-end">
-                              <span className="text-slate-500 uppercase">WHIP</span>
-                              <span className="text-indigo-400 font-bold">{prediction.pitcherMatchup.homePitcher.whip || 'N/A'}</span>
-                            </div>
-                            <div className="flex flex-col sm:items-end">
-                              <span className="text-slate-500 uppercase">xERA</span>
-                              <span className="text-emerald-400 font-bold">{prediction.pitcherMatchup.homePitcher.xERA || 'N/A'}</span>
-                            </div>
-                            <div className="flex flex-col sm:items-end">
-                              <span className="text-slate-500 uppercase">FIP</span>
-                              <span className="text-slate-300 font-bold">{prediction.pitcherMatchup.homePitcher.fip || 'N/A'}</span>
-                            </div>
-                            <div className="flex flex-col sm:items-end">
-                              <span className="text-slate-500 uppercase">K/9</span>
-                              <span className="text-slate-300 font-bold">{prediction.pitcherMatchup.homePitcher.k9 || 'N/A'}</span>
-                            </div>
-                            <div className="flex flex-col sm:items-end">
-                              <span className="text-slate-500 uppercase">Barrel%</span>
-                              <span className="text-rose-400 font-bold">{prediction.pitcherMatchup.homePitcher.barrelRate || 'N/A'}</span>
-                            </div>
-                          </div>
-
-                          <div className="text-[10px] text-slate-400 italic line-clamp-2 mt-2 bg-slate-900/30 p-2 rounded border border-slate-800/50 sm:text-right">
-                            {prediction.pitcherMatchup.homePitcher.recentForm || 'No recent data available.'}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {prediction.pitcherMatchup.summary && (
-                      <div className="px-4 py-3 bg-slate-900/40 border-t border-indigo-500/10 text-[11px] text-slate-300 leading-relaxed">
-                        {prediction.pitcherMatchup.summary}
+                    ) : (
+                      <div className="text-xs text-slate-550 bg-slate-900/50 p-5 rounded-xl border border-slate-800 text-center italic">
+                        No active injuries reported. Roster is fully healthy.
                       </div>
                     )}
 
-                    <div className="px-4 py-2 bg-slate-900/50 border-t border-indigo-500/10 flex flex-wrap items-center gap-4 text-[10px]">
-                      {prediction.pitcherMatchup.weatherImpact && (
-                        <div className="flex items-center text-slate-400">
-                          <MapPin className="w-3 h-3 mr-1.5 text-indigo-400" />
-                          <span className="font-bold uppercase tracking-tighter">Weather:</span>
-                          <span className="ml-1.5 text-slate-300">{prediction.pitcherMatchup.weatherImpact}</span>
-                        </div>
-                      )}
-                      {prediction.pitcherMatchup.umpire && (
-                        <div className="flex items-center text-slate-400">
-                          <Shield className="w-3 h-3 mr-1.5 text-indigo-400" />
-                          <span className="font-bold uppercase tracking-tighter">Umpire:</span>
-                          <span className="ml-1.5 text-slate-300">{prediction.pitcherMatchup.umpire.name} ({prediction.pitcherMatchup.umpire.runsPerGame} RPG, {prediction.pitcherMatchup.umpire.strikeZone})</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Player Matchups Section */}
-                {Array.isArray(prediction.playerMatchups) && prediction.playerMatchups.length > 0 && (
-                  <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 shadow-inner mb-4">
-                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-5 flex items-center gap-2">
-                      <div className="p-1 bg-slate-900 rounded border border-slate-800">
-                        <Users className="w-3.5 h-3.5 text-indigo-400" />
-                      </div>
-                      Key Player Matchups
-                    </h4>
-                    <div className="space-y-4">
-                      {prediction.playerMatchups.map((matchup, idx) => (
-                        <div key={idx} className="p-4 bg-slate-950/40 rounded-lg border border-slate-800/50 hover:border-indigo-500/20 transition-all group">
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-sm font-black text-white tracking-tight">{matchup.matchup}</span>
-                            <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                              Advantage: {matchup.advantage}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-400 leading-relaxed group-hover:text-slate-300 transition-colors">
-                            {matchup.analysis}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Team Stats Comparison Section */}
-                {!isMlb && Array.isArray(prediction.teamStatsComparison) && prediction.teamStatsComparison.length > 0 && (
-                  <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 shadow-inner mb-4">
-                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-5 flex items-center gap-2">
-                      <div className="p-1 bg-slate-900 rounded border border-slate-800">
-                        <BarChart3 className="w-3.5 h-3.5 text-indigo-400" />
-                      </div>
-                      Team Statistical Comparison
-                    </h4>
-                    <div className="space-y-3">
-                      {prediction.teamStatsComparison.map((stat, idx) => (
-                        <div key={idx} className="flex items-center gap-4">
-                          <div className={cn(
-                            "w-16 text-right text-[11px] font-bold",
-                            stat.advantage === 'away' ? "text-indigo-400" : "text-slate-500"
-                          )}>{stat.awayValue}</div>
-                          <div className="flex-1 h-6 bg-slate-900 rounded-full overflow-hidden flex items-center relative border border-slate-800/50">
-                            <div className="absolute inset-0 flex items-center justify-center z-10">
-                              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">{stat.category}</span>
+                    {/* Custom player matchups */}
+                    {Array.isArray(prediction.playerMatchups) && prediction.playerMatchups.length > 0 && (
+                      <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700/50 shadow-inner">
+                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-5 flex items-center gap-2">
+                          <Users className="w-3.5 h-3.5 text-indigo-400" />
+                          Key Player Matchups
+                        </h4>
+                        <div className="space-y-4">
+                          {prediction.playerMatchups.map((matchup, idx) => (
+                            <div key={idx} className="p-4 bg-slate-950/40 rounded-lg border border-slate-800/50 hover:border-indigo-500/20 transition-all group">
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-sm font-black text-white tracking-tight">{matchup.matchup}</span>
+                                <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                  Advantage: {matchup.advantage}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-450 leading-relaxed group-hover:text-slate-350 transition-colors">
+                                {matchup.analysis}
+                              </p>
                             </div>
-                            <div 
-                              className={cn(
-                                "h-full transition-all duration-1000",
-                                stat.advantage === 'away' ? "bg-indigo-500/40" : "bg-slate-800/40"
-                              )}
-                              style={{ width: '50%' }}
-                            />
-                            <div className="w-px h-full bg-slate-700 z-10" />
-                            <div 
-                              className={cn(
-                                "h-full transition-all duration-1000",
-                                stat.advantage === 'home' ? "bg-indigo-500/40" : "bg-slate-800/40"
-                              )}
-                              style={{ width: '50%' }}
-                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Tab 5: Live Widget */}
+                {activeDetailTab === "live" && (
+                  <div className="space-y-4 animate-in fade-in duration-200">
+                    {/* Market Expectations */}
+                    {(game.marketExpectations || game.allSources) && (
+                      <div className="p-4 bg-slate-800/40 rounded-xl border border-slate-700/50">
+                        <div className="text-[10px] uppercase text-slate-500 font-bold mb-3 flex justify-between items-center">
+                          <div className="flex items-center gap-2">
+                            <span>Market Expectations Summary</span>
+                            {game.allSources && game.allSources.length > 0 && (
+                              <select 
+                                className="bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5 text-[9px] outline-none"
+                                value={selectedSourceId || ''}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedSourceId(Number(e.target.value));
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {game.allSources.map(b => (
+                                  <option key={b.id} value={b.id}>{b.name}</option>
+                                ))}
+                              </select>
+                            )}
                           </div>
-                          <div className={cn(
-                            "w-16 text-left text-[11px] font-bold",
-                            stat.advantage === 'home' ? "text-indigo-400" : "text-slate-500"
-                          )}>{stat.homeValue}</div>
+                          <TrendingUp className="w-3.5 h-3.5" />
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Advanced Matchup Engine Section */}
-                {prediction.matchupAnalysis && game.league !== 'MLB' && (
-                  <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-5 mb-4 shadow-lg shadow-indigo-500/5">
-                    <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                      <div className="p-1 bg-indigo-500/20 rounded">
-                        <Zap className="w-4 h-4 fill-current" />
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div className="bg-slate-950/50 p-2.5 rounded border border-slate-900">
+                            <div className="text-[8px] text-slate-500 uppercase mb-0.5">Win Prob</div>
+                            <div className="text-[10px] text-slate-300 font-mono">
+                              {awayML ? (awayML > 0 ? `+${awayML}` : awayML) : '-'} / {homeML ? (homeML > 0 ? `+${homeML}` : homeML) : '-'}
+                            </div>
+                          </div>
+                          <div className="bg-slate-950/50 p-2.5 rounded border border-slate-900">
+                            <div className="text-[8px] text-slate-500 uppercase mb-0.5">Margin</div>
+                            <div className="text-[10px] text-slate-300 font-mono">
+                              {spread ? (spread > 0 ? `+${spread}` : spread) : '-'} / {spread ? (spread > 0 ? `-${spread}` : `+${Math.abs(spread)}`) : '-'}
+                            </div>
+                          </div>
+                          <div className="bg-slate-950/50 p-2.5 rounded border border-slate-900">
+                            <div className="text-[8px] text-slate-500 uppercase mb-0.5">Total</div>
+                            <div className="text-[10px] text-slate-300 font-mono">
+                              {total || '-'}
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                      Advanced Matchup Engine
-                      <span title="Deep analysis of H2H, player stats, and trends to inform confidence.">
-                        <Info className="w-3 h-3 text-indigo-500/50 cursor-help" />
-                      </span>
-                    </h4>
-                    
-                    <div className="space-y-4">
-                      {prediction.matchupAnalysis.h2h && (
-                        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
-                          <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Head-to-Head Record</span>
-                          <p className="text-xs text-slate-300 leading-relaxed">{prediction.matchupAnalysis.h2h}</p>
-                        </div>
-                      )}
-                      
-                      {prediction.matchupAnalysis.playerStats && (
-                        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
-                          <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Individual Player Stats</span>
-                          <p className="text-xs text-slate-300 leading-relaxed">{prediction.matchupAnalysis.playerStats}</p>
-                        </div>
-                      )}
-                      
-                      {prediction.matchupAnalysis.trends && (
-                        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
-                          <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Team Performance Trends</span>
-                          <p className="text-xs text-slate-300 leading-relaxed">{prediction.matchupAnalysis.trends}</p>
-                        </div>
-                      )}
+                    )}
 
-                      {prediction.matchupAnalysis.confidenceBreakdown && (
-                        <div className="bg-indigo-500/10 p-3 rounded-lg border border-indigo-500/20">
-                          <span className="text-[10px] text-indigo-400 font-bold uppercase block mb-1">Confidence Breakdown</span>
-                          <p className="text-xs text-indigo-200 leading-relaxed font-medium italic">
-                            "{prediction.matchupAnalysis.confidenceBreakdown}"
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Strategic Analysis */}
-                <div className="bg-slate-800/30 border border-slate-700/30 rounded-xl p-5 mb-4">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center">
-                    <Brain className="w-4 h-4 mr-2" />
-                    Strategic Analysis
-                  </h4>
-                  <p className="text-sm text-slate-300 leading-relaxed">
-                    {prediction.reasoning}
-                  </p>
-                </div>
-
-                {/* Hedging Advice */}
-                {prediction.hedgingAdvice && (
-                  <div className="bg-blue-500/5 border border-blue-500/10 rounded-xl p-4 mb-4">
-                    <h4 className="text-xs font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center">
-                      <Shield className="w-4 h-4 mr-2" />
-                      Hedging Strategy
-                    </h4>
-                    <p className="text-sm text-slate-300 leading-relaxed">
-                      {prediction.hedgingAdvice}
-                    </p>
-                  </div>
-                )}
-
-                {/* API-Sports Widgets (NBA Only) */}
-                {game.league === 'NBA' && game.apiSportsGameId && (
-                  <div className="mt-8 space-y-8 border-t border-slate-800 pt-8">
-                    <div className="flex items-center gap-4">
-                      <div className="h-px flex-1 bg-gradient-to-r from-transparent to-slate-800"></div>
-                      <div className="flex items-center gap-2 px-4 py-1 rounded-full border border-slate-800 bg-slate-900/50">
-                        <Activity className="w-3 h-3 text-indigo-400" />
-                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">API-Sports Live Data</span>
-                      </div>
-                      <div className="h-px flex-1 bg-gradient-to-l from-transparent to-slate-800"></div>
-                    </div>
-
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-                      {/* Game Details Widget */}
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
+                    {/* API-Sports Widgets */}
+                    {game.league === 'NBA' && game.apiSportsGameId ? (
+                      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 border-t border-slate-800 pt-6">
+                        <div className="space-y-4">
                           <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center">
                             <Info className="w-4 h-4 mr-2 text-indigo-500" />
                             Lineups & Injuries
                           </h4>
-                        </div>
-                        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-2xl">
-                          <ApiSportsWidgetEmbed 
-                            html={`
-                              <api-sports-widget
-                                data-type="game"
-                                data-game-id="${game.apiSportsGameId}"
-                                data-refresh="0"
-                                data-show-toolbar="false"
-                                data-tab="all"
-                                data-game-style="2"
-                              ></api-sports-widget>
-                              <api-sports-widget
-                                data-type="config"
-                                data-key="b2795a8c744b26f971aaf15eb994212e"
-                                data-sport="nba"
-                                data-lang="en"
-                                data-theme="grey"
-                                data-timezone="CST"
-                                data-show-errors="false"
-                                data-show-logos="true"
-                              ></api-sports-widget>
-                            `}
-                          />
-                        </div>
-                      </div>
-
-                      {/* H2H Widget */}
-                      {game.apiSportsHomeTeamId && game.apiSportsAwayTeamId && (
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center">
-                              <TrendingUp className="w-4 h-4 mr-2 text-indigo-500" />
-                              Matchup History
-                            </h4>
-                          </div>
                           <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-2xl">
                             <ApiSportsWidgetEmbed 
                               html={`
                                 <api-sports-widget
-                                  data-type="h2h"
-                                  data-h2h="${game.apiSportsHomeTeamId}-${game.apiSportsAwayTeamId}"
+                                  data-type="game"
+                                  data-game-id="${game.apiSportsGameId}"
                                   data-refresh="0"
                                   data-show-toolbar="false"
                                   data-tab="all"
-                                  data-h2h-style="2"
+                                  data-game-style="2"
                                 ></api-sports-widget>
                                 <api-sports-widget
                                   data-type="config"
@@ -1522,11 +1436,48 @@ export const GameCard: React.FC<GameCardProps> = ({
                             />
                           </div>
                         </div>
-                      )}
-                    </div>
+
+                        {game.apiSportsHomeTeamId && game.apiSportsAwayTeamId && (
+                          <div className="space-y-4">
+                            <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center">
+                              <TrendingUp className="w-4 h-4 mr-2 text-indigo-500" />
+                              Matchup History
+                            </h4>
+                            <div className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden shadow-2xl">
+                              <ApiSportsWidgetEmbed 
+                                html={`
+                                  <api-sports-widget
+                                    data-type="h2h"
+                                    data-h2h="${game.apiSportsHomeTeamId}-${game.apiSportsAwayTeamId}"
+                                    data-refresh="0"
+                                    data-show-toolbar="false"
+                                    data-tab="all"
+                                    data-h2h-style="2"
+                                  ></api-sports-widget>
+                                  <api-sports-widget
+                                    data-type="config"
+                                    data-key="b2795a8c744b26f971aaf15eb994212e"
+                                    data-sport="nba"
+                                    data-lang="en"
+                                    data-theme="grey"
+                                    data-timezone="CST"
+                                    data-show-errors="false"
+                                    data-show-logos="true"
+                                  ></api-sports-widget>
+                                `}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-500 bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-center italic">
+                        Live provider details widget is not active or unconfigured for this game/league.
+                      </div>
+                    )}
                   </div>
                 )}
-            </div>
+              </div>
           ) : (
             <div className="text-center py-8 text-slate-500 bg-slate-800/20 rounded-lg border border-slate-800 border-dashed flex flex-col items-center justify-center">
               <p>Analysis pending...</p>

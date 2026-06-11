@@ -279,17 +279,19 @@ function buildMlbTeamStatRows(game: Game, mlbContext: any, edgeModel: EdgeModelR
       advantage: edgeModel.selectedSide,
     });
   }
+  const normHome = mlbContext?.normalizedTeamStats?.home;
+  const normAway = mlbContext?.normalizedTeamStats?.away;
   const homeStats = mlbContext?.teamStatistics?.home;
   const awayStats = mlbContext?.teamStatistics?.away;
   const statCandidates = [
-    ["Runs", ["runs.for.total", "runs.total", "statistics.runs", "runs"]],
-    ["Runs Allowed", ["runs.against.total", "statistics.runsAllowed", "runsAllowed"]],
-    ["Batting Avg", ["batting.average", "statistics.batting.average", "avg"]],
-    ["ERA", ["pitching.era", "statistics.pitching.era", "era"]],
+    ["Runs", ["runs.for.total", "runs.total", "statistics.runs", "runs"], normHome?.runsPerGame, normAway?.runsPerGame],
+    ["Runs Allowed", ["runs.against.total", "statistics.runsAllowed", "runsAllowed"], normHome?.runsAllowed, normAway?.runsAllowed],
+    ["Batting Avg", ["batting.average", "statistics.batting.average", "avg"], normHome?.battingAverage, normAway?.battingAverage],
+    ["ERA", ["pitching.era", "statistics.pitching.era", "era"], normHome?.teamEra, normAway?.teamEra],
   ] as const;
-  for (const [label, paths] of statCandidates) {
-    const homeVal = valueFromPaths(homeStats, [...paths]);
-    const awayVal = valueFromPaths(awayStats, [...paths]);
+  for (const [label, paths, normH, normA] of statCandidates) {
+    const homeVal = normH !== undefined && normH !== 0 ? normH : valueFromPaths(homeStats, [...paths]);
+    const awayVal = normA !== undefined && normA !== 0 ? normA : valueFromPaths(awayStats, [...paths]);
     if (homeVal !== undefined || awayVal !== undefined) {
       const homeNum = numericValue(homeVal);
       const awayNum = numericValue(awayVal);
@@ -407,8 +409,8 @@ export class BettorsEdge {
       let h2hEdge = 0;
       let marketVariance = 0;
 
-      const normHomeStats = parseTeamStats(mlbContext?.teamStatistics?.home);
-      const normAwayStats = parseTeamStats(mlbContext?.teamStatistics?.away);
+      const normHomeStats = mlbContext?.normalizedTeamStats?.home || parseTeamStats(mlbContext?.teamStatistics?.home);
+      const normAwayStats = mlbContext?.normalizedTeamStats?.away || parseTeamStats(mlbContext?.teamStatistics?.away);
 
       const homePitcher = parsePitcher(mlbContext?.pitching?.homeStarter);
       const awayPitcher = parsePitcher(mlbContext?.pitching?.awayStarter);

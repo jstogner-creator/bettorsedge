@@ -133,7 +133,8 @@ export function Dashboard({
   onOpenFAQ: () => void;
 }) {
   const [user, setUser] = useState<User | null>(initialUser);
-  const [activeTab, setActiveTab] = useState("NBA");
+  const [activeTab, setActiveTab] = useState("Dashboard");
+  const [selectedSport, setSelectedSport] = useState("ALL");
   const [showTopPicks, setShowTopPicks] = useState(true);
   const [apiSportsStatus, setApiSportsStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', count: number, message?: string }>({ status: 'idle', count: 0 });
   const [selectedDate, setSelectedDate] = useState(getNYDate());
@@ -567,8 +568,8 @@ export function Dashboard({
 
   const cancelAnalysisRef = useRef<Record<string, boolean>>({});
 
-  const analyzing = analyzingMap[activeTab] || false;
-  const analysisProgress = analysisProgressMap[activeTab] || null;
+  const analyzing = (activeTab === "Dashboard" || activeTab === "Picks" ? analyzingMap[selectedSport] : analyzingMap[activeTab]) || false;
+  const analysisProgress = (activeTab === "Dashboard" || activeTab === "Picks" ? analysisProgressMap[selectedSport] : analysisProgressMap[activeTab]) || null;
 
   const handleSyncPending = async () => {
     setLoading(true);
@@ -865,16 +866,16 @@ export function Dashboard({
   };
 
   useEffect(() => {
-    if (activeTab === "NCAA" && !bracket) {
+    if (selectedSport === "NCAA" && !bracket) {
       fetchBracket().catch(console.error);
     }
-  }, [activeTab]);
+  }, [selectedSport, bracket]);
 
   useEffect(() => {
     setSelectedGameIds(new Set());
     fetchGames().catch(console.error);
     // We no longer cancel analysis on tab change to allow background processing
-  }, [activeTab, selectedDate, user]);
+  }, [activeTab, selectedSport, selectedDate, user]);
 
   const [alertedGames, setAlertedGames] = useState<Set<string>>(new Set());
 
@@ -987,16 +988,21 @@ export function Dashboard({
     // Only poll if we have games loaded
     if (games.length === 0) return;
 
-    // Initial fetch if needed (though fetchGames calls it too)
-    // fetchKalshiExpectations(activeTab);
-
     const intervalId = setInterval(() => {
-      console.log(`[Dashboard] Polling Kalshi expectations for ${activeTab}...`);
-      fetchKalshiExpectations(activeTab).catch(console.error);
+      if (selectedSport !== "ALL") {
+        console.log(`[Dashboard] Polling Kalshi expectations for ${selectedSport}...`);
+        fetchKalshiExpectations(selectedSport).catch(console.error);
+      } else {
+        const uniqueLeagues = Array.from(new Set(games.map(g => g.league).filter(Boolean)));
+        console.log(`[Dashboard] Polling Kalshi expectations for leagues:`, uniqueLeagues);
+        for (const league of uniqueLeagues) {
+          fetchKalshiExpectations(league).catch(console.error);
+        }
+      }
     }, 30000); // 30 seconds
 
     return () => clearInterval(intervalId);
-  }, [activeTab, games.length]); // Re-run if tab changes or games array length changes
+  }, [selectedSport, games]); // Re-run if tab changes or games array length changes
 
   // Resolve finished games
   useEffect(() => {
@@ -1064,43 +1070,28 @@ export function Dashboard({
     resolveGames().catch(console.error);
   }, [games, savedPredictions, isAdminUser]);
 
-const fetchGames = async (force: boolean = false) => {
-  if (activeTab === "Accuracy") {
-    setGames([]);
-    setLoading(false);
-    return;
-  }
-
-  setLoading(true);
-  setError(null);
-  if (force) setGames([]);
-
-  const dateStr = format(selectedDate, "yyyy-MM-dd");
-  console.log(`[Dashboard] fetchGames: Fetching schedule for ${activeTab} on ${dateStr} (force=${force})`);
-
-  try {
+  const fetchGamesForLeague = async (league: string, date: Date, force: boolean = false): Promise<Game[]> => {
+    const dateStrIso = format(date, "yyyy-MM-dd");
+    console.log(`[Dashboard] fetchGamesForLeague: Fetching ${league} on ${dateStrIso} (force=${force})`);
+    
     let fetchedGames: Game[] = [];
-    const dateStrIso = format(selectedDate, "yyyy-MM-dd");
-
-    console.log(`[Dashboard] fetchGames: Parallel fetch starting for ${activeTab}...`);
-
     let espnGames: Game[] = [];
     let aiGames: any[] = [];
     let apiSportsGames: any[] = [];
 
     // 1. Try ESPN first as it's the fastest and cheapest
     try {
-      espnGames = await espnService.getSchedule(activeTab, selectedDate);
-      console.log(`[Dashboard] fetchGames: ESPN fetch SUCCESS: ${espnGames.length} games for ${activeTab}`);
-      addDebugLog(`ESPN returned ${espnGames.length} games for ${activeTab}`);
+      espnGames = await espnService.getSchedule(league, date);
+      console.log(`[Dashboard] fetchGamesForLeague: ESPN fetch SUCCESS: ${espnGames.length} games for ${league}`);
+      addDebugLog(`ESPN returned ${espnGames.length} games for ${league}`);
     } catch (e) {
-      console.warn(`[Dashboard] fetchGames: ESPN fetch failed for ${activeTab}`, e);
-      addDebugLog(`ESPN fetch FAILED for ${activeTab}`);
+      console.warn(`[Dashboard] fetchGamesForLeague: ESPN fetch failed for ${league}`, e);
+      addDebugLog(`ESPN fetch FAILED for ${league}`);
     }
 
     // 2. Fetch API-Sports in parallel if NBA or MLB
-    const apiSportsPromise = (activeTab === "NBA" || activeTab === "MLB")
-      ? (activeTab === "NBA" ? apiSportsService.getGames(selectedDate).catch(() => []) : apiSportsMlbService.getGames(selectedDate).catch(() => []))
+    const apiSportsPromise = (league === "NBA" || league === "MLB")
+      ? (league === "NBA" ? apiSportsService.getGames(date).catch(() => []) : apiSportsMlbService.getGames(date).catch(() => []))
       : Promise.resolve([]);
 
     // 3. Fetch AI schedule. If ESPN has games and we are not forcing, try direct Firestore cache lookup
@@ -1108,35 +1099,35 @@ const fetchGames = async (force: boolean = false) => {
     
     if (shouldFetchAiSchedule) {
       try {
-        aiGames = await bettorsEdge.getDailySchedule(activeTab, dateStrIso, force);
-        console.log(`[Dashboard] fetchGames: AI/Firestore fetch SUCCESS: ${aiGames.length} games for ${activeTab}`);
-        addDebugLog(`AI/Firestore returned ${aiGames.length} games for ${activeTab}`);
+        aiGames = await bettorsEdge.getDailySchedule(league, dateStrIso, force);
+        console.log(`[Dashboard] fetchGamesForLeague: AI/Firestore fetch SUCCESS: ${aiGames.length} games for ${league}`);
+        addDebugLog(`AI/Firestore returned ${aiGames.length} games for ${league}`);
       } catch (e) {
-        console.warn("[Dashboard] fetchGames: AI schedule fetch failed:", e);
+        console.warn(`[Dashboard] fetchGamesForLeague: AI schedule fetch failed:`, e);
       }
     } else {
       // Direct Firestore cache read (very fast, no external API calls)
       try {
         const db = getDb();
-        const scheduleRef = doc(db, "schedules", `${activeTab}-${dateStrIso}`);
+        const scheduleRef = doc(db, "schedules", `${league}-${dateStrIso}`);
         const cached = await getDoc(scheduleRef);
         if (cached.exists()) {
           const data = cached.data();
           if (Array.isArray(data.games)) {
-            aiGames = data.games.map((g: any) => normalizeGame(g, activeTab, dateStrIso));
-            console.log(`[Dashboard] fetchGames: Loaded ${aiGames.length} cached schedule games from Firestore`);
+            aiGames = data.games.map((g: any) => normalizeGame(g, league, dateStrIso));
+            console.log(`[Dashboard] fetchGamesForLeague: Loaded ${aiGames.length} cached schedule games from Firestore`);
             addDebugLog(`Loaded ${aiGames.length} cached schedule games from Firestore`);
           }
         }
       } catch (error) {
-        console.warn("[Dashboard] fetchGames: Failed to read cached schedule from Firestore:", error);
+        console.warn(`[Dashboard] fetchGamesForLeague: Failed to read cached schedule from Firestore:`, error);
       }
     }
 
     try {
       apiSportsGames = await apiSportsPromise;
     } catch (e) {
-      console.warn("[Dashboard] fetchGames: apiSportsPromise failed:", e);
+      console.warn(`[Dashboard] fetchGamesForLeague: apiSportsPromise failed:`, e);
     }
 
     if (Array.isArray(espnGames)) {
@@ -1144,51 +1135,51 @@ const fetchGames = async (force: boolean = false) => {
     }
 
     // Map API-Sports IDs to games
-    if ((activeTab === "NBA" || activeTab === "MLB") && Array.isArray(apiSportsGames)) {
+    if ((league === "NBA" || league === "MLB") && Array.isArray(apiSportsGames)) {
       if (apiSportsGames.length > 0) {
         setApiSportsStatus({ status: 'success', count: apiSportsGames.length });
         
         if (fetchedGames.length === 0) {
-          console.log(`[Dashboard] fetchGames: ESPN returned 0 games. Using API-Sports games instead.`);
+          console.log(`[Dashboard] fetchGamesForLeague: ESPN returned 0 games. Using API-Sports games instead.`);
           fetchedGames = apiSportsGames
             .filter(ag => ag?.teams?.home?.name && ag?.teams?.away?.name)
             .map(ag => {
-            const statusStr = ag.status?.short || 'NS';
-            let status: 'scheduled' | 'live' | 'finished' = 'scheduled';
-            
-            if (activeTab === "NBA") {
-              if (['1Q', '2Q', '3Q', '4Q', 'OT', 'HT'].includes(statusStr)) status = 'live';
-              if (['FT', 'AOT'].includes(statusStr)) status = 'finished';
-            } else {
-              // MLB Status
-              if (['IN1', 'IN2', 'IN3', 'IN4', 'IN5', 'IN6', 'IN7', 'IN8', 'IN9', 'IN10', 'IN11', 'IN12', 'IN'].includes(statusStr)) status = 'live';
-              if (['FT'].includes(statusStr)) status = 'finished';
-            }
+              const statusStr = ag.status?.short || 'NS';
+              let status: 'scheduled' | 'live' | 'finished' = 'scheduled';
+              
+              if (league === "NBA") {
+                if (['1Q', '2Q', '3Q', '4Q', 'OT', 'HT'].includes(statusStr)) status = 'live';
+                if (['FT', 'AOT'].includes(statusStr)) status = 'finished';
+              } else {
+                // MLB Status
+                if (['IN1', 'IN2', 'IN3', 'IN4', 'IN5', 'IN6', 'IN7', 'IN8', 'IN9', 'IN10', 'IN11', 'IN12', 'IN'].includes(statusStr)) status = 'live';
+                if (['FT'].includes(statusStr)) status = 'finished';
+              }
 
-            const dateVal = ag.date ? String(ag.date) : "";
-            const safeDateStr = dateVal ? dateVal.split("T")[0] : dateStrIso;
-            const timeStr = ag.time || (dateVal ? dateVal.split("T")[1]?.substring(0, 5) : "00:00");
+              const dateVal = ag.date ? String(ag.date) : "";
+              const safeDateStr = dateVal ? dateVal.split("T")[0] : dateStrIso;
+              const timeStr = ag.time || (dateVal ? dateVal.split("T")[1]?.substring(0, 5) : "00:00");
 
-            return {
-              id: `${activeTab.toLowerCase()}-${ag.teams.away.name}-${ag.teams.home.name}-${safeDateStr}`.toLowerCase().replace(/[^a-z0-9]/g, "-"),
-              league: activeTab as any,
-              homeTeam: ag.teams.home.name,
-              awayTeam: ag.teams.away.name,
-              homeLogo: ag.teams.home.logo,
-              awayLogo: ag.teams.away.logo,
-              date: safeDateStr,
-              time: timeStr,
-              location: ag.venue || "Unknown",
-              status: status,
-              homeScore: ag.scores?.home?.total,
-              awayScore: ag.scores?.away?.total,
-              apiSportsGameId: ag.id,
-              apiSportsHomeTeamId: ag.teams.home.id,
-              apiSportsAwayTeamId: ag.teams.away.id,
-            };
-          });
+              return {
+                id: `${league.toLowerCase()}-${ag.teams.away.name}-${ag.teams.home.name}-${safeDateStr}`.toLowerCase().replace(/[^a-z0-9]/g, "-"),
+                league: league as any,
+                homeTeam: ag.teams.home.name,
+                awayTeam: ag.teams.away.name,
+                homeLogo: ag.teams.home.logo,
+                awayLogo: ag.teams.away.logo,
+                date: safeDateStr,
+                time: timeStr,
+                location: ag.venue || "Unknown",
+                status: status,
+                homeScore: ag.scores?.home?.total,
+                awayScore: ag.scores?.away?.total,
+                apiSportsGameId: ag.id,
+                apiSportsHomeTeamId: ag.teams.home.id,
+                apiSportsAwayTeamId: ag.teams.away.id,
+              };
+            });
         } else {
-          console.log(`[Dashboard] fetchGames: Mapping API-Sports IDs to ${fetchedGames.length} ${activeTab} games...`);
+          console.log(`[Dashboard] fetchGamesForLeague: Mapping API-Sports IDs to ${fetchedGames.length} ${league} games...`);
           fetchedGames.forEach((g) => {
             const apiGame = apiSportsGames.find((ag) => {
               if (!ag?.teams?.home?.name || !ag?.teams?.away?.name) return false;
@@ -1217,11 +1208,11 @@ const fetchGames = async (force: boolean = false) => {
         }
         
         // Fetch expectations for all NBA/MLB games
-        console.log(`[Dashboard] fetchGames: Fetching expectations for ${fetchedGames.length} ${activeTab} games...`);
+        console.log(`[Dashboard] fetchGamesForLeague: Fetching expectations for ${fetchedGames.length} ${league} games...`);
         const gamesWithExpectations = await Promise.all(fetchedGames.map(async (g) => {
           if (g.apiSportsGameId) {
             try {
-              const oddsData = activeTab === "NBA" 
+              const oddsData = league === "NBA" 
                 ? await apiSportsBasketballService.getOddsForGame(g.apiSportsGameId)
                 : await apiSportsMlbService.getOdds({ game: g.apiSportsGameId });
               if (oddsData && oddsData.length > 0) {
@@ -1314,7 +1305,7 @@ const fetchGames = async (force: boolean = false) => {
                 }
               }
             } catch (err) {
-              console.warn(`[Dashboard] fetchGames: Failed to fetch expectations for game ${g.id}`, err);
+              console.warn(`[Dashboard] fetchGamesForLeague: Failed to fetch expectations for game ${g.id}`, err);
             }
           }
           return g;
@@ -1325,7 +1316,7 @@ const fetchGames = async (force: boolean = false) => {
       } else {
         setApiSportsStatus({ status: 'idle', count: 0, message: "No games found for this date in API-Sports" });
       }
-    } else if (activeTab === "NBA" || activeTab === "MLB") {
+    } else if (league === "NBA" || league === "MLB") {
       setApiSportsStatus({ status: 'error', count: 0, message: "Failed to fetch from API-Sports" });
     }
 
@@ -1333,27 +1324,16 @@ const fetchGames = async (force: boolean = false) => {
       const filteredAiGames = aiGames.filter((g) => {
         if (!g.league) return true;
 
-        const gLeague = normalizeLeagueKey(g.league, activeTab);
-        const currentTab = normalizeLeagueKey(activeTab);
+        const gLeague = normalizeLeagueKey(g.league, league);
+        const currentTab = normalizeLeagueKey(league);
 
-        const isMatch =
-          gLeague === currentTab ||
-          gLeague.includes(currentTab) ||
-          currentTab.includes(gLeague);
-
-        if (!isMatch) {
-          console.log(
-            `[Dashboard] fetchGames: AI game league mismatch. Game: ${g.awayTeam}@${g.homeTeam}, League: ${gLeague}, Tab: ${currentTab}`
-          );
-        }
-
-        return isMatch;
+        return gLeague === currentTab || gLeague.includes(currentTab) || currentTab.includes(gLeague);
       });
 
       filteredAiGames.forEach((g) => {
         if (g.id === "unique-id" || g.id === "unique_string_id" || !g.id) {
           const safeDateStr = g.date ? g.date.split("T")[0] : "unknown";
-          g.id = `${g.league || activeTab}-${g.awayTeam}-${g.homeTeam}-${safeDateStr}`
+          g.id = `${g.league || league}-${g.awayTeam}-${g.homeTeam}-${safeDateStr}`
             .toLowerCase()
             .replace(/[^a-z0-9]/g, "-");
         }
@@ -1390,7 +1370,7 @@ const fetchGames = async (force: boolean = false) => {
           });
 
           if (!isDuplicate) {
-            console.log(`[Dashboard] fetchGames: Adding missing game from AI: ${g.awayTeam} @ ${g.homeTeam}`);
+            console.log(`[Dashboard] fetchGamesForLeague: Adding missing game from AI: ${g.awayTeam} @ ${g.homeTeam}`);
             fetchedGames.push(g);
           } else {
             const existingGame = fetchedGames.find((eg) => {
@@ -1410,7 +1390,7 @@ const fetchGames = async (force: boolean = false) => {
 
             if (existingGame && g.id) {
               console.log(
-                `[Dashboard] fetchGames: Syncing ID for ${existingGame.awayTeam} @ ${existingGame.homeTeam}: ${existingGame.id} -> ${g.id}`
+                `[Dashboard] fetchGamesForLeague: Syncing ID for ${existingGame.awayTeam} @ ${existingGame.homeTeam}: ${existingGame.id} -> ${g.id}`
               );
               existingGame.id = g.id;
               if (g.apiSportsGameId) existingGame.apiSportsGameId = g.apiSportsGameId;
@@ -1431,7 +1411,7 @@ const fetchGames = async (force: boolean = false) => {
     }
 
     const finalUniqueGames: Game[] = [];
-    console.log(`[Dashboard] fetchGames: Starting final deduplication pass on ${fetchedGames.length} games.`);
+    console.log(`[Dashboard] fetchGamesForLeague: Starting final deduplication pass on ${fetchedGames.length} games.`);
 
     fetchedGames.forEach((g) => {
       const normalize = (name: string) => {
@@ -1445,7 +1425,7 @@ const fetchGames = async (force: boolean = false) => {
 
       const isAlreadyAdded = finalUniqueGames.some((ug) => {
         if (g.id && ug.id === g.id) {
-          console.log(`[Dashboard] fetchGames: Duplicate ID found: ${g.id} (${g.awayTeam}@${g.homeTeam})`);
+          console.log(`[Dashboard] fetchGamesForLeague: Duplicate ID found: ${g.id} (${g.awayTeam}@${g.homeTeam})`);
           return true;
         }
 
@@ -1462,12 +1442,6 @@ const fetchGames = async (force: boolean = false) => {
           g.awayTeam.toLowerCase().includes(ug.awayTeam.toLowerCase()) ||
           ug.awayTeam.toLowerCase().includes(g.awayTeam.toLowerCase());
 
-        if (homeMatch && awayMatch) {
-          console.log(
-            `[Dashboard] fetchGames: Duplicate team names found: ${g.awayTeam}@${g.homeTeam} matches ${ug.awayTeam}@${ug.homeTeam}`
-          );
-        }
-
         return homeMatch && awayMatch;
       });
 
@@ -1476,62 +1450,86 @@ const fetchGames = async (force: boolean = false) => {
       }
     });
 
-    fetchedGames = finalUniqueGames.map((g) => normalizeGame(g, activeTab, dateStrIso));
+    fetchedGames = finalUniqueGames.map((g) => normalizeGame(g, league, dateStrIso));
 
-    const targetDateStr = format(selectedDate, "yyyy-MM-dd");
+    const targetDateStr = format(date, "yyyy-MM-dd");
     fetchedGames = fetchedGames.filter((g) => {
       if (!g.date) return true;
 
       const gameSlateDate = getSlateDate(g.date);
       const isMatch = gameSlateDate === targetDateStr;
-      
-      if (!isMatch) {
-        console.log(
-          `[Dashboard] fetchGames: Filtering out game from different slate. Game: ${g.awayTeam}@${g.homeTeam}, Game Date: ${g.date}, Game Slate: ${gameSlateDate}, Target: ${targetDateStr}`
-        );
-      }
 
       return isMatch;
     });
 
-    console.log(
-      `[Dashboard] fetchGames: Final unique games count after date filtering: ${fetchedGames?.length || 0} for ${activeTab}`
-    );
-
-    if (!fetchedGames || !Array.isArray(fetchedGames) || fetchedGames.length === 0) {
-      console.warn(`[Dashboard] fetchGames: NO GAMES FOUND for ${activeTab} on ${dateStrIso} from any source.`);
-      
-      if (!importedTabsRef.current.has(activeTab)) {
-        console.log(`[Dashboard] fetchGames: No games found for ${activeTab}. Auto-importing...`);
-        importedTabsRef.current.add(activeTab);
-        bettorsEdge.importSchedule(activeTab, selectedDate, 7, (msg) => {
-          setToast({ message: msg, type: "info" });
-        }, false)
-        .then(() => fetchGames(false))
-        .catch((err) => {
-          console.error(`[Dashboard] Failed to auto-import ${activeTab}:`, err);
-          setToast({ message: `Failed to import schedule for ${activeTab}.`, type: "error" });
-        });
-        return;
+    if (fetchedGames.length === 0 && !force && !importedTabsRef.current.has(league)) {
+      console.log(`[Dashboard] fetchGamesForLeague: No games found for ${league}. Auto-importing...`);
+      importedTabsRef.current.add(league);
+      try {
+        await bettorsEdge.importSchedule(league, date, 7, () => {}, false);
+        return await fetchGamesForLeague(league, date, true);
+      } catch (err) {
+        console.error(`[Dashboard] Failed to auto-import ${league}:`, err);
       }
-      
-      setGames([]);
-    } else {
-      console.log(
-        `[Dashboard] fetchGames: Setting ${fetchedGames.length} games for ${activeTab}. Sample: ${fetchedGames[0].awayTeam}@${fetchedGames[0].homeTeam}`
-      );
-      setGames(fetchedGames);
-      fetchKalshiExpectations(activeTab).catch(console.error);
     }
-  } catch (err: any) {
-    const msg = err?.message || "Failed to fetch schedule. Please try again.";
-    setError(msg);
-    console.error("[Dashboard] Error fetching games:", err);
-    setGames([]);
-  } finally {
-    setLoading(false);
-  }
-};
+
+    return fetchedGames;
+  };
+
+  const fetchGames = async (force: boolean = false) => {
+    if (activeTab !== "Dashboard" && activeTab !== "Picks") {
+      setGames([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    if (force) setGames([]);
+
+    const dateStr = format(selectedDate, "yyyy-MM-dd");
+    console.log(`[Dashboard] fetchGames: Fetching schedules for activeTab=${activeTab}, selectedSport=${selectedSport} on ${dateStr} (force=${force})`);
+
+    try {
+      const sportsToFetch = selectedSport === "ALL" 
+        ? ["NBA", "NFL", "MLB", "NHL", "NCAA"] 
+        : [selectedSport];
+        
+      addDebugLog(`Fetching schedules for sports: ${sportsToFetch.join(', ')}`);
+      
+      const results = await Promise.all(
+        sportsToFetch.map(sport => 
+          fetchGamesForLeague(sport, selectedDate, force)
+            .catch(err => {
+              console.error(`[Dashboard] Error fetching ${sport} games:`, err);
+              return [] as Game[];
+            })
+        )
+      );
+      
+      const allFetchedGames = results.flat();
+      console.log(`[Dashboard] fetchGames: Combined fetched games count: ${allFetchedGames.length}`);
+      setGames(allFetchedGames);
+      
+      if (allFetchedGames.length > 0) {
+        if (selectedSport !== "ALL") {
+          fetchKalshiExpectations(selectedSport).catch(console.error);
+        } else {
+          const uniqueLeagues = Array.from(new Set(allFetchedGames.map(g => g.league).filter(Boolean)));
+          for (const league of uniqueLeagues) {
+            fetchKalshiExpectations(league).catch(console.error);
+          }
+        }
+      }
+    } catch (err: any) {
+      const msg = err?.message || "Failed to fetch schedule. Please try again.";
+      setError(msg);
+      console.error("[Dashboard] Error in fetchGames:", err);
+      setGames([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleImportSchedule = async () => {
     if (!user) {
@@ -1653,95 +1651,88 @@ const fetchGames = async (force: boolean = false) => {
     }
   };
 
-              
-        
-            
-   
   const getFilteredGames = () => {
-    console.log(`[Dashboard] getFilteredGames: Filtering ${games.length} games for ${activeTab}`);
+    console.log(`[Dashboard] getFilteredGames: Filtering ${games.length} games for tab ${activeTab}, sport ${selectedSport}`);
+    
+    // 1. Basic League filter
     let filtered = games.filter(game => {
       if (!game.league) return true;
-      const gLeague = normalizeLeagueKey(game.league, activeTab);
-      const currentTab = normalizeLeagueKey(activeTab);
-      const isMatch = gLeague === currentTab || gLeague.includes(currentTab) || currentTab.includes(gLeague);
+      const gLeague = normalizeLeagueKey(game.league);
       
-      if (!isMatch && Math.random() < 0.05) {
-        console.log(`[Dashboard] getFilteredGames: League mismatch. Game: ${game.awayTeam}@${game.homeTeam}, League: ${gLeague}, Tab: ${currentTab}`);
+      if (selectedSport !== "ALL") {
+        const currentSport = normalizeLeagueKey(selectedSport);
+        return gLeague === currentSport || gLeague.includes(currentSport) || currentSport.includes(gLeague);
       }
       
-      return isMatch;
+      // If ALL is selected, only show sports the user is subscribed/access-granted to
+      return isSubscribedToSport(game.league);
     });
-    
-    console.log(`[Dashboard] getFilteredGames: After league filter: ${filtered.length} games`);
 
-    // Merge logic for NBA (and other sports if needed)
-    // This combines multiple cards for the same matchup into one to reduce scrolling
-    if (activeTab === "NBA" || activeTab === "NCAA") {
-      const mergedMap = new Map<string, Game>();
-      
-      filtered.forEach(game => {
-        const normalize = (name: string) => {
-          if (!name) return "";
-          const parts = name.toLowerCase().trim().split(/\s+/);
-          return parts[parts.length - 1].replace(/[^a-z0-9]/g, "").trim();
-        };
-        const home = normalize(game.homeTeam);
-        const away = normalize(game.awayTeam);
-        
-        // Create a stable key regardless of home/away order
-        // This ensures that if one source has A@B and another has B@A (rare but possible), they merge
-        const key = [home, away].sort().join('|');
+    console.log(`[Dashboard] getFilteredGames: After league/access filters: ${filtered.length} games`);
 
-        const existing = mergedMap.get(key);
-        if (!existing) {
-          mergedMap.set(key, game);
-        } else {
-          // Merge information into the existing game object
-          // 1. Prefer game with more IDs
-          if (!existing.apiSportsGameId && game.apiSportsGameId) {
-            existing.apiSportsGameId = game.apiSportsGameId;
-            existing.apiSportsHomeTeamId = game.apiSportsHomeTeamId;
-            existing.apiSportsAwayTeamId = game.apiSportsAwayTeamId;
-          }
-          
-          // 2. Merge market expectations
-          if (!existing.marketExpectations && game.marketExpectations) {
-            existing.marketExpectations = game.marketExpectations;
-          }
-          
-          // 3. Merge all sources
-          if (game.allSources) {
-            const existingSources = existing.allSources || [];
-            const newSources = game.allSources.filter(ns => 
-              ns && !existingSources.some(es => es?.name === ns?.name)
-            );
-            existing.allSources = [...existingSources, ...newSources];
-          }
-
-          // 4. Merge Kalshi expectations
-          if (!existing.kalshiExpectations && game.kalshiExpectations) {
-            existing.kalshiExpectations = game.kalshiExpectations;
-            existing.kalshiTicker = game.kalshiTicker;
-            existing.kalshiMarketTitle = game.kalshiMarketTitle;
-          }
-
-          // 5. Prefer game with prediction
-          const existingPred = savedPredictions[existing.id];
-          const newPred = savedPredictions[game.id];
-          if (!existingPred && newPred) {
-            // If the existing game doesn't have a prediction but the new one does,
-            // we should ideally switch the primary game object to the one that has the prediction
-            // to ensure the ID matches the prediction key.
-            mergedMap.set(key, game);
-          }
-        }
+    // 2. Picks tab filter
+    if (activeTab === "Picks") {
+      filtered = filtered.filter(g => {
+        const pred = savedPredictions[g.id];
+        return pred && 
+               pred.winner !== "PASS" && 
+               pred.winner !== "TBD" && 
+               pred.confidence !== undefined && 
+               pred.confidence >= 7;
       });
-      
-      filtered = Array.from(mergedMap.values());
-      console.log(`[Dashboard] getFilteredGames: Merged games into ${filtered.length} unique matchups.`);
+      console.log(`[Dashboard] getFilteredGames: After Picks tab filter: ${filtered.length} games`);
     }
 
-    // Time filtering
+    // 3. Merge logic for NBA/NCAA duplicate matchup cards (across all loaded games)
+    const mergedMap = new Map<string, Game>();
+    filtered.forEach(game => {
+      if (game.league !== "NBA" && game.league !== "NCAA") {
+        mergedMap.set(game.id, game);
+        return;
+      }
+      
+      const normalize = (name: string) => {
+        if (!name) return "";
+        const parts = name.toLowerCase().trim().split(/\s+/);
+        return parts[parts.length - 1].replace(/[^a-z0-9]/g, "").trim();
+      };
+      const home = normalize(game.homeTeam);
+      const away = normalize(game.awayTeam);
+      const key = [home, away].sort().join('|');
+
+      const existing = mergedMap.get(key);
+      if (!existing) {
+        mergedMap.set(key, game);
+      } else {
+        if (!existing.apiSportsGameId && game.apiSportsGameId) {
+          existing.apiSportsGameId = game.apiSportsGameId;
+          existing.apiSportsHomeTeamId = game.apiSportsHomeTeamId;
+          existing.apiSportsAwayTeamId = game.apiSportsAwayTeamId;
+        }
+        if (!existing.marketExpectations && game.marketExpectations) {
+          existing.marketExpectations = game.marketExpectations;
+        }
+        if (game.allSources) {
+          const existingSources = existing.allSources || [];
+          const newSources = game.allSources.filter(ns => ns && !existingSources.some(es => es?.name === ns?.name));
+          existing.allSources = [...existingSources, ...newSources];
+        }
+        if (!existing.kalshiExpectations && game.kalshiExpectations) {
+          existing.kalshiExpectations = game.kalshiExpectations;
+          existing.kalshiTicker = game.kalshiTicker;
+          existing.kalshiMarketTitle = game.kalshiMarketTitle;
+        }
+        const existingPred = savedPredictions[existing.id];
+        const newPred = savedPredictions[game.id];
+        if (!existingPred && newPred) {
+          mergedMap.set(key, game);
+        }
+      }
+    });
+    filtered = Array.from(mergedMap.values());
+    console.log(`[Dashboard] getFilteredGames: After matchup merge: ${filtered.length} games`);
+
+    // 4. Time filtering
     if (timeFilter !== "all") {
       filtered = filtered.filter(game => {
         const timeStr = game.time;
@@ -1763,7 +1754,7 @@ const fetchGames = async (force: boolean = false) => {
       console.log(`[Dashboard] getFilteredGames: After time filter (${timeFilter}): ${filtered.length} games`);
     }
 
-    // Sorting
+    // 5. Sorting
     filtered.sort((a, b) => {
       if (sortBy === "edge") {
         const getEdge = (g: Game) => {
@@ -2590,8 +2581,20 @@ const fetchGames = async (force: boolean = false) => {
     );
   }
 
-  const isSportTab = activeTab !== "Accuracy" && activeTab !== "Users" && activeTab !== "Admin" && activeTab !== "Add Sport";
-  const showPaywall = !!(authReady && user && userProfile && isSportTab && (forcePaywall || !isSubscribedToSport(activeTab)));
+  const isSubscribedToAny = () => {
+    const userEmail = (user?.email || userProfile?.email || "").toLowerCase().trim();
+    const isBypassEmail = BYPASS_EMAILS.includes(userEmail);
+    const isPaywallBypassOnly = PAYWALL_ONLY_BYPASS_EMAILS.includes(userEmail);
+    
+    return isAdminUser || 
+      isBypassEmail || 
+      isPaywallBypassOnly || 
+      (userProfile?.subscriptionStatus === 'active' && (userProfile?.subscribedSports?.length || 0) > 0);
+  };
+
+  const isSportTab = activeTab === "Dashboard" || activeTab === "Picks";
+  const hasAccess = selectedSport === "ALL" ? isSubscribedToAny() : isSubscribedToSport(selectedSport);
+  const showPaywall = !!(authReady && user && userProfile && isSportTab && (forcePaywall || !hasAccess));
 
   const handleToggleGameSelection = (gameId: string) => {
     setSelectedGameIds(prev => {
@@ -2630,7 +2633,7 @@ const fetchGames = async (force: boolean = false) => {
       {JoyrideAny && !showPaywall && !isMobile && (
         <JoyrideAny
           steps={walkthroughSteps}
-          run={runWalkthrough && activeTab === "NBA" && filteredGames.length > 0 && !showPaywall}
+          run={runWalkthrough && selectedSport === "NBA" && filteredGames.length > 0 && !showPaywall}
           continuous
           disableBeacon
           callback={(data) => handleJoyrideCallback(data).catch(console.error)}
@@ -2643,7 +2646,7 @@ const fetchGames = async (force: boolean = false) => {
         {showPaywall ? (
           <Paywall
             onSubscribe={(sports) => handleSubscribe(sports).catch(console.error)}
-            initialSports={[...(userProfile?.subscribedSports || []), activeTab].filter((s) => s !== "Add Sport")}
+            initialSports={[...(userProfile?.subscribedSports || []), selectedSport].filter((s) => s !== "ALL" && s !== "Add Sport")}
             existingSports={userProfile?.subscribedSports || []}
           />
         ) : activeTab === "Accuracy" ? (
@@ -2666,8 +2669,60 @@ const fetchGames = async (force: boolean = false) => {
               </p>
             </div>
 
+            {/* Sport Category Pills Filter */}
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              {["ALL", "NBA", "NFL", "MLB", "NHL", "NCAA"].map((sport) => (
+                <button
+                  key={sport}
+                  onClick={() => setSelectedSport(sport)}
+                  className={cn(
+                    "px-4 py-2 text-xs font-black rounded-xl transition-all border uppercase tracking-wider",
+                    selectedSport === sport
+                      ? "bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-500/20"
+                      : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-850"
+                  )}
+                >
+                  {sport}
+                </button>
+              ))}
+            </div>
+
+            {/* Sorting Controls Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+              <div className="flex items-center bg-slate-900 border border-slate-800 rounded-2xl p-1 shadow-sm">
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider px-3 py-1.5">Sort:</span>
+                <button
+                  onClick={() => setSortBy("time")}
+                  className={cn(
+                    "px-3 py-1.5 text-[10px] font-bold rounded-xl transition-all uppercase tracking-wider",
+                    sortBy === "time" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+                  )}
+                >
+                  Start Time
+                </button>
+                <button
+                  onClick={() => setSortBy("confidence")}
+                  className={cn(
+                    "px-3 py-1.5 text-[10px] font-bold rounded-xl transition-all uppercase tracking-wider",
+                    sortBy === "confidence" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+                  )}
+                >
+                  Confidence
+                </button>
+                <button
+                  onClick={() => setSortBy("edge")}
+                  className={cn(
+                    "px-3 py-1.5 text-[10px] font-bold rounded-xl transition-all uppercase tracking-wider",
+                    sortBy === "edge" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+                  )}
+                >
+                  Edge
+                </button>
+              </div>
+            </div>
+
             <DashboardHeader
-              activeTab={activeTab}
+              activeTab={activeTab === "Picks" ? "Top Picks" : selectedSport}
               isAdminUser={isAdminUser}
               selectedDate={selectedDate}
               setSelectedDate={setSelectedDate}
@@ -2684,25 +2739,23 @@ const fetchGames = async (force: boolean = false) => {
               selectedCount={selectedGameIds.size}
             />
 
-            {isAdminUser && (
-              <div className="mb-4">
-                <button 
-                  onClick={() => setShowTopPicks(!showTopPicks)}
-                  className="flex items-center gap-2 text-xs font-bold text-slate-500 hover:text-slate-300 transition-colors"
-                >
-                  <TrendingUp className={cn("w-4 h-4", showTopPicks ? "text-emerald-400" : "text-slate-600")} />
-                  {showTopPicks ? "Hide Top Picks" : "Show Top Picks"}
-                </button>
-              </div>
-            )}
+            <div className="mb-4">
+              <button 
+                onClick={() => setShowTopPicks(!showTopPicks)}
+                className="flex items-center gap-2 text-xs font-bold text-slate-500 hover:text-slate-300 transition-colors"
+              >
+                <TrendingUp className={cn("w-4 h-4", showTopPicks ? "text-emerald-400" : "text-slate-600")} />
+                {showTopPicks ? "Hide Top Picks" : "Show Top Picks"}
+              </button>
+            </div>
 
-            {isAdminUser && showTopPicks && (
+            {showTopPicks && (
               <TopPicksOfTheDay
                 games={filteredGames}
                 predictions={allPredictions}
                 selectedDate={selectedDate}
-                league={activeTab}
-                onSelectLeague={setActiveTab}
+                league={selectedSport === "ALL" ? undefined : selectedSport}
+                onSelectLeague={setSelectedSport}
               />
             )}
 
@@ -2739,7 +2792,7 @@ const fetchGames = async (force: boolean = false) => {
         <DailyBriefingModal
           isOpen={isBriefingOpen}
           onClose={() => setIsBriefingOpen(false)}
-          league={activeTab}
+          league={selectedSport === "ALL" ? "NBA" : selectedSport}
           date={selectedDate}
           games={games}
         />

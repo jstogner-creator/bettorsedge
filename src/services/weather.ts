@@ -80,7 +80,7 @@ const BALLPARKS: Record<string, BallparkInfo> = {
 };
 
 class WeatherService {
-  private openWeatherKey = process.env.OPENWEATHER_API_KEY;
+  private openWeatherKey = (typeof process !== "undefined" ? process.env?.OPENWEATHER_API_KEY : undefined) || (import.meta.env?.VITE_OPENWEATHER_API_KEY);
 
   getBallparkInfo(stadiumName: string, homeTeamName?: string): BallparkInfo {
     // Try to match by stadium name

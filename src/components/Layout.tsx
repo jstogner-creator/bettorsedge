@@ -36,20 +36,8 @@ export function Layout({
     type: "terms",
   });
 
-  const ALL_SPORTS = ["NBA", "NFL", "NCAA", "NHL", "MLB"];
-  let tabs = [...ALL_SPORTS];
-  
-  // Filter tabs based on subscription for non-admins
-  if (!isAdmin && subscribedSports.length > 0) {
-    tabs = tabs.filter(sport => subscribedSports.includes(sport));
-    // Add "Add Sport" if there are more sports available to subscribe to
-    if (tabs.length < ALL_SPORTS.length) {
-      tabs.push("Add Sport");
-    }
-  }
-
+  const tabs = ["Dashboard", "Picks", "Accuracy"];
   if (isAdmin) {
-    tabs.push("Accuracy");
     tabs.push("Users");
   }
 

@@ -215,6 +215,9 @@ export function parsePitcher(raw: any): PitcherStats | null {
 
 export function parseTeamStats(raw: any): TeamStatsMLB | null {
   if (!raw) return null;
+  if (Array.isArray(raw) && raw.length === 0) return null;
+  if (typeof raw === "object" && Object.keys(raw).length === 0) return null;
+  if (!raw.runs && !raw.games && !raw.batting && !raw.pitching) return null;
 
   const runsForTotal = Number(raw.runs?.for?.total || raw.points?.for?.total || 0);
   const runsAgainstTotal = Number(raw.runs?.against?.total || raw.points?.against?.total || 0);
@@ -554,8 +557,22 @@ class ApiSportsMlbService {
       awayStarter = getProjectedStarter(game?.teams?.away?.name || params.awayTeam || "Away Team");
     }
 
-    const normHomeStats = parseTeamStats(homeStats);
-    const normAwayStats = parseTeamStats(awayStats);
+    let normHomeStats = parseTeamStats(homeStats);
+    let normAwayStats = parseTeamStats(awayStats);
+
+    const hasEmptyStats = !normHomeStats || !normAwayStats || 
+                         (normHomeStats.runsPerGame === 0 && normHomeStats.teamEra === 0) ||
+                         (normAwayStats.runsPerGame === 0 && normAwayStats.teamEra === 0);
+
+    if (hasEmptyStats) {
+      const mockContext = generateMockMlbContext(params);
+      if (!normHomeStats || normHomeStats.runsPerGame === 0) {
+        normHomeStats = mockContext.normalizedTeamStats.home;
+      }
+      if (!normAwayStats || normAwayStats.runsPerGame === 0) {
+        normAwayStats = mockContext.normalizedTeamStats.away;
+      }
+    }
 
     // Calculate market implied probability
     let totalHomeProb = 0;

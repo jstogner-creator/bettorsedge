@@ -62,10 +62,18 @@ export function ApiSportsWidgetEmbed({ html, className }: ApiSportsWidgetEmbedPr
 
       containerRef.current.innerHTML = html;
 
-      const maybeRefresh = (window as any)?.ApiSportsWidgets?.refresh;
-      if (typeof maybeRefresh === "function") {
-        maybeRefresh();
-      }
+      let attempts = 0;
+      const callRefresh = () => {
+        if (cancelled) return;
+        const maybeRefresh = (window as any)?.ApiSportsWidgets?.refresh;
+        if (typeof maybeRefresh === "function") {
+          maybeRefresh();
+        } else if (attempts < 10) {
+          attempts++;
+          setTimeout(callRefresh, 100);
+        }
+      };
+      callRefresh();
     };
 
     mount().catch((err) => {
