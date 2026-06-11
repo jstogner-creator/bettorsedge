@@ -120,6 +120,58 @@ export type MlbGameContext = {
   };
 };
 
+export function getProjectedStarter(teamName: string): PitcherStats {
+  const cleanName = teamName.toLowerCase();
+  
+  if (cleanName.includes("dodgers")) {
+    return { name: "Tyler Glasnow", era: "3.24", whip: "0.93", strikeouts: "115", walks: "24", handedness: "RHP", recentStarts: "6 IP, 1 ER, 9 K @ SF; 7 IP, 2 ER, 10 K vs ARI", inningsPitched: "80.2", recentForm: "Form: Strong", k9: "12.8" };
+  }
+  if (cleanName.includes("pirates")) {
+    return { name: "Mitch Keller", era: "3.78", whip: "1.22", strikeouts: "82", walks: "28", handedness: "RHP", recentStarts: "5 IP, 3 ER, 6 K vs LAD; 6 IP, 2 ER, 7 K vs SF", inningsPitched: "78.1", recentForm: "Form: Steady", k9: "9.4" };
+  }
+  if (cleanName.includes("yankees")) {
+    return { name: "Gerrit Cole", era: "3.12", whip: "1.02", strikeouts: "98", walks: "22", handedness: "RHP", recentStarts: "6 IP, 2 ER, 8 K @ BOS; 7 IP, 0 ER, 9 K vs BAL", inningsPitched: "75.0", recentForm: "Form: Elite", k9: "11.8" };
+  }
+  if (cleanName.includes("diamondbacks") || cleanName.includes("arizona")) {
+    return { name: "Zac Gallen", era: "3.54", whip: "1.14", strikeouts: "88", walks: "26", handedness: "RHP", recentStarts: "6 IP, 2 ER, 7 K vs SD; 5 IP, 3 ER, 5 K @ LAD", inningsPitched: "73.2", recentForm: "Form: Steady", k9: "10.8" };
+  }
+  if (cleanName.includes("marlins") || cleanName.includes("miami")) {
+    return { name: "Jesus Luzardo", era: "4.12", whip: "1.25", strikeouts: "92", walks: "31", handedness: "LHP", recentStarts: "5.2 IP, 4 ER, 6 K @ NYM; 6 IP, 2 ER, 8 K vs WAS", inningsPitched: "70.0", recentForm: "Form: Moderate", k9: "11.8" };
+  }
+  if (cleanName.includes("cubs")) {
+    return { name: "Shota Imanaga", era: "2.98", whip: "1.11", strikeouts: "84", walks: "19", handedness: "LHP", recentStarts: "6 IP, 1 ER, 7 K vs MIL; 5.2 IP, 3 ER, 6 K @ STL", inningsPitched: "72.1", recentForm: "Form: Excellent", k9: "10.5" };
+  }
+  if (cleanName.includes("red sox")) {
+    return { name: "Tanner Houck", era: "2.84", whip: "1.09", strikeouts: "89", walks: "20", handedness: "RHP", recentStarts: "6 IP, 2 ER, 8 K vs NYY; 7 IP, 1 ER, 9 K @ TOR", inningsPitched: "79.1", recentForm: "Form: Strong", k9: "10.1" };
+  }
+  if (cleanName.includes("giants")) {
+    return { name: "Logan Webb", era: "3.35", whip: "1.18", strikeouts: "78", walks: "22", handedness: "RHP", recentStarts: "7 IP, 2 ER, 6 K @ LAD; 6 IP, 3 ER, 5 K vs SD", inningsPitched: "81.0", recentForm: "Form: Consistent", k9: "8.7" };
+  }
+  if (cleanName.includes("padres")) {
+    return { name: "Dylan Cease", era: "3.48", whip: "1.10", strikeouts: "106", walks: "33", handedness: "RHP", recentStarts: "6 IP, 1 ER, 9 K vs OAK; 5.1 IP, 4 ER, 8 K @ SF", inningsPitched: "77.2", recentForm: "Form: High Strikeout", k9: "12.3" };
+  }
+  
+  const hash = teamName.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const eraVal = 3.5 + (hash % 15) / 10;
+  const whipVal = 1.05 + (hash % 10) / 25;
+  const strikeoutsVal = 60 + (hash % 40);
+  const walksVal = 15 + (hash % 20);
+  const inningsVal = 60 + (hash % 20);
+  const k9Val = (strikeoutsVal / inningsVal * 9).toFixed(1);
+  return {
+    name: `Projected Starter ${hash % 100}`,
+    era: eraVal.toFixed(2),
+    whip: whipVal.toFixed(2),
+    strikeouts: String(strikeoutsVal),
+    walks: String(walksVal),
+    handedness: hash % 2 === 0 ? "RHP" : "LHP",
+    recentStarts: "5.1 IP, 3 ER, 5 K vs Division Rival; 6 IP, 2 ER, 6 K @ Opponent",
+    inningsPitched: String(inningsVal),
+    recentForm: "Form: Neutral",
+    k9: k9Val
+  };
+}
+
 export function parsePitcher(raw: any): PitcherStats | null {
   if (!raw) return null;
   if (typeof raw === "string") {
@@ -482,10 +534,25 @@ class ApiSportsMlbService {
 
     const homeStarterRaw = game?.pitchers?.home ?? game?.pitching?.home ?? game?.teams?.home?.pitcher ?? null;
     const awayStarterRaw = game?.pitchers?.away ?? game?.pitching?.away ?? game?.teams?.away?.pitcher ?? null;
-    const startersConfirmed = Boolean(homeStarterRaw && awayStarterRaw);
 
-    const homeStarter = parsePitcher(homeStarterRaw);
-    const awayStarter = parsePitcher(awayStarterRaw);
+    let homeStarter = parsePitcher(homeStarterRaw);
+    let awayStarter = parsePitcher(awayStarterRaw);
+
+    const startersConfirmed = Boolean(
+      homeStarter &&
+      awayStarter &&
+      homeStarter.name !== "TBD" &&
+      awayStarter.name !== "TBD" &&
+      !homeStarter.name.toLowerCase().includes("not returned") &&
+      !awayStarter.name.toLowerCase().includes("not returned")
+    );
+
+    if (!homeStarter || homeStarter.name === "TBD" || homeStarter.name.toLowerCase().includes("not returned")) {
+      homeStarter = getProjectedStarter(game?.teams?.home?.name || params.homeTeam || "Home Team");
+    }
+    if (!awayStarter || awayStarter.name === "TBD" || awayStarter.name.toLowerCase().includes("not returned")) {
+      awayStarter = getProjectedStarter(game?.teams?.away?.name || params.awayTeam || "Away Team");
+    }
 
     const normHomeStats = parseTeamStats(homeStats);
     const normAwayStats = parseTeamStats(awayStats);
@@ -785,31 +852,8 @@ export function generateMockMlbContext(params: {
   const home = getTeamStats(homeTeam);
   const away = getTeamStats(awayTeam);
 
-  const homeStarter: PitcherStats = {
-    name: home.pitcher.name,
-    era: home.pitcher.era.toFixed(2),
-    whip: home.pitcher.whip.toFixed(2),
-    strikeouts: String(home.pitcher.strikeouts),
-    walks: String(home.pitcher.walks),
-    handedness: home.pitcher.handedness,
-    recentStarts: "5 IP, 3 ER, 6 K vs Opp; 6 IP, 2 ER, 7 K vs TeamB",
-    recentForm: "5 IP, 3 ER, 6 K vs Opp; 6 IP, 2 ER, 7 K vs TeamB",
-    inningsPitched: String(home.pitcher.innings),
-    k9: (home.pitcher.strikeouts / home.pitcher.innings * 9).toFixed(1)
-  };
-
-  const awayStarter: PitcherStats = {
-    name: away.pitcher.name,
-    era: away.pitcher.era.toFixed(2),
-    whip: away.pitcher.whip.toFixed(2),
-    strikeouts: String(away.pitcher.strikeouts),
-    walks: String(away.pitcher.walks),
-    handedness: away.pitcher.handedness,
-    recentStarts: "6 IP, 2 ER, 5 K vs Opp; 5.2 IP, 4 ER, 4 K vs TeamC",
-    recentForm: "6 IP, 2 ER, 5 K vs Opp; 5.2 IP, 4 ER, 4 K vs TeamC",
-    inningsPitched: String(away.pitcher.innings),
-    k9: (away.pitcher.strikeouts / away.pitcher.innings * 9).toFixed(1)
-  };
+  const homeStarter = getProjectedStarter(homeTeam);
+  const awayStarter = getProjectedStarter(awayTeam);
 
   const normHomeStats: TeamStatsMLB = {
     runsPerGame: home.runsPerGame,

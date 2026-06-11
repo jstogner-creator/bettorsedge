@@ -58,8 +58,8 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
   const h2h = Array.isArray(prediction?.previousMatchups) ? prediction.previousMatchups : [];
   const pitcherMatchup = prediction?.pitcherMatchup || mlbContext?.pitching;
   
-  const homeStarter = useMemo(() => parsePitcher(pitcherMatchup?.homePitcher), [pitcherMatchup]);
-  const awayStarter = useMemo(() => parsePitcher(pitcherMatchup?.awayPitcher), [pitcherMatchup]);
+  const homeStarter = useMemo(() => parsePitcher(pitcherMatchup?.homePitcher || pitcherMatchup?.homeStarter), [pitcherMatchup]);
+  const awayStarter = useMemo(() => parsePitcher(pitcherMatchup?.awayPitcher || pitcherMatchup?.awayStarter), [pitcherMatchup]);
   const startersConfirmed = Boolean(
     homeStarter?.name &&
     homeStarter.name !== "TBD" &&
@@ -197,7 +197,83 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
   return (
     <div className="space-y-5 animate-in fade-in slide-in-from-top-4 duration-300">
       
-      {/* 1. Starting Pitcher Check */}
+      {/* 1. Final Selection (Play/Lean/Pass) */}
+      <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 relative overflow-hidden">
+        
+        {/* Play/Lean/Pass Badge */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-indigo-500/20 rounded-lg">
+              <Brain className="w-5 h-5 text-indigo-400" />
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-500 font-bold uppercase block tracking-widest">FINAL SELECTION</span>
+              <span className={cn(
+                "text-lg font-black uppercase tracking-wider",
+                prediction?.winner === "PASS" ? "text-amber-400" : (edge || 0) >= 0.07 ? "text-emerald-400 animate-pulse" : "text-indigo-400"
+              )}>
+                {prediction?.winner === "PASS" ? "Pass" : (edge || 0) >= 0.07 ? "Play" : "Lean"}
+              </span>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-3 text-right">
+            <div>
+              <span className="text-[10px] text-slate-500 font-bold uppercase block tracking-widest">CONFIDENCE LEVEL</span>
+              <span className="text-sm font-black text-white font-mono">
+                {prediction?.confidence ? prediction.confidence.toFixed(1) : "0.0"}/10
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Confidence Meter */}
+        <div className="w-full bg-slate-800/40 rounded-full h-2 mb-5 overflow-hidden border border-slate-800">
+          <div 
+            className={cn(
+              "h-2 rounded-full transition-all duration-1000 ease-out",
+              (prediction?.confidence || 0) >= 7 ? "bg-gradient-to-r from-emerald-600 to-emerald-400" :
+              (prediction?.confidence || 0) >= 5 ? "bg-gradient-to-r from-amber-600 to-amber-400" : 
+              "bg-gradient-to-r from-rose-600 to-rose-400"
+            )}
+            style={{ width: `${(prediction?.confidence || 0) * 10}%` }}
+          />
+        </div>
+
+        {/* Betting Explanation */}
+        <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4">
+          <h5 className="text-[10px] font-black uppercase text-slate-400 tracking-wider mb-2 flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-indigo-400" /> Bettor Analysis Breakdown
+          </h5>
+          <p className="text-sm text-slate-200 leading-relaxed italic">
+            "{prediction?.reasoning || "Bettors Edge prediction engine is analyzing this matchup. Check back shortly."}"
+          </p>
+        </div>
+
+        {/* Admin Reanalyze Block */}
+        {onReanalyze && (
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-900 pt-4">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onReanalyze(game);
+              }}
+              disabled={isAnalyzing}
+              className={cn(
+                "py-2 px-4 rounded-lg flex items-center justify-center transition-all font-black text-xs shadow-lg disabled:opacity-50",
+                prediction 
+                  ? "bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700" 
+                  : "bg-indigo-600 hover:bg-indigo-500 text-white"
+              )}
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", isAnalyzing && "animate-spin")} />
+              {isAnalyzing ? "Analyzing..." : (prediction ? "Reanalyze Matchup" : "Run Analysis")}
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* 2. Starting Pitcher Check */}
       <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 relative overflow-hidden">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -219,7 +295,12 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
           <div className="rounded-xl bg-slate-900/60 p-3.5 border border-slate-800/60 hover:border-slate-800 transition-colors">
             <div className="flex justify-between items-start mb-2">
               <div>
-                <span className="text-[9px] font-black uppercase text-slate-500 block">AWAY STARTER</span>
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className="text-[9px] font-black uppercase text-slate-500">AWAY STARTER</span>
+                  {!startersConfirmed && (
+                    <span className="text-amber-400 text-[8px] font-extrabold bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">PROJECTED</span>
+                  )}
+                </div>
                 <span className="text-sm font-black text-white">{awayStarter?.name || "TBD"}</span>
               </div>
               {awayStarter?.handedness && (
@@ -252,7 +333,12 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
           <div className="rounded-xl bg-slate-900/60 p-3.5 border border-slate-800/60 hover:border-slate-800 transition-colors">
             <div className="flex justify-between items-start mb-2">
               <div>
-                <span className="text-[9px] font-black uppercase text-slate-500 block">HOME STARTER</span>
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className="text-[9px] font-black uppercase text-slate-500">HOME STARTER</span>
+                  {!startersConfirmed && (
+                    <span className="text-amber-400 text-[8px] font-extrabold bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">PROJECTED</span>
+                  )}
+                </div>
                 <span className="text-sm font-black text-white">{homeStarter?.name || "TBD"}</span>
               </div>
               {homeStarter?.handedness && (
@@ -292,7 +378,7 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
         )}
       </section>
 
-      {/* 2. Betting Snapshot */}
+      {/* 3. Betting Snapshot */}
       <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
         <div className="mb-3 flex items-center gap-2">
           <div className="p-1 bg-indigo-500/10 rounded border border-indigo-500/20 text-indigo-400">
@@ -361,7 +447,7 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
         </div>
       </section>
 
-      {/* 3. Market Edge */}
+      {/* 4. Market Edge */}
       <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
         <div className="mb-3 flex items-center gap-2">
           <div className="p-1 bg-amber-500/10 rounded border border-amber-500/20 text-amber-400">
@@ -452,7 +538,7 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
         )}
       </section>
 
-      {/* 4. Team Edge */}
+      {/* 5. Team Edge */}
       <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
         <div className="mb-3 flex items-center gap-2">
           <div className="p-1 bg-indigo-500/10 rounded border border-indigo-500/20 text-indigo-400">
@@ -461,7 +547,7 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
           <h4 className="text-xs font-black text-indigo-200 uppercase tracking-widest">Team Edge</h4>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-1">
           {[
             { label: "Runs Per Game", home: homeTeamStats?.runsPerGame, away: awayTeamStats?.runsPerGame, lowerIsBetter: false },
             { label: "Runs Allowed / Game", home: homeTeamStats?.runsAllowed, away: awayTeamStats?.runsAllowed, lowerIsBetter: true },
@@ -498,34 +584,63 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
               : (awayFatigued ? `(🚨 Fatigue: ${(awayFatigue * 100).toFixed(0)}%) ${awayVal}` : awayVal);
 
             return (
-              <div key={idx} className="flex items-center gap-3">
-                <div className={cn(
-                  "w-24 sm:w-32 text-right text-[11px] font-black truncate",
-                  advantage === "away" ? "text-cyan-300" : "text-slate-500"
-                )}>
-                  {awayLabel !== undefined && awayLabel !== null ? String(awayLabel) : "N/A"}
+              <div key={idx} className="border-b border-slate-900/60 py-3 last:border-0 last:pb-0">
+                {/* Mobile Header: Label & Advantage (if any) */}
+                <div className="flex md:hidden items-center justify-between mb-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-900/80 px-2.5 py-0.5 rounded border border-slate-800/60">
+                    {stat.label}
+                  </span>
+                  {advantage !== "neutral" && (
+                    <span className={cn(
+                      "text-[8px] font-extrabold px-1.5 py-0.2 rounded border uppercase tracking-wider",
+                      advantage === "home" 
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                        : "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
+                    )}>
+                      {advantage === "home" ? `${game.homeTeam.substring(0, 3)} Edge` : `${game.awayTeam.substring(0, 3)} Edge`}
+                    </span>
+                  )}
                 </div>
                 
-                <div className="flex-1 h-6 bg-slate-900/60 rounded-full overflow-hidden flex items-center relative border border-slate-800/40">
-                  <div className="absolute inset-0 flex items-center justify-center z-10">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">{stat.label}</span>
+                <div className="grid grid-cols-2 md:grid-cols-3 items-center gap-3 text-xs">
+                  {/* Away Value */}
+                  <div className={cn(
+                    "text-left md:text-right font-mono font-bold px-2.5 py-2 rounded-lg border md:border-0 md:bg-transparent md:p-0 transition-all",
+                    advantage === "away" 
+                      ? "text-cyan-300 bg-cyan-500/[0.04] border-cyan-500/20 md:text-cyan-400" 
+                      : "text-slate-400 bg-slate-900/25 border-slate-900/60 md:text-slate-500"
+                  )}>
+                    <span className="text-[8px] text-slate-500 block md:hidden uppercase font-bold mb-0.5">{game.awayTeam.substring(0, 3)}</span>
+                    <span className="leading-relaxed">{awayLabel !== undefined && awayLabel !== null ? String(awayLabel) : "N/A"}</span>
                   </div>
+                  
+                  {/* Desktop Center Label & Advantage */}
+                  <div className="hidden md:flex flex-col items-center justify-center gap-1.5">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-200 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20">
+                      {stat.label}
+                    </span>
+                    {advantage !== "neutral" && (
+                      <span className={cn(
+                        "text-[8px] font-extrabold px-1.5 py-0.2 rounded border uppercase tracking-wider",
+                        advantage === "home" 
+                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                          : "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
+                      )}>
+                        {advantage === "home" ? `${game.homeTeam.substring(0, 3)} Edge` : `${game.awayTeam.substring(0, 3)} Edge`}
+                      </span>
+                    )}
+                  </div>
+                  
+                  {/* Home Value */}
                   <div className={cn(
-                    "h-full w-1/2 transition-all duration-1000",
-                    advantage === "away" ? "bg-cyan-500/20" : "bg-transparent"
-                  )} />
-                  <div className="w-px h-full bg-slate-700/50 z-10" />
-                  <div className={cn(
-                    "h-full w-1/2 transition-all duration-1000",
-                    advantage === "home" ? "bg-cyan-500/20" : "bg-transparent"
-                  )} />
-                </div>
-
-                <div className={cn(
-                  "w-24 sm:w-32 text-left text-[11px] font-black truncate",
-                  advantage === "home" ? "text-cyan-300" : "text-slate-500"
-                )}>
-                  {homeLabel !== undefined && homeLabel !== null ? String(homeLabel) : "N/A"}
+                    "text-right md:text-left font-mono font-bold px-2.5 py-2 rounded-lg border md:border-0 md:bg-transparent md:p-0 transition-all",
+                    advantage === "home" 
+                      ? "text-emerald-300 bg-emerald-500/[0.04] border-emerald-500/20 md:text-cyan-400" 
+                      : "text-slate-400 bg-slate-900/25 border-slate-900/60 md:text-slate-500"
+                  )}>
+                    <span className="text-[8px] text-slate-500 block md:hidden uppercase font-bold mb-0.5 text-right">{game.homeTeam.substring(0, 3)}</span>
+                    <span className="leading-relaxed">{homeLabel !== undefined && homeLabel !== null ? String(homeLabel) : "N/A"}</span>
+                  </div>
                 </div>
               </div>
             );
@@ -533,7 +648,7 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
         </div>
       </section>
 
-      {/* 5. Previous Matchups */}
+      {/* 6. Previous Matchups */}
       <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -579,7 +694,7 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
         )}
       </section>
 
-      {/* 6. Key Betting Factors */}
+      {/* 7. Key Betting Factors */}
       {displayDecisionDrivers.length > 0 && (
         <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
           <div className="mb-3 flex items-center gap-2">
@@ -600,7 +715,7 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
         </section>
       )}
 
-      {/* 7. Risk Notes */}
+      {/* 8. Risk Notes */}
       {riskNotes.length > 0 && (
         <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
           <div className="mb-3 flex items-center gap-2">
@@ -621,81 +736,7 @@ export function MlbMatchupLab({ game, prediction, onReanalyze, isAnalyzing }: Ml
         </section>
       )}
 
-      {/* 8. Final Lean / Play / Pass */}
-      <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 relative overflow-hidden">
-        
-        {/* Play/Lean/Pass Badge */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-500/20 rounded-lg">
-              <Brain className="w-5 h-5 text-indigo-400" />
-            </div>
-            <div>
-              <span className="text-[10px] text-slate-500 font-bold uppercase block tracking-widest">FINAL SELECTION</span>
-              <span className={cn(
-                "text-lg font-black uppercase tracking-wider",
-                prediction?.winner === "PASS" ? "text-amber-400" : (edge || 0) >= 0.07 ? "text-emerald-400 animate-pulse" : "text-indigo-400"
-              )}>
-                {prediction?.winner === "PASS" ? "Pass" : (edge || 0) >= 0.07 ? "Play" : "Lean"}
-              </span>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-3 text-right">
-            <div>
-              <span className="text-[10px] text-slate-500 font-bold uppercase block tracking-widest">CONFIDENCE LEVEL</span>
-              <span className="text-sm font-black text-white font-mono">
-                {prediction?.confidence ? prediction.confidence.toFixed(1) : "0.0"}/10
-              </span>
-            </div>
-          </div>
-        </div>
 
-        {/* Confidence Meter */}
-        <div className="w-full bg-slate-800/40 rounded-full h-2 mb-5 overflow-hidden border border-slate-800">
-          <div 
-            className={cn(
-              "h-2 rounded-full transition-all duration-1000 ease-out",
-              (prediction?.confidence || 0) >= 7 ? "bg-gradient-to-r from-emerald-600 to-emerald-400" :
-              (prediction?.confidence || 0) >= 5 ? "bg-gradient-to-r from-amber-600 to-amber-400" : 
-              "bg-gradient-to-r from-rose-600 to-rose-400"
-            )}
-            style={{ width: `${(prediction?.confidence || 0) * 10}%` }}
-          />
-        </div>
-
-        {/* Betting Explanation */}
-        <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4">
-          <h5 className="text-[10px] font-black uppercase text-slate-400 tracking-wider mb-2 flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-400" /> Bettor Analysis Breakdown
-          </h5>
-          <p className="text-sm text-slate-200 leading-relaxed italic">
-            "{prediction?.reasoning || "Bettors Edge prediction engine is analyzing this matchup. Check back shortly."}"
-          </p>
-        </div>
-
-        {/* Admin Reanalyze Block */}
-        {onReanalyze && (
-          <div className="mt-4 flex justify-end gap-2 border-t border-slate-900 pt-4">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onReanalyze(game);
-              }}
-              disabled={isAnalyzing}
-              className={cn(
-                "py-2 px-4 rounded-lg flex items-center justify-center transition-all font-black text-xs shadow-lg disabled:opacity-50",
-                prediction 
-                  ? "bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700" 
-                  : "bg-indigo-600 hover:bg-indigo-500 text-white"
-              )}
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", isAnalyzing && "animate-spin")} />
-              {isAnalyzing ? "Analyzing..." : (prediction ? "Reanalyze Matchup" : "Run Analysis")}
-            </button>
-          </div>
-        )}
-      </section>
 
       {/* Provider game widget */}
       {game.apiSportsGameId && (

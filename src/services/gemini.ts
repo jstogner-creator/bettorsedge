@@ -205,12 +205,18 @@ function normalizePitcher(raw: any) {
   if (!raw) return undefined;
   const name = valueFromPaths(raw, ["name", "player.name", "athlete.name", "fullName", "player", "pitcher.name"]);
   if (!name) return undefined;
+  const throws = valueFromPaths(raw, ["handedness", "throws", "hand"]);
   return {
     name: String(name),
     era: formatStat(valueFromPaths(raw, ["era", "statistics.era", "stats.era"])),
     whip: formatStat(valueFromPaths(raw, ["whip", "statistics.whip", "stats.whip"])),
     k9: formatStat(valueFromPaths(raw, ["k9", "statistics.k9", "stats.k9", "strikeoutsPerNine"])),
-    recentForm: String(valueFromPaths(raw, ["recentForm", "form", "last5", "status", "record"]) || "Starter returned by provider feed"),
+    recentForm: String(valueFromPaths(raw, ["recentForm", "form", "last5", "status", "record", "recentStarts"]) || "Starter returned by provider feed"),
+    strikeouts: formatStat(valueFromPaths(raw, ["strikeouts", "so", "k"])),
+    walks: formatStat(valueFromPaths(raw, ["walks", "bb"])),
+    handedness: (throws === "RHP" || throws === "LHP" ? throws : "Unknown") as "RHP" | "LHP" | "Unknown",
+    recentStarts: String(valueFromPaths(raw, ["recentStarts", "recentForm", "form"]) || "Starter returned by provider feed"),
+    inningsPitched: formatStat(valueFromPaths(raw, ["inningsPitched", "ip"])),
   };
 }
 

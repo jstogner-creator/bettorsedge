@@ -122,6 +122,11 @@ export interface Prediction {
       bb9?: number | string;
       barrelRate?: string;
       recentForm: string;
+      strikeouts?: number | string;
+      walks?: number | string;
+      handedness?: "LHP" | "RHP" | "Unknown";
+      recentStarts?: string;
+      inningsPitched?: number | string;
     };
     awayPitcher: {
       name: string;
@@ -133,6 +138,11 @@ export interface Prediction {
       bb9?: number | string;
       barrelRate?: string;
       recentForm: string;
+      strikeouts?: number | string;
+      walks?: number | string;
+      handedness?: "LHP" | "RHP" | "Unknown";
+      recentStarts?: string;
+      inningsPitched?: number | string;
     };
     weatherImpact?: string;
     parkFactor?: string;
